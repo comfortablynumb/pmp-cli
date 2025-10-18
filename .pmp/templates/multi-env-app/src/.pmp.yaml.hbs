@@ -1,0 +1,18 @@
+apiVersion: {{resource_api_version}}
+kind: {{resource_kind}}
+metadata:
+  name: "{{app_name}}"
+  description: "{{app_name}} - Multi-environment application in {{region}}"
+spec:
+  iac:
+    executor: opentofu
+    commands:
+      plan: "tofu plan -out=tfplan"
+      apply: "tofu apply tfplan"
+  hooks:
+    pre_preview:
+      - "echo 'Validating {{environment}} environment configuration for {{app_name}}'"
+    post_apply:
+      - "echo 'Successfully deployed {{app_name}} to {{environment}} with {{replicas}} replica(s)'"
+      - "echo 'Instance type: {{instance_type}}'"
+      - "echo 'Monitoring enabled: {{enable_monitoring}}'"

@@ -9,9 +9,15 @@ pub struct CreateCommand;
 
 impl CreateCommand {
     /// Execute the create command
-    pub fn execute(output_path: Option<&str>) -> Result<()> {
+    pub fn execute(output_path: Option<&str>, templates_path: Option<&str>) -> Result<()> {
         // Discover all templates
-        let templates = TemplateDiscovery::discover_templates()
+        let custom_paths = if let Some(path) = templates_path {
+            vec![path]
+        } else {
+            vec![]
+        };
+
+        let templates = TemplateDiscovery::discover_templates_with_custom_paths(&custom_paths)
             .context("Failed to discover templates")?;
 
         if templates.is_empty() {
@@ -42,7 +48,10 @@ impl CreateCommand {
 
         let template_options: Vec<String> = category_templates
             .iter()
-            .map(|t| format!("{} - {}", t.metadata.name, t.metadata.description))
+            .map(|t| {
+                let desc = t.resource.metadata.description.as_deref().unwrap_or("");
+                format!("{} - {}", t.resource.metadata.name, desc)
+            })
             .collect();
 
         let selected_template_name = Select::new("Select a template:", template_options.clone())
@@ -57,10 +66,41 @@ impl CreateCommand {
 
         let selected_template = category_templates[template_index];
 
-        println!("\nUsing template: {}", selected_template.metadata.name);
-        println!("Description: {}", selected_template.metadata.description);
+        println!("\nUsing template: {}", selected_template.resource.metadata.name);
 
-        // Step 3: Collect and validate inputs based on schema
+        if let Some(desc) = &selected_template.resource.metadata.description {
+            println!("Description: {}", desc);
+        }
+
+        // Step 3: Select environment if available
+        let selected_env_config = if let Some(environments) = &selected_template.resource.spec.environments {
+            if !environments.is_empty() {
+                let mut env_names: Vec<String> = environments.keys().cloned().collect();
+                env_names.sort();
+
+                println!("\nThis template supports multiple environments:");
+                let selected_env_name = Select::new("Select an environment:", env_names)
+                    .prompt()
+                    .context("Failed to select environment")?;
+
+                let env_config = environments.get(&selected_env_name)
+                    .context("Environment not found")?;
+
+                if let Some(desc) = &env_config.description {
+                    println!("Environment: {} - {}", selected_env_name, desc);
+                } else {
+                    println!("Environment: {}", selected_env_name);
+                }
+
+                Some((selected_env_name, env_config.clone()))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        // Step 4: Collect and validate inputs based on schema
         let schema_path = selected_template.schema_path();
 
         if !schema_path.exists() {
@@ -71,17 +111,37 @@ impl CreateCommand {
         }
 
         println!("\nPlease provide the following information:");
-        let inputs = SchemaValidator::collect_and_validate_inputs(&schema_path)
-            .context("Failed to collect inputs")?;
+        let mut inputs = if let Some((_, env_config)) = &selected_env_config {
+            SchemaValidator::collect_and_validate_inputs_with_env(&schema_path, Some(env_config))
+                .context("Failed to collect inputs")?
+        } else {
+            SchemaValidator::collect_and_validate_inputs(&schema_path)
+                .context("Failed to collect inputs")?
+        };
 
-        // Step 4: Determine output directory
+        // Add environment to inputs if selected
+        if let Some((env_name, _)) = selected_env_config {
+            inputs.insert("environment".to_string(), serde_json::Value::String(env_name));
+        }
+
+        // Add resource apiVersion and kind for rendering the generated project's .pmp.yaml
+        inputs.insert(
+            "resource_api_version".to_string(),
+            serde_json::Value::String(selected_template.resource.spec.resource.api_version.clone()),
+        );
+        inputs.insert(
+            "resource_kind".to_string(),
+            serde_json::Value::String(selected_template.resource.spec.resource.kind.clone()),
+        );
+
+        // Step 5: Determine output directory
         let output_dir = if let Some(path) = output_path {
             Path::new(path)
         } else {
             Path::new(".")
         };
 
-        // Step 5: Render template
+        // Step 6: Render template
         println!("\nRendering template...");
         let renderer = TemplateRenderer::new();
         let template_src = selected_template.src_path();

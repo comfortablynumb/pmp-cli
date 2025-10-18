@@ -1,4 +1,4 @@
-use super::metadata::TemplateMetadata;
+use super::metadata::TemplateResource;
 use anyhow::Result;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -13,6 +13,15 @@ impl TemplateDiscovery {
     /// 1. Current directory's .pmp/templates
     /// 2. User's home directory ~/.pmp/templates
     pub fn discover_templates() -> Result<Vec<TemplateInfo>> {
+        Self::discover_templates_with_custom_paths(&[])
+    }
+
+    /// Find all templates in standard locations plus additional custom paths
+    /// Checks:
+    /// 1. Current directory's .pmp/templates
+    /// 2. User's home directory ~/.pmp/templates
+    /// 3. Custom paths provided
+    pub fn discover_templates_with_custom_paths(custom_paths: &[&str]) -> Result<Vec<TemplateInfo>> {
         let mut templates = Vec::new();
 
         // Check current directory's .pmp/templates
@@ -28,6 +37,15 @@ impl TemplateDiscovery {
 
             if home_templates_path.exists() {
                 templates.extend(Self::load_templates_from_dir(&home_templates_path)?);
+            }
+        }
+
+        // Check custom paths
+        for custom_path in custom_paths {
+            let custom_path_buf = PathBuf::from(custom_path);
+
+            if custom_path_buf.exists() {
+                templates.extend(Self::load_templates_from_dir(&custom_path_buf)?);
             }
         }
 
@@ -49,10 +67,10 @@ impl TemplateDiscovery {
 
             if path.is_file() && path.file_name() == Some(std::ffi::OsStr::new(".pmp.yaml")) {
                 if let Some(template_dir) = path.parent() {
-                    match TemplateMetadata::from_file(path) {
-                        Ok(metadata) => {
+                    match TemplateResource::from_file(path) {
+                        Ok(resource) => {
                             templates.push(TemplateInfo {
-                                metadata,
+                                resource,
                                 path: template_dir.to_path_buf(),
                             });
                         }
@@ -72,7 +90,7 @@ impl TemplateDiscovery {
         let mut grouped: HashMap<String, Vec<&TemplateInfo>> = HashMap::new();
 
         for template in templates {
-            for category in &template.metadata.categories {
+            for category in &template.resource.spec.categories {
                 grouped
                     .entry(category.clone())
                     .or_default()
@@ -87,8 +105,8 @@ impl TemplateDiscovery {
 /// Information about a discovered template
 #[derive(Debug, Clone)]
 pub struct TemplateInfo {
-    /// Template metadata from .pmp.yaml
-    pub metadata: TemplateMetadata,
+    /// Template resource from .pmp.yaml
+    pub resource: TemplateResource,
     /// Path to the template directory
     pub path: PathBuf,
 }
@@ -96,11 +114,11 @@ pub struct TemplateInfo {
 impl TemplateInfo {
     /// Get the full path to the schema.json file
     pub fn schema_path(&self) -> PathBuf {
-        self.path.join(&self.metadata.schema_path)
+        self.resource.schema_path(&self.path)
     }
 
     /// Get the full path to the src directory
     pub fn src_path(&self) -> PathBuf {
-        self.path.join(&self.metadata.src_path)
+        self.resource.src_path(&self.path)
     }
 }

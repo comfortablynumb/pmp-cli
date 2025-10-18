@@ -1,6 +1,13 @@
-name: "Example Workload"
-description: "Creates a simple Kubernetes workload"
-categories:
-  - workload
-  - kubernetes
-  - example
+apiVersion: pmp.io/v1
+kind: Template
+metadata:
+  name: "Example Workload"
+  description: "Creates a simple Kubernetes workload"
+spec:
+  categories:
+    - workload
+    - kubernetes
+    - example
+  resource:
+    apiVersion: pmp.io/v1
+    kind: Workload

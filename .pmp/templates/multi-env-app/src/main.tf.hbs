@@ -1,0 +1,31 @@
+resource "aws_instance" "app" {
+  count         = {{replicas}}
+  ami           = data.aws_ami.latest.id
+  instance_type = "{{instance_type}}"
+
+  tags = {
+    Name        = "{{app_name}}-${count.index + 1}"
+    Environment = "{{environment}}"
+    Application = "{{app_name}}"
+  }
+
+  {{#if enable_monitoring}}
+  monitoring = true
+  {{else}}
+  monitoring = false
+  {{/if}}
+}
+
+data "aws_ami" "latest" {
+  most_recent = true
+  owners      = ["amazon"]
+
+  filter {
+    name   = "name"
+    values = ["amzn2-ami-hvm-*-x86_64-gp2"]
+  }
+}
+
+provider "aws" {
+  region = "{{region}}"
+}

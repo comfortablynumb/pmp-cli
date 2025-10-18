@@ -1,14 +1,16 @@
-resource_type: workload
-description: "{{name}} - Kubernetes workload in {{namespace}}"
-
-iac:
-  executor: opentofu
-  commands:
-    plan: "tofu plan"
-    apply: "tofu apply -auto-approve"
-
-hooks:
-  pre_preview:
-    - "echo 'Starting preview for {{name}}'"
-  post_apply:
-    - "echo 'Successfully deployed {{name}} to {{environment}}'"
+apiVersion: {{resource_api_version}}
+kind: {{resource_kind}}
+metadata:
+  name: "{{name}}"
+  description: "{{name}} - Kubernetes workload in {{namespace}}"
+spec:
+  iac:
+    executor: opentofu
+    commands:
+      plan: "tofu plan"
+      apply: "tofu apply -auto-approve"
+  hooks:
+    pre_preview:
+      - "echo 'Starting preview for {{name}}'"
+    post_apply:
+      - "echo 'Successfully deployed {{name}} to {{environment}}'"

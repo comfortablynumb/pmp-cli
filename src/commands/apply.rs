@@ -1,6 +1,6 @@
 use crate::hooks::HooksRunner;
 use crate::iac::{executor::IacConfig, IacExecutor, OpenTofuExecutor};
-use crate::template::ProjectMetadata;
+use crate::template::ProjectResource;
 use anyhow::{Context, Result};
 use std::path::Path;
 
@@ -24,15 +24,20 @@ impl ApplyCommand {
             );
         }
 
-        let metadata = ProjectMetadata::from_file(&metadata_path)
-            .context("Failed to load project metadata")?;
+        let resource = ProjectResource::from_file(&metadata_path)
+            .context("Failed to load project resource")?;
 
-        println!("Project: {}", metadata.description);
-        println!("Type: {}", metadata.resource_type);
+        println!("Project: {}", resource.metadata.name);
+
+        if let Some(desc) = &resource.metadata.description {
+            println!("Description: {}", desc);
+        }
+
+        println!("Kind: {}", resource.kind);
 
         // Get IaC configuration
-        let iac_config = metadata.get_iac_config();
-        let hooks = metadata.get_hooks();
+        let iac_config = resource.get_iac_config();
+        let hooks = resource.get_hooks();
 
         // Get executor
         let executor = Self::get_executor(&iac_config.executor)?;

@@ -41,17 +41,58 @@ Example template structure:
     └── .pmp.yaml.hbs
 ```
 
-#### Template `.pmp.yaml`
+#### Template `.pmp.yaml` (Kubernetes-style Resource)
+
+PMP uses a Kubernetes-style resource format for configuration files:
 
 ```yaml
-name: "EKS Workload"
-description: "Creates a Kubernetes workload on EKS"
-categories:
-  - workload
-  - kubernetes
-schema_path: schema.json  # Optional, defaults to "schema.json"
-src_path: src             # Optional, defaults to "src"
+apiVersion: pmp.io/v1
+kind: Template
+metadata:
+  name: "EKS Workload"
+  description: "Creates a Kubernetes workload on EKS"
+spec:
+  categories:
+    - workload
+    - kubernetes
+
+  # Defines the resource kind that will be generated
+  resource:
+    apiVersion: pmp.io/v1
+    kind: Workload
+
+  # Optional: schema and source paths
+  schema_path: schema.json  # Defaults to "schema.json"
+  src_path: src             # Defaults to "src"
+
+  # Optional: Environment-specific configurations
+  environments:
+    development:
+      description: "Development environment"
+      overrides:
+        replicas:
+          default: 1
+        instance_type:
+          default: "t3.micro"
+          enum_values: ["t3.micro", "t3.small"]
+
+    production:
+      description: "Production environment"
+      overrides:
+        replicas:
+          default: 3
+        instance_type:
+          default: "t3.large"
+          enum_values: ["t3.large", "t3.xlarge"]
 ```
+
+**Key Fields:**
+- `apiVersion`: Namespace for resource kinds (e.g., `pmp.io/v1`)
+- `kind`: Type of resource (always `Template` for templates)
+- `metadata`: Template name and description
+- `spec.resource`: Defines the generated project's `apiVersion` and `kind`
+- `spec.categories`: Categories for template discovery
+- `spec.environments`: Environment-specific overrides (optional)
 
 #### `schema.json`
 
@@ -124,15 +165,24 @@ pmp create
 This will:
 1. Show available categories
 2. Show templates in the selected category
-3. Prompt for inputs based on the template's JSON Schema
-4. Validate inputs
-5. Render the template files to the output directory
+3. Prompt for environment selection (if template supports multiple environments)
+4. Prompt for inputs based on the template's JSON Schema (with environment-specific overrides applied)
+5. Validate inputs
+6. Render the template files to the output directory
 
 You can specify an output directory:
 
 ```bash
 pmp create --output ./my-project
 ```
+
+You can also use custom template directories:
+
+```bash
+pmp create --templates-path /path/to/custom/templates
+```
+
+**Note:** Input prompts will display only the field description (from the JSON Schema) to keep the interface clean and user-friendly.
 
 ### 3. Preview Changes
 
@@ -158,36 +208,90 @@ Or for a specific project:
 pmp apply --path ./my-project
 ```
 
+## Environment-Specific Configurations
+
+Templates can define environment-specific configurations that override default values in the JSON Schema. This is useful for having different settings for development, staging, and production environments.
+
+### How It Works
+
+1. **Define environments in template's `.pmp.yaml`:**
+
+```yaml
+environments:
+  development:
+    description: "Development environment with minimal resources"
+    overrides:
+      instance_type:
+        default: "t3.micro"
+        enum_values: ["t3.micro", "t3.small"]
+        description: "EC2 instance type (development options)"
+      replicas:
+        default: 1
+      enable_monitoring:
+        default: false
+
+  production:
+    description: "Production environment with high availability"
+    overrides:
+      instance_type:
+        default: "t3.large"
+        enum_values: ["t3.large", "t3.xlarge", "t3.2xlarge"]
+        description: "EC2 instance type (production options)"
+      replicas:
+        default: 3
+      enable_monitoring:
+        default: true
+```
+
+2. **During `pmp create`, users select an environment** and the overrides are automatically applied to the schema
+3. **The selected environment name is available** as `{{environment}}` in your templates
+
+### Override Options
+
+Each property can override:
+- `default`: Override the default value
+- `enum_values`: Override enum options (for string enums)
+- `description`: Override the field description
+
 ## Project Configuration
 
 Each generated project has a `.pmp.yaml` file in its root:
 
 ```yaml
-resource_type: workload
-description: This is an API that allows you to manage users
+apiVersion: pmp.io/v1
+kind: Workload  # Defined by template's spec.resource.kind
+metadata:
+  name: "my-api"
+  description: "This is an API that allows you to manage users"
+spec:
+  # Optional: IaC executor configuration
+  iac:
+    executor: opentofu  # Default: opentofu
 
-# Optional: IaC executor configuration
-iac:
-  executor: opentofu  # Default: opentofu
+    # Optional: Override default commands
+    commands:
+      plan: "tofu plan -out=tfplan"
+      apply: "tofu apply tfplan"
 
-  # Optional: Override default commands
-  commands:
-    plan: "tofu plan -out=tfplan"
-    apply: "tofu apply tfplan"
-
-# Optional: Hooks
-hooks:
-  pre_preview:
-    - "echo 'Running pre-preview checks'"
-    - "./scripts/validate-env.sh"
-  post_preview:
-    - "echo 'Preview completed'"
-  pre_apply:
-    - "./scripts/notify-slack.sh 'Starting deployment...'"
-  post_apply:
-    - "./scripts/notify-slack.sh 'Deployment complete!'"
-    - "./scripts/run-tests.sh"
+  # Optional: Hooks
+  hooks:
+    pre_preview:
+      - "echo 'Running pre-preview checks'"
+      - "./scripts/validate-env.sh"
+    post_preview:
+      - "echo 'Preview completed'"
+    pre_apply:
+      - "./scripts/notify-slack.sh 'Starting deployment...'"
+    post_apply:
+      - "./scripts/notify-slack.sh 'Deployment complete!'"
+      - "./scripts/run-tests.sh"
 ```
+
+**Generated Project Structure:**
+- `apiVersion` and `kind`: Automatically populated from template's `spec.resource` definition
+- `metadata.name`: Typically comes from template inputs
+- `spec.iac`: IaC executor configuration (optional)
+- `spec.hooks`: Pre/post execution hooks (optional)
 
 ## Architecture
 
@@ -216,6 +320,14 @@ To add support for another IaC tool, implement the `IacExecutor` trait and regis
 Templates are discovered in this order:
 1. `.pmp/templates` in the current directory
 2. `~/.pmp/templates` in the user's home directory
+3. Custom paths specified via `--templates-path` flag
+
+You can use the `--templates-path` flag to add additional template directories:
+
+```bash
+pmp create --templates-path /company/shared/templates
+pmp create --templates-path ~/my-custom-templates
+```
 
 ### Hooks System
 

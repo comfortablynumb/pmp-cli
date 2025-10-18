@@ -1,3 +1,4 @@
+use crate::template::metadata::EnvironmentConfig;
 use anyhow::{Context, Result};
 use inquire::{CustomType, Select, Text};
 use serde_json::{json, Value};
@@ -19,7 +20,20 @@ impl SchemaValidator {
 
     /// Prompt user for inputs based on JSON Schema and validate
     pub fn collect_and_validate_inputs(schema_path: &Path) -> Result<HashMap<String, Value>> {
-        let schema = Self::load_schema(schema_path)?;
+        Self::collect_and_validate_inputs_with_env(schema_path, None)
+    }
+
+    /// Prompt user for inputs based on JSON Schema with optional environment overrides
+    pub fn collect_and_validate_inputs_with_env(
+        schema_path: &Path,
+        env_config: Option<&EnvironmentConfig>,
+    ) -> Result<HashMap<String, Value>> {
+        let mut schema = Self::load_schema(schema_path)?;
+
+        // Apply environment overrides to the schema if provided
+        if let Some(env) = env_config {
+            Self::apply_environment_overrides(&mut schema, env)?;
+        }
 
         // Extract properties from schema
         let properties = schema
@@ -72,10 +86,11 @@ impl SchemaValidator {
             .and_then(|t| t.as_str())
             .unwrap_or("string");
 
-        let prompt_message = if description.is_empty() {
-            name.to_string()
+        // Use description as the prompt message, fallback to field name if no description
+        let prompt_message = if !description.is_empty() {
+            description.to_string()
         } else {
-            format!("{} ({})", name, description)
+            name.to_string()
         };
 
         match property_type {
@@ -148,5 +163,40 @@ impl SchemaValidator {
                 Ok(Value::String(input))
             }
         }
+    }
+
+    /// Apply environment-specific overrides to the schema
+    fn apply_environment_overrides(schema: &mut Value, env_config: &EnvironmentConfig) -> Result<()> {
+        let properties = schema
+            .get_mut("properties")
+            .and_then(|p| p.as_object_mut())
+            .context("Schema must have 'properties' object")?;
+
+        for (property_name, override_config) in &env_config.overrides {
+            if let Some(property_schema) = properties.get_mut(property_name) {
+                if let Some(property_obj) = property_schema.as_object_mut() {
+                    // Override default value
+                    if let Some(default_value) = &override_config.default {
+                        property_obj.insert("default".to_string(), default_value.clone());
+                    }
+
+                    // Override enum values
+                    if let Some(enum_values) = &override_config.enum_values {
+                        let enum_json: Vec<Value> = enum_values
+                            .iter()
+                            .map(|s| Value::String(s.clone()))
+                            .collect();
+                        property_obj.insert("enum".to_string(), Value::Array(enum_json));
+                    }
+
+                    // Override description
+                    if let Some(description) = &override_config.description {
+                        property_obj.insert("description".to_string(), Value::String(description.clone()));
+                    }
+                }
+            }
+        }
+
+        Ok(())
     }
 }
