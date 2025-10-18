@@ -1,8 +1,8 @@
-apiVersion: {{resource_api_version}}
-kind: {{resource_kind}}
+apiVersion: {{pmp_resource_api_version}}
+kind: {{pmp_resource_kind}}
 metadata:
-  name: "{{name}}"
-  description: "{{name}} - Kubernetes workload in {{namespace}}"
+  name: "{{pmp_name}}"
+  description: "{{pmp_name}} - Kubernetes workload in {{namespace}}"
 spec:
   iac:
     executor: opentofu
@@ -11,6 +11,6 @@ spec:
       apply: "tofu apply -auto-approve"
   hooks:
     pre_preview:
-      - "echo 'Starting preview for {{name}}'"
+      - "echo 'Starting preview for {{pmp_name}}'"
     post_apply:
-      - "echo 'Successfully deployed {{name}} to {{environment}}'"
+      - "echo 'Successfully deployed {{pmp_name}} to {{pmp_environment}}'"

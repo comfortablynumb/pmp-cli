@@ -1,7 +1,7 @@
-apiVersion: {{resource_api_version}}
-kind: {{resource_kind}}
+apiVersion: {{pmp_resource_api_version}}
+kind: {{pmp_resource_kind}}
 metadata:
-  name: "{{app_name}}"
+  name: "{{pmp_name}}"
   description: "{{app_name}} - Multi-environment application in {{region}}"
 spec:
   iac:
@@ -11,8 +11,8 @@ spec:
       apply: "tofu apply tfplan"
   hooks:
     pre_preview:
-      - "echo 'Validating {{environment}} environment configuration for {{app_name}}'"
+      - "echo 'Validating {{pmp_environment}} environment configuration for {{app_name}}'"
     post_apply:
-      - "echo 'Successfully deployed {{app_name}} to {{environment}} with {{replicas}} replica(s)'"
+      - "echo 'Successfully deployed {{app_name}} to {{pmp_environment}} with {{replicas}} replica(s)'"
       - "echo 'Instance type: {{instance_type}}'"
       - "echo 'Monitoring enabled: {{enable_monitoring}}'"

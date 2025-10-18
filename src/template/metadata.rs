@@ -231,6 +231,52 @@ pub struct ProjectCollectionSpec {
     /// Whether to organize projects by category in folders
     #[serde(default)]
     pub organize_by_category: bool,
+
+    /// Optional: Categories available in this collection
+    #[serde(default)]
+    pub categories: Option<std::collections::HashMap<String, Category>>,
+}
+
+/// Category definition in a ProjectCollection
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Category {
+    /// Display name of the category
+    pub name: String,
+
+    /// Optional: Description of the category
+    #[serde(default)]
+    pub description: Option<String>,
+
+    /// Optional: Child categories (can be nested)
+    #[serde(default)]
+    pub children: Option<std::collections::HashMap<String, Category>>,
+}
+
+impl Category {
+    /// Check if this category is a leaf (has no children)
+    pub fn is_leaf(&self) -> bool {
+        self.children.is_none() || self.children.as_ref().unwrap().is_empty()
+    }
+
+    /// Get all leaf category paths from this category (recursive)
+    pub fn get_leaf_paths(&self, prefix: &str) -> Vec<String> {
+        if self.is_leaf() {
+            vec![prefix.to_string()]
+        } else {
+            let mut paths = Vec::new();
+            if let Some(children) = &self.children {
+                for (key, child) in children {
+                    let child_prefix = if prefix.is_empty() {
+                        key.clone()
+                    } else {
+                        format!("{}/{}", prefix, key)
+                    };
+                    paths.extend(child.get_leaf_paths(&child_prefix));
+                }
+            }
+            paths
+        }
+    }
 }
 
 /// Reference to a project in the collection

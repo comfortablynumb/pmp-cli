@@ -1,4 +1,4 @@
-use crate::collection::CollectionDiscovery;
+use crate::collection::{CategorySelector, CollectionDiscovery};
 use crate::schema::SchemaValidator;
 use crate::template::{TemplateDiscovery, TemplateRenderer};
 use anyhow::{Context, Result};
@@ -26,22 +26,26 @@ impl CreateCommand {
             );
         }
 
-        // Group templates by category
-        let grouped = TemplateDiscovery::group_by_category(&templates);
-
-        if grouped.is_empty() {
-            anyhow::bail!("No template categories found");
-        }
-
-        // Step 1: Select category
-        let mut categories: Vec<String> = grouped.keys().cloned().collect();
-        categories.sort();
-
-        let selected_category = Select::new("Select a category:", categories)
-            .prompt()
-            .context("Failed to select category")?;
+        // Check if we're in a ProjectCollection with defined categories
+        let collection_info = CollectionDiscovery::find_collection()?;
+        let selected_category = if let Some((collection, _)) = &collection_info {
+            // If collection has defined categories, use hierarchical selection
+            if let Some(categories) = &collection.spec.categories {
+                println!("\nThis collection has defined categories. Please select one:");
+                CategorySelector::select_category(categories)
+                    .context("Failed to select category")?
+            } else {
+                // Collection exists but no categories defined, use template categories
+                Self::select_template_category(&templates)?
+            }
+        } else {
+            // Not in a collection, use template categories
+            Self::select_template_category(&templates)?
+        };
 
         // Step 2: Select template from category
+        // Group templates by category
+        let grouped = TemplateDiscovery::group_by_category(&templates);
         let category_templates = grouped
             .get(&selected_category)
             .context("Category not found")?;
@@ -72,7 +76,40 @@ impl CreateCommand {
             println!("Description: {}", desc);
         }
 
-        // Step 3: Select environment if available
+        // Step 3: Prompt for project name (after category, before other inputs)
+        println!("\nPlease provide the project name:");
+        let mut project_name = SchemaValidator::prompt_for_project_name()
+            .context("Failed to get project name")?;
+
+        // Validate the project name against the final path that will be used
+        loop {
+            let final_path = if let Some(path) = output_path {
+                std::path::PathBuf::from(path)
+            } else if let Some((collection, collection_root)) = &collection_info {
+                if collection.spec.organize_by_category {
+                    // Organize by category: collection_root/projects/category/project_name
+                    collection_root.join("projects").join(&selected_category).join(&project_name)
+                } else {
+                    // No category organization: collection_root/projects/project_name
+                    collection_root.join("projects").join(&project_name)
+                }
+            } else {
+                // Default to current directory
+                std::path::PathBuf::from(".")
+            };
+
+            // Check if the final path already exists
+            if final_path.exists() {
+                println!("\n⚠ Warning: A project with this name already exists at: {}", final_path.display());
+                println!("Please choose a different name:");
+                project_name = SchemaValidator::prompt_for_project_name()
+                    .context("Failed to get project name")?;
+            } else {
+                break;
+            }
+        }
+
+        // Step 4: Select environment if available
         let selected_env_config = if let Some(environments) = &selected_template.resource.spec.environments {
             if !environments.is_empty() {
                 let mut env_names: Vec<String> = environments.keys().cloned().collect();
@@ -100,7 +137,7 @@ impl CreateCommand {
             None
         };
 
-        // Step 4: Collect and validate inputs based on schema
+        // Step 5: Collect and validate other inputs based on schema
         let schema_path = selected_template.schema_path();
 
         if !schema_path.exists() {
@@ -112,47 +149,23 @@ impl CreateCommand {
 
         println!("\nPlease provide the following information:");
         let mut inputs = if let Some((_, env_config)) = &selected_env_config {
-            SchemaValidator::collect_and_validate_inputs_with_env(&schema_path, Some(env_config))
+            SchemaValidator::collect_and_validate_inputs_with_env(&schema_path, Some(env_config), Some(project_name.clone()))
                 .context("Failed to collect inputs")?
         } else {
-            SchemaValidator::collect_and_validate_inputs(&schema_path)
+            SchemaValidator::collect_and_validate_inputs_with_env(&schema_path, None, Some(project_name.clone()))
                 .context("Failed to collect inputs")?
         };
 
-        // Step 4.5: Validate that project name is unique within the category (if in a collection)
-        if let Ok(Some((collection, collection_root))) = CollectionDiscovery::find_collection() {
-            let project_name = inputs
-                .get("name")
-                .and_then(|v| v.as_str())
-                .context("Project name not found in inputs")?;
-
-            // Check for duplicates within the same category
-            if collection.spec.organize_by_category {
-                // Only check within the selected category
-                let projects_in_category = CollectionDiscovery::discover_projects(&collection_root)?
-                    .into_iter()
-                    .filter(|p| {
-                        p.category
-                            .as_ref()
-                            .map(|c| c == &selected_category)
-                            .unwrap_or(false)
-                    })
-                    .collect::<Vec<_>>();
-
-                if projects_in_category.iter().any(|p| p.name == project_name) {
+        // Step 5.5: Validate category is a leaf (if in a collection with defined categories)
+        if let Some((collection, _)) = &collection_info {
+            // Validate that the selected category is a leaf category (if collection has categories defined)
+            if let Some(categories) = &collection.spec.categories {
+                let all_leaf_paths = CategorySelector::get_all_leaf_paths(categories);
+                if !all_leaf_paths.contains(&selected_category) {
                     anyhow::bail!(
-                        "A project named '{}' already exists in category '{}'. Please choose a different name.",
-                        project_name,
-                        selected_category
-                    );
-                }
-            } else {
-                // Check across all projects if not organized by category
-                let all_projects = CollectionDiscovery::discover_projects(&collection_root)?;
-                if all_projects.iter().any(|p| p.name == project_name) {
-                    anyhow::bail!(
-                        "A project named '{}' already exists in the collection. Please choose a different name.",
-                        project_name
+                        "Category '{}' is not a leaf category. Projects can only be assigned to leaf categories.\nAvailable leaf categories: {}",
+                        selected_category,
+                        all_leaf_paths.join(", ")
                     );
                 }
             }
@@ -160,37 +173,31 @@ impl CreateCommand {
 
         // Add environment to inputs if selected
         if let Some((env_name, _)) = selected_env_config {
-            inputs.insert("environment".to_string(), serde_json::Value::String(env_name));
+            inputs.insert("pmp_environment".to_string(), serde_json::Value::String(env_name));
         }
 
         // Add resource apiVersion and kind for rendering the generated project's .pmp.project.yaml
         inputs.insert(
-            "resource_api_version".to_string(),
+            "pmp_resource_api_version".to_string(),
             serde_json::Value::String(selected_template.resource.spec.resource.api_version.clone()),
         );
         inputs.insert(
-            "resource_kind".to_string(),
+            "pmp_resource_kind".to_string(),
             serde_json::Value::String(selected_template.resource.spec.resource.kind.clone()),
         );
 
-        // Step 5: Determine output directory
+        // Step 6: Determine output directory (using the validated project_name)
         let output_dir_path = if let Some(path) = output_path {
             std::path::PathBuf::from(path)
         } else {
             // Check if we're in a ProjectCollection that organizes by category
-            if let Ok(Some((collection, collection_root))) = CollectionDiscovery::find_collection() {
-                // Get the project name from schema to create a subdirectory
-                let project_name = inputs
-                    .get("name")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("unnamed");
-
+            if let Some((collection, collection_root)) = &collection_info {
                 if collection.spec.organize_by_category {
                     // Organize by category: collection_root/projects/category/project_name
-                    collection_root.join("projects").join(&selected_category).join(project_name)
+                    collection_root.join("projects").join(&selected_category).join(&project_name)
                 } else {
                     // No category organization: collection_root/projects/project_name
-                    collection_root.join("projects").join(project_name)
+                    collection_root.join("projects").join(&project_name)
                 }
             } else {
                 // Default to current directory
@@ -225,20 +232,14 @@ impl CreateCommand {
         println!("\n✓ Project created successfully in: {}", output_dir.display());
 
         // Step 7: If we're in a ProjectCollection, inform the user the project will be auto-discovered
-        if let Ok(Some((collection, _))) = CollectionDiscovery::find_collection() {
-            // Get the project name from inputs
-            let project_name = inputs
-                .get("name")
-                .and_then(|v| v.as_str())
-                .unwrap_or("unknown");
-
+        if let Some((collection, _)) = &collection_info {
             let project_kind = selected_template.resource.spec.resource.kind.clone();
 
             println!(
                 "\n✓ Project created in collection '{}' and will be automatically discovered",
                 collection.metadata.name
             );
-            println!("  Name: {}", project_name);
+            println!("  Name: {}", &project_name);
             println!("  Kind: {}", project_kind);
             if collection.spec.organize_by_category {
                 println!("  Category: {}", selected_category);
@@ -251,5 +252,27 @@ impl CreateCommand {
         println!("  3. Run 'pmp apply' to apply the infrastructure");
 
         Ok(())
+    }
+
+    /// Helper method to select a template category (when not using collection categories)
+    fn select_template_category(
+        templates: &[crate::template::discovery::TemplateInfo],
+    ) -> Result<String> {
+        // Group templates by category
+        let grouped = TemplateDiscovery::group_by_category(templates);
+
+        if grouped.is_empty() {
+            anyhow::bail!("No template categories found");
+        }
+
+        // Select category
+        let mut categories: Vec<String> = grouped.keys().cloned().collect();
+        categories.sort();
+
+        let selected_category = Select::new("Select a category:", categories)
+            .prompt()
+            .context("Failed to select category")?;
+
+        Ok(selected_category)
     }
 }

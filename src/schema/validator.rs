@@ -19,14 +19,16 @@ impl SchemaValidator {
     }
 
     /// Prompt user for inputs based on JSON Schema and validate
+    #[allow(dead_code)]
     pub fn collect_and_validate_inputs(schema_path: &Path) -> Result<HashMap<String, Value>> {
-        Self::collect_and_validate_inputs_with_env(schema_path, None)
+        Self::collect_and_validate_inputs_with_env(schema_path, None, None)
     }
 
-    /// Prompt user for inputs based on JSON Schema with optional environment overrides
+    /// Prompt user for inputs based on JSON Schema with optional environment overrides and optional pre-collected name
     pub fn collect_and_validate_inputs_with_env(
         schema_path: &Path,
         env_config: Option<&EnvironmentConfig>,
+        pre_collected_name: Option<String>,
     ) -> Result<HashMap<String, Value>> {
         let mut schema = Self::load_schema(schema_path)?;
 
@@ -41,7 +43,17 @@ impl SchemaValidator {
             .and_then(|p| p.as_object())
             .context("Schema must have 'properties' object")?;
 
-        let mut required_fields = schema
+        // Validate that no property uses the reserved "pmp_" prefix
+        for key in properties.keys() {
+            if key.starts_with("pmp_") {
+                anyhow::bail!(
+                    "Schema property '{}' uses reserved prefix 'pmp_'. This prefix is reserved for internal fields.",
+                    key
+                );
+            }
+        }
+
+        let required_fields = schema
             .get("required")
             .and_then(|r| r.as_array())
             .map(|arr| {
@@ -52,34 +64,32 @@ impl SchemaValidator {
             })
             .unwrap_or_default();
 
-        // Ensure "name" is always required
-        if properties.contains_key("name") && !required_fields.contains(&"name".to_string()) {
-            required_fields.push("name".to_string());
-        }
-
         let mut inputs = HashMap::new();
 
-        // Always prompt for "name" first if it exists in the schema
-        if let Some(name_schema) = properties.get("name") {
-            let value = Self::prompt_for_name_property(name_schema)?;
-            inputs.insert("name".to_string(), value);
-        }
+        // Use pre-collected name if provided, otherwise prompt for it
+        // This is an internal field, separate from any template-specific "name" field
+        let name_value = if let Some(name) = pre_collected_name {
+            Value::String(name)
+        } else {
+            Self::prompt_for_pmp_name()?
+        };
+        inputs.insert("pmp_name".to_string(), name_value);
 
-        // Collect inputs for remaining properties (excluding "name")
+        // Collect inputs for all schema properties
         for (key, property_schema) in properties {
-            if key == "name" {
-                continue; // Already handled
-            }
             let is_required = required_fields.contains(key);
             let value = Self::prompt_for_property(key, property_schema, is_required)?;
             inputs.insert(key.clone(), value);
         }
 
-        // Validate collected inputs against schema
+        // Validate collected inputs against schema (excluding pmp_ fields)
         let compiled_schema = jsonschema::validator_for(&schema)
             .context("Failed to compile JSON Schema")?;
 
-        let input_json = json!(inputs);
+        // Create a validation input without the pmp_ prefixed fields
+        let mut validation_input = inputs.clone();
+        validation_input.retain(|k, _| !k.starts_with("pmp_"));
+        let input_json = json!(validation_input);
 
         if let Err(error) = compiled_schema.validate(&input_json) {
             anyhow::bail!("Validation error: {}", error);
@@ -88,17 +98,10 @@ impl SchemaValidator {
         Ok(inputs)
     }
 
-    /// Prompt user for the "name" property with special validation
-    fn prompt_for_name_property(schema: &Value) -> Result<Value> {
-        let description = schema
-            .get("description")
-            .and_then(|d| d.as_str())
-            .unwrap_or("Project name");
-
-        let prompt_message = description.to_string();
-
-        let text_prompt = Text::new(&prompt_message)
-            .with_help_message("Only alphanumeric characters and hyphens allowed")
+    /// Public method to prompt for project name (used when name needs to be collected before schema validation)
+    pub fn prompt_for_project_name() -> Result<String> {
+        let text_prompt = inquire::Text::new("Project name")
+            .with_help_message("Only lowercase letters, numbers, and hyphens allowed")
             .with_validator(|input: &str| {
                 // Check if empty
                 if input.is_empty() {
@@ -107,10 +110,53 @@ impl SchemaValidator {
                     ));
                 }
 
-                // Check if contains only alphanumeric characters and hyphens
-                if !input.chars().all(|c| c.is_alphanumeric() || c == '-') {
+                // Check if contains uppercase characters
+                if input.chars().any(|c| c.is_uppercase()) {
                     return Ok(inquire::validator::Validation::Invalid(
-                        "Project name must contain only alphanumeric characters or hyphens".into()
+                        "Project name must not contain uppercase characters".into()
+                    ));
+                }
+
+                // Check if contains only lowercase alphanumeric characters and hyphens
+                if !input.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-') {
+                    return Ok(inquire::validator::Validation::Invalid(
+                        "Project name must contain only lowercase letters, numbers, or hyphens".into()
+                    ));
+                }
+
+                Ok(inquire::validator::Validation::Valid)
+            });
+
+        let input = text_prompt
+            .prompt()
+            .context("Failed to get project name")?;
+
+        Ok(input)
+    }
+
+    /// Prompt user for the internal "pmp_name" field with special validation
+    fn prompt_for_pmp_name() -> Result<Value> {
+        let text_prompt = Text::new("Project name")
+            .with_help_message("Only lowercase letters, numbers, and hyphens allowed")
+            .with_validator(|input: &str| {
+                // Check if empty
+                if input.is_empty() {
+                    return Ok(inquire::validator::Validation::Invalid(
+                        "Project name is required and cannot be empty".into()
+                    ));
+                }
+
+                // Check if contains uppercase characters
+                if input.chars().any(|c| c.is_uppercase()) {
+                    return Ok(inquire::validator::Validation::Invalid(
+                        "Project name must not contain uppercase characters".into()
+                    ));
+                }
+
+                // Check if contains only lowercase alphanumeric characters and hyphens
+                if !input.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-') {
+                    return Ok(inquire::validator::Validation::Invalid(
+                        "Project name must contain only lowercase letters, numbers, or hyphens".into()
                     ));
                 }
 

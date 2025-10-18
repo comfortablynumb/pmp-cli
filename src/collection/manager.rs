@@ -60,6 +60,7 @@ impl CollectionManager {
             metadata: ProjectCollectionMetadata { name, description },
             spec: ProjectCollectionSpec {
                 organize_by_category: false,
+                categories: None,
             },
         };
 
@@ -147,5 +148,10 @@ impl CollectionManager {
     #[allow(dead_code)]
     pub fn organizes_by_category(&self) -> bool {
         self.collection.spec.organize_by_category
+    }
+
+    /// Get the categories defined in the collection (if any)
+    pub fn get_categories(&self) -> Option<&std::collections::HashMap<String, crate::template::metadata::Category>> {
+        self.collection.spec.categories.as_ref()
     }
 }

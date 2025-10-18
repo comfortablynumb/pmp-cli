@@ -1,4 +1,4 @@
-use crate::collection::CollectionManager;
+use crate::collection::{CategorySelector, CollectionManager};
 use crate::template::metadata::ProjectReference;
 use anyhow::{Context, Result};
 use inquire::{Select, Text};
@@ -54,26 +54,33 @@ impl FindCommand {
                 Ok(manager.find_by_name(&search_term))
             }
             "Search by category" => {
-                // Get unique categories from all projects
-                let categories: Vec<String> = manager
-                    .get_all_projects()
-                    .iter()
-                    .filter_map(|p| p.category.clone())
-                    .collect::<std::collections::HashSet<_>>()
-                    .into_iter()
-                    .collect();
+                // Check if the collection has defined categories
+                let selected_category = if let Some(categories) = manager.get_categories() {
+                    // Use hierarchical category selection
+                    CategorySelector::select_category(categories)
+                        .context("Failed to select category")?
+                } else {
+                    // Fallback to listing unique categories from existing projects
+                    let categories: Vec<String> = manager
+                        .get_all_projects()
+                        .iter()
+                        .filter_map(|p| p.category.clone())
+                        .collect::<std::collections::HashSet<_>>()
+                        .into_iter()
+                        .collect();
 
-                if categories.is_empty() {
-                    println!("No categories found in the collection.");
-                    return Ok(vec![]);
-                }
+                    if categories.is_empty() {
+                        println!("No categories found in the collection.");
+                        return Ok(vec![]);
+                    }
 
-                let mut sorted_categories = categories;
-                sorted_categories.sort();
+                    let mut sorted_categories = categories;
+                    sorted_categories.sort();
 
-                let selected_category = Select::new("Select a category:", sorted_categories)
-                    .prompt()
-                    .context("Failed to select category")?;
+                    Select::new("Select a category:", sorted_categories)
+                        .prompt()
+                        .context("Failed to select category")?
+                };
 
                 Ok(manager.find_by_category(&selected_category))
             }
