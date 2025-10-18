@@ -26,9 +26,7 @@ impl IacExecutor for OpenTofuExecutor {
 
     fn plan(&self, config: &IacConfig, working_dir: &str) -> Result<Output> {
         let command = config
-            .plan_command
-            .as_ref()
-            .map(|s| s.as_str())
+            .plan_command.as_deref()
             .unwrap_or(self.default_plan_command());
 
         // Parse the command string into command and args
@@ -49,9 +47,7 @@ impl IacExecutor for OpenTofuExecutor {
 
     fn apply(&self, config: &IacConfig, working_dir: &str) -> Result<Output> {
         let command = config
-            .apply_command
-            .as_ref()
-            .map(|s| s.as_str())
+            .apply_command.as_deref()
             .unwrap_or(self.default_apply_command());
 
         // Parse the command string into command and args

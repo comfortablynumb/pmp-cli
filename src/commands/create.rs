@@ -1,8 +1,9 @@
+use crate::collection::CollectionDiscovery;
 use crate::schema::SchemaValidator;
+use crate::template::metadata::ProjectReference;
 use crate::template::{TemplateDiscovery, TemplateRenderer};
 use anyhow::{Context, Result};
 use inquire::Select;
-use std::path::Path;
 
 /// Handles the 'create' command - creates projects from templates
 pub struct CreateCommand;
@@ -135,11 +136,37 @@ impl CreateCommand {
         );
 
         // Step 5: Determine output directory
-        let output_dir = if let Some(path) = output_path {
-            Path::new(path)
+        let output_dir_path = if let Some(path) = output_path {
+            std::path::PathBuf::from(path)
         } else {
-            Path::new(".")
+            // Check if we're in a ProjectCollection that organizes by category
+            if let Ok(Some((collection, collection_root))) = CollectionDiscovery::find_collection() {
+                if collection.spec.organize_by_category {
+                    // Get the project name from schema to create a subdirectory
+                    let project_name = inputs
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unnamed");
+
+                    // Organize by category: collection_root/category/project_name
+                    collection_root.join(&selected_category).join(project_name)
+                } else {
+                    // Default to current directory
+                    std::path::PathBuf::from(".")
+                }
+            } else {
+                // Default to current directory
+                std::path::PathBuf::from(".")
+            }
         };
+
+        // Create the output directory if it doesn't exist
+        if !output_dir_path.exists() {
+            std::fs::create_dir_all(&output_dir_path)
+                .context(format!("Failed to create output directory: {}", output_dir_path.display()))?;
+        }
+
+        let output_dir = output_dir_path.as_path();
 
         // Step 6: Render template
         println!("\nRendering template...");
@@ -158,6 +185,68 @@ impl CreateCommand {
             .context("Failed to render template")?;
 
         println!("\n✓ Project created successfully in: {}", output_dir.display());
+
+        // Step 7: Check if we're in a ProjectCollection and register the project
+        if let Ok(Some((mut collection, collection_root))) = CollectionDiscovery::find_collection() {
+            // Get the project name from inputs
+            let project_name = inputs
+                .get("name")
+                .and_then(|v| v.as_str())
+                .context("Project name not found in inputs")?
+                .to_string();
+
+            let project_kind = selected_template.resource.spec.resource.kind.clone();
+
+            // Check for duplicates
+            if collection.has_project(&project_name, &project_kind) {
+                println!(
+                    "\n⚠ Warning: A project with name '{}' and kind '{}' already exists in the collection",
+                    project_name, project_kind
+                );
+                println!("Skipping automatic registration.");
+            } else {
+                // Calculate the relative path from collection root to the project
+                let output_path_abs = output_dir.canonicalize()
+                    .context("Failed to get absolute path for output directory")?;
+                let collection_root_abs = collection_root.canonicalize()
+                    .context("Failed to get absolute path for collection root")?;
+
+                let relative_path = output_path_abs
+                    .strip_prefix(&collection_root_abs)
+                    .context("Project is not inside the collection directory")?;
+
+                let relative_path_str = relative_path
+                    .to_str()
+                    .context("Failed to convert path to string")?
+                    .replace('\\', "/"); // Normalize to forward slashes
+
+                // Get the category from the selected category
+                let category = Some(selected_category.clone());
+
+                // Create project reference
+                let project_ref = ProjectReference {
+                    name: project_name.clone(),
+                    kind: project_kind.clone(),
+                    path: relative_path_str.clone(),
+                    category,
+                };
+
+                // Add to collection
+                collection.add_project(project_ref);
+
+                // Save the collection
+                let collection_path = collection_root.join(".pmp.yaml");
+                collection
+                    .save(&collection_path)
+                    .context("Failed to save project collection")?;
+
+                println!(
+                    "\n✓ Project registered in collection '{}' as '{}/{}'",
+                    collection.metadata.name, project_kind, project_name
+                );
+            }
+        }
+
         println!("\nNext steps:");
         println!("  1. Review the generated files");
         println!("  2. Run 'pmp preview' to see what will be created");

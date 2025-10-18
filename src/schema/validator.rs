@@ -173,8 +173,8 @@ impl SchemaValidator {
             .context("Schema must have 'properties' object")?;
 
         for (property_name, override_config) in &env_config.overrides {
-            if let Some(property_schema) = properties.get_mut(property_name) {
-                if let Some(property_obj) = property_schema.as_object_mut() {
+            if let Some(property_schema) = properties.get_mut(property_name)
+                && let Some(property_obj) = property_schema.as_object_mut() {
                     // Override default value
                     if let Some(default_value) = &override_config.default {
                         property_obj.insert("default".to_string(), default_value.clone());
@@ -194,7 +194,6 @@ impl SchemaValidator {
                         property_obj.insert("description".to_string(), Value::String(description.clone()));
                     }
                 }
-            }
         }
 
         Ok(())

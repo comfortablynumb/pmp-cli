@@ -12,6 +12,7 @@ impl TemplateDiscovery {
     /// Checks:
     /// 1. Current directory's .pmp/templates
     /// 2. User's home directory ~/.pmp/templates
+    #[allow(dead_code)]
     pub fn discover_templates() -> Result<Vec<TemplateInfo>> {
         Self::discover_templates_with_custom_paths(&[])
     }
@@ -65,8 +66,8 @@ impl TemplateDiscovery {
         {
             let path = entry.path();
 
-            if path.is_file() && path.file_name() == Some(std::ffi::OsStr::new(".pmp.yaml")) {
-                if let Some(template_dir) = path.parent() {
+            if path.is_file() && path.file_name() == Some(std::ffi::OsStr::new(".pmp.yaml"))
+                && let Some(template_dir) = path.parent() {
                     match TemplateResource::from_file(path) {
                         Ok(resource) => {
                             templates.push(TemplateInfo {
@@ -79,7 +80,6 @@ impl TemplateDiscovery {
                         }
                     }
                 }
-            }
         }
 
         Ok(templates)

@@ -194,6 +194,67 @@ pub struct HooksConfig {
 }
 
 // ============================================================================
+// ProjectCollection Resource (Kubernetes-style)
+// ============================================================================
+
+/// Kubernetes-style ProjectCollection resource
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectCollectionResource {
+    /// API version (e.g., "pmp.io/v1")
+    #[serde(rename = "apiVersion")]
+    pub api_version: String,
+
+    /// Kind of resource (always "ProjectCollection")
+    pub kind: String,
+
+    /// Metadata about the project collection
+    pub metadata: ProjectCollectionMetadata,
+
+    /// ProjectCollection specification
+    pub spec: ProjectCollectionSpec,
+}
+
+/// ProjectCollection metadata (Kubernetes-style)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectCollectionMetadata {
+    /// Name of the project collection
+    pub name: String,
+
+    /// Description of this project collection
+    #[serde(default)]
+    pub description: Option<String>,
+}
+
+/// ProjectCollection specification
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectCollectionSpec {
+    /// Projects in this collection
+    #[serde(default)]
+    pub projects: Vec<ProjectReference>,
+
+    /// Whether to organize projects by category in folders
+    #[serde(default)]
+    pub organize_by_category: bool,
+}
+
+/// Reference to a project in the collection
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectReference {
+    /// Name of the project
+    pub name: String,
+
+    /// Kind of the project (e.g., "Workload", "Infrastructure")
+    pub kind: String,
+
+    /// Path to the project relative to the collection root
+    pub path: String,
+
+    /// Optional: Category of the project
+    #[serde(default)]
+    pub category: Option<String>,
+}
+
+// ============================================================================
 // Implementation
 // ============================================================================
 
@@ -241,5 +302,92 @@ impl ProjectResource {
     /// Get the hooks configuration, or return empty hooks
     pub fn get_hooks(&self) -> HooksConfig {
         self.spec.hooks.clone().unwrap_or_default()
+    }
+}
+
+impl ProjectCollectionResource {
+    /// Load project collection resource from a .pmp.yaml file
+    pub fn from_file(path: &std::path::Path) -> anyhow::Result<Self> {
+        let content = std::fs::read_to_string(path)?;
+        let resource: ProjectCollectionResource = serde_yaml::from_str(&content)?;
+
+        // Validate kind
+        if resource.kind != "ProjectCollection" {
+            anyhow::bail!(
+                "Expected kind 'ProjectCollection', got '{}'",
+                resource.kind
+            );
+        }
+
+        Ok(resource)
+    }
+
+    /// Add a project to the collection
+    pub fn add_project(&mut self, project: ProjectReference) {
+        self.spec.projects.push(project);
+    }
+
+    /// Remove a project from the collection by name and kind
+    #[allow(dead_code)]
+    pub fn remove_project(&mut self, name: &str, kind: &str) -> bool {
+        if let Some(pos) = self
+            .spec
+            .projects
+            .iter()
+            .position(|p| p.name == name && p.kind == kind)
+        {
+            self.spec.projects.remove(pos);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Check if a project with the same name and kind already exists
+    pub fn has_project(&self, name: &str, kind: &str) -> bool {
+        self.spec
+            .projects
+            .iter()
+            .any(|p| p.name == name && p.kind == kind)
+    }
+
+    /// Find projects by name (case-insensitive)
+    pub fn find_by_name(&self, name: &str) -> Vec<&ProjectReference> {
+        let name_lower = name.to_lowercase();
+        self.spec
+            .projects
+            .iter()
+            .filter(|p| p.name.to_lowercase().contains(&name_lower))
+            .collect()
+    }
+
+    /// Find projects by category
+    pub fn find_by_category(&self, category: &str) -> Vec<&ProjectReference> {
+        self.spec
+            .projects
+            .iter()
+            .filter(|p| {
+                p.category
+                    .as_ref()
+                    .map(|c| c.eq_ignore_ascii_case(category))
+                    .unwrap_or(false)
+            })
+            .collect()
+    }
+
+    /// Find projects by kind
+    pub fn find_by_kind(&self, kind: &str) -> Vec<&ProjectReference> {
+        self.spec
+            .projects
+            .iter()
+            .filter(|p| p.kind.eq_ignore_ascii_case(kind))
+            .collect()
+    }
+
+    /// Save the collection to a .pmp.yaml file
+    pub fn save(&self, path: &std::path::Path) -> anyhow::Result<()> {
+        let content = serde_yaml::to_string(self)?;
+        std::fs::write(path, content)?;
+        Ok(())
     }
 }

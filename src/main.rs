@@ -1,3 +1,4 @@
+mod collection;
 mod commands;
 mod hooks;
 mod iac;
@@ -6,7 +7,7 @@ mod template;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use commands::{ApplyCommand, CreateCommand, PreviewCommand};
+use commands::{ApplyCommand, CreateCommand, FindCommand, PreviewCommand};
 
 #[derive(Parser)]
 #[command(name = "pmp")]
@@ -46,6 +47,22 @@ enum Commands {
         #[arg(short, long)]
         path: Option<String>,
     },
+
+    /// Find projects in a ProjectCollection
+    #[command(long_about = "Find projects in a ProjectCollection\n\nExamples:\n  pmp find\n  pmp find --name my-api\n  pmp find --category workload\n  pmp find --kind Infrastructure")]
+    Find {
+        /// Filter by project name (case-insensitive substring match)
+        #[arg(short, long)]
+        name: Option<String>,
+
+        /// Filter by category
+        #[arg(short, long)]
+        category: Option<String>,
+
+        /// Filter by kind
+        #[arg(short, long)]
+        kind: Option<String>,
+    },
 }
 
 fn main() -> Result<()> {
@@ -60,6 +77,13 @@ fn main() -> Result<()> {
         }
         Commands::Apply { path } => {
             ApplyCommand::execute(path.as_deref())?;
+        }
+        Commands::Find { name, category, kind } => {
+            FindCommand::execute(
+                name.as_deref(),
+                category.as_deref(),
+                kind.as_deref(),
+            )?;
         }
     }
 
