@@ -41,7 +41,7 @@ impl SchemaValidator {
             .and_then(|p| p.as_object())
             .context("Schema must have 'properties' object")?;
 
-        let required_fields = schema
+        let mut required_fields = schema
             .get("required")
             .and_then(|r| r.as_array())
             .map(|arr| {
@@ -52,10 +52,24 @@ impl SchemaValidator {
             })
             .unwrap_or_default();
 
+        // Ensure "name" is always required
+        if properties.contains_key("name") && !required_fields.contains(&"name".to_string()) {
+            required_fields.push("name".to_string());
+        }
+
         let mut inputs = HashMap::new();
 
-        // Collect inputs for each property
+        // Always prompt for "name" first if it exists in the schema
+        if let Some(name_schema) = properties.get("name") {
+            let value = Self::prompt_for_name_property(name_schema)?;
+            inputs.insert("name".to_string(), value);
+        }
+
+        // Collect inputs for remaining properties (excluding "name")
         for (key, property_schema) in properties {
+            if key == "name" {
+                continue; // Already handled
+            }
             let is_required = required_fields.contains(key);
             let value = Self::prompt_for_property(key, property_schema, is_required)?;
             inputs.insert(key.clone(), value);
@@ -72,6 +86,42 @@ impl SchemaValidator {
         }
 
         Ok(inputs)
+    }
+
+    /// Prompt user for the "name" property with special validation
+    fn prompt_for_name_property(schema: &Value) -> Result<Value> {
+        let description = schema
+            .get("description")
+            .and_then(|d| d.as_str())
+            .unwrap_or("Project name");
+
+        let prompt_message = description.to_string();
+
+        let text_prompt = Text::new(&prompt_message)
+            .with_help_message("Only alphanumeric characters and hyphens allowed")
+            .with_validator(|input: &str| {
+                // Check if empty
+                if input.is_empty() {
+                    return Ok(inquire::validator::Validation::Invalid(
+                        "Project name is required and cannot be empty".into()
+                    ));
+                }
+
+                // Check if contains only alphanumeric characters and hyphens
+                if !input.chars().all(|c| c.is_alphanumeric() || c == '-') {
+                    return Ok(inquire::validator::Validation::Invalid(
+                        "Project name must contain only alphanumeric characters or hyphens".into()
+                    ));
+                }
+
+                Ok(inquire::validator::Validation::Valid)
+            });
+
+        let input = text_prompt
+            .prompt()
+            .context("Failed to get project name")?;
+
+        Ok(Value::String(input))
     }
 
     /// Prompt user for a single property based on its schema
@@ -108,6 +158,11 @@ impl SchemaValidator {
 
                     Ok(Value::String(selected))
                 } else {
+                    // Get validation constraints from schema (convert to owned values)
+                    let min_length = schema.get("minLength").and_then(|v| v.as_u64()).unwrap_or(0);
+                    let max_length = schema.get("maxLength").and_then(|v| v.as_u64());
+                    let pattern = schema.get("pattern").and_then(|v| v.as_str()).map(String::from);
+
                     let mut text_prompt = Text::new(&prompt_message);
 
                     if !required {
@@ -118,6 +173,45 @@ impl SchemaValidator {
                     if let Some(default) = schema.get("default").and_then(|d| d.as_str()) {
                         text_prompt = text_prompt.with_default(default);
                     }
+
+                    // Add validator function
+                    text_prompt = text_prompt.with_validator(move |input: &str| {
+                        // Check if empty
+                        if input.is_empty() {
+                            if required {
+                                return Ok(inquire::validator::Validation::Invalid(
+                                    "This field is required and cannot be empty".into()
+                                ));
+                            }
+                            return Ok(inquire::validator::Validation::Valid);
+                        }
+
+                        // Check minLength
+                        if input.len() < min_length as usize {
+                            return Ok(inquire::validator::Validation::Invalid(
+                                format!("Minimum length is {}", min_length).into()
+                            ));
+                        }
+
+                        // Check maxLength
+                        if let Some(max) = max_length
+                            && input.len() > max as usize {
+                                return Ok(inquire::validator::Validation::Invalid(
+                                    format!("Maximum length is {}", max).into()
+                                ));
+                            }
+
+                        // Check pattern
+                        if let Some(ref pat) = pattern
+                            && let Ok(regex) = regex::Regex::new(pat)
+                            && !regex.is_match(input) {
+                                return Ok(inquire::validator::Validation::Invalid(
+                                    format!("Input must match pattern: {}", pat).into()
+                                ));
+                            }
+
+                        Ok(inquire::validator::Validation::Valid)
+                    });
 
                     let input = text_prompt
                         .prompt()

@@ -1,6 +1,5 @@
 use crate::collection::CollectionDiscovery;
 use crate::schema::SchemaValidator;
-use crate::template::metadata::ProjectReference;
 use crate::template::{TemplateDiscovery, TemplateRenderer};
 use anyhow::{Context, Result};
 use inquire::Select;
@@ -120,12 +119,51 @@ impl CreateCommand {
                 .context("Failed to collect inputs")?
         };
 
+        // Step 4.5: Validate that project name is unique within the category (if in a collection)
+        if let Ok(Some((collection, collection_root))) = CollectionDiscovery::find_collection() {
+            let project_name = inputs
+                .get("name")
+                .and_then(|v| v.as_str())
+                .context("Project name not found in inputs")?;
+
+            // Check for duplicates within the same category
+            if collection.spec.organize_by_category {
+                // Only check within the selected category
+                let projects_in_category = CollectionDiscovery::discover_projects(&collection_root)?
+                    .into_iter()
+                    .filter(|p| {
+                        p.category
+                            .as_ref()
+                            .map(|c| c == &selected_category)
+                            .unwrap_or(false)
+                    })
+                    .collect::<Vec<_>>();
+
+                if projects_in_category.iter().any(|p| p.name == project_name) {
+                    anyhow::bail!(
+                        "A project named '{}' already exists in category '{}'. Please choose a different name.",
+                        project_name,
+                        selected_category
+                    );
+                }
+            } else {
+                // Check across all projects if not organized by category
+                let all_projects = CollectionDiscovery::discover_projects(&collection_root)?;
+                if all_projects.iter().any(|p| p.name == project_name) {
+                    anyhow::bail!(
+                        "A project named '{}' already exists in the collection. Please choose a different name.",
+                        project_name
+                    );
+                }
+            }
+        }
+
         // Add environment to inputs if selected
         if let Some((env_name, _)) = selected_env_config {
             inputs.insert("environment".to_string(), serde_json::Value::String(env_name));
         }
 
-        // Add resource apiVersion and kind for rendering the generated project's .pmp.yaml
+        // Add resource apiVersion and kind for rendering the generated project's .pmp.project.yaml
         inputs.insert(
             "resource_api_version".to_string(),
             serde_json::Value::String(selected_template.resource.spec.resource.api_version.clone()),
@@ -141,18 +179,18 @@ impl CreateCommand {
         } else {
             // Check if we're in a ProjectCollection that organizes by category
             if let Ok(Some((collection, collection_root))) = CollectionDiscovery::find_collection() {
-                if collection.spec.organize_by_category {
-                    // Get the project name from schema to create a subdirectory
-                    let project_name = inputs
-                        .get("name")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("unnamed");
+                // Get the project name from schema to create a subdirectory
+                let project_name = inputs
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unnamed");
 
-                    // Organize by category: collection_root/category/project_name
-                    collection_root.join(&selected_category).join(project_name)
+                if collection.spec.organize_by_category {
+                    // Organize by category: collection_root/projects/category/project_name
+                    collection_root.join("projects").join(&selected_category).join(project_name)
                 } else {
-                    // Default to current directory
-                    std::path::PathBuf::from(".")
+                    // No category organization: collection_root/projects/project_name
+                    collection_root.join("projects").join(project_name)
                 }
             } else {
                 // Default to current directory
@@ -186,64 +224,24 @@ impl CreateCommand {
 
         println!("\n✓ Project created successfully in: {}", output_dir.display());
 
-        // Step 7: Check if we're in a ProjectCollection and register the project
-        if let Ok(Some((mut collection, collection_root))) = CollectionDiscovery::find_collection() {
+        // Step 7: If we're in a ProjectCollection, inform the user the project will be auto-discovered
+        if let Ok(Some((collection, _))) = CollectionDiscovery::find_collection() {
             // Get the project name from inputs
             let project_name = inputs
                 .get("name")
                 .and_then(|v| v.as_str())
-                .context("Project name not found in inputs")?
-                .to_string();
+                .unwrap_or("unknown");
 
             let project_kind = selected_template.resource.spec.resource.kind.clone();
 
-            // Check for duplicates
-            if collection.has_project(&project_name, &project_kind) {
-                println!(
-                    "\n⚠ Warning: A project with name '{}' and kind '{}' already exists in the collection",
-                    project_name, project_kind
-                );
-                println!("Skipping automatic registration.");
-            } else {
-                // Calculate the relative path from collection root to the project
-                let output_path_abs = output_dir.canonicalize()
-                    .context("Failed to get absolute path for output directory")?;
-                let collection_root_abs = collection_root.canonicalize()
-                    .context("Failed to get absolute path for collection root")?;
-
-                let relative_path = output_path_abs
-                    .strip_prefix(&collection_root_abs)
-                    .context("Project is not inside the collection directory")?;
-
-                let relative_path_str = relative_path
-                    .to_str()
-                    .context("Failed to convert path to string")?
-                    .replace('\\', "/"); // Normalize to forward slashes
-
-                // Get the category from the selected category
-                let category = Some(selected_category.clone());
-
-                // Create project reference
-                let project_ref = ProjectReference {
-                    name: project_name.clone(),
-                    kind: project_kind.clone(),
-                    path: relative_path_str.clone(),
-                    category,
-                };
-
-                // Add to collection
-                collection.add_project(project_ref);
-
-                // Save the collection
-                let collection_path = collection_root.join(".pmp.yaml");
-                collection
-                    .save(&collection_path)
-                    .context("Failed to save project collection")?;
-
-                println!(
-                    "\n✓ Project registered in collection '{}' as '{}/{}'",
-                    collection.metadata.name, project_kind, project_name
-                );
+            println!(
+                "\n✓ Project created in collection '{}' and will be automatically discovered",
+                collection.metadata.name
+            );
+            println!("  Name: {}", project_name);
+            println!("  Kind: {}", project_kind);
+            if collection.spec.organize_by_category {
+                println!("  Category: {}", selected_category);
             }
         }
 

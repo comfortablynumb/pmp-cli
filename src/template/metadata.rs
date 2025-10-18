@@ -228,10 +228,6 @@ pub struct ProjectCollectionMetadata {
 /// ProjectCollection specification
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectCollectionSpec {
-    /// Projects in this collection
-    #[serde(default)]
-    pub projects: Vec<ProjectReference>,
-
     /// Whether to organize projects by category in folders
     #[serde(default)]
     pub organize_by_category: bool,
@@ -320,68 +316,6 @@ impl ProjectCollectionResource {
         }
 
         Ok(resource)
-    }
-
-    /// Add a project to the collection
-    pub fn add_project(&mut self, project: ProjectReference) {
-        self.spec.projects.push(project);
-    }
-
-    /// Remove a project from the collection by name and kind
-    #[allow(dead_code)]
-    pub fn remove_project(&mut self, name: &str, kind: &str) -> bool {
-        if let Some(pos) = self
-            .spec
-            .projects
-            .iter()
-            .position(|p| p.name == name && p.kind == kind)
-        {
-            self.spec.projects.remove(pos);
-            true
-        } else {
-            false
-        }
-    }
-
-    /// Check if a project with the same name and kind already exists
-    pub fn has_project(&self, name: &str, kind: &str) -> bool {
-        self.spec
-            .projects
-            .iter()
-            .any(|p| p.name == name && p.kind == kind)
-    }
-
-    /// Find projects by name (case-insensitive)
-    pub fn find_by_name(&self, name: &str) -> Vec<&ProjectReference> {
-        let name_lower = name.to_lowercase();
-        self.spec
-            .projects
-            .iter()
-            .filter(|p| p.name.to_lowercase().contains(&name_lower))
-            .collect()
-    }
-
-    /// Find projects by category
-    pub fn find_by_category(&self, category: &str) -> Vec<&ProjectReference> {
-        self.spec
-            .projects
-            .iter()
-            .filter(|p| {
-                p.category
-                    .as_ref()
-                    .map(|c| c.eq_ignore_ascii_case(category))
-                    .unwrap_or(false)
-            })
-            .collect()
-    }
-
-    /// Find projects by kind
-    pub fn find_by_kind(&self, kind: &str) -> Vec<&ProjectReference> {
-        self.spec
-            .projects
-            .iter()
-            .filter(|p| p.kind.eq_ignore_ascii_case(kind))
-            .collect()
     }
 
     /// Save the collection to a .pmp.yaml file

@@ -28,3 +28,7 @@ target
 # Tmp directory
 
 /tmp
+
+# Claude stuff
+
+/.claude

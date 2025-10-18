@@ -57,7 +57,7 @@ impl TemplateDiscovery {
     fn load_templates_from_dir(base_path: &Path) -> Result<Vec<TemplateInfo>> {
         let mut templates = Vec::new();
 
-        // Walk through subdirectories looking for .pmp.yaml files
+        // Walk through subdirectories looking for .pmp.template.yaml files
         for entry in WalkDir::new(base_path)
             .min_depth(1)
             .max_depth(2)
@@ -66,7 +66,7 @@ impl TemplateDiscovery {
         {
             let path = entry.path();
 
-            if path.is_file() && path.file_name() == Some(std::ffi::OsStr::new(".pmp.yaml"))
+            if path.is_file() && path.file_name() == Some(std::ffi::OsStr::new(".pmp.template.yaml"))
                 && let Some(template_dir) = path.parent() {
                     match TemplateResource::from_file(path) {
                         Ok(resource) => {

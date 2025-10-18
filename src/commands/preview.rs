@@ -15,11 +15,11 @@ impl PreviewCommand {
         let project_path_obj = Path::new(project_dir);
 
         // Load project metadata
-        let metadata_path = project_path_obj.join(".pmp.yaml");
+        let metadata_path = project_path_obj.join(".pmp.project.yaml");
 
         if !metadata_path.exists() {
             anyhow::bail!(
-                "No .pmp.yaml found in {}. Is this a PMP project?",
+                "No .pmp.project.yaml found in {}. Is this a PMP project?",
                 project_dir
             );
         }
