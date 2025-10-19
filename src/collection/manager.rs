@@ -59,6 +59,8 @@ impl CollectionManager {
             kind: "ProjectCollection".to_string(),
             metadata: ProjectCollectionMetadata { name, description },
             spec: ProjectCollectionSpec {
+                allowed_resources: vec![],
+                environments: std::collections::HashMap::new(),
                 organize_by_category: false,
                 categories: None,
             },
@@ -111,6 +113,33 @@ impl CollectionManager {
         self.projects
             .iter()
             .filter(|p| p.kind.eq_ignore_ascii_case(kind))
+            .collect()
+    }
+
+    /// Find projects by search category (checks both primary category and search_categories)
+    pub fn find_by_search_category(&self, search_term: &str) -> Vec<&ProjectReference> {
+        let search_lower = search_term.to_lowercase();
+        self.projects
+            .iter()
+            .filter(|p| {
+                // Check primary category
+                let matches_primary = p.category
+                    .as_ref()
+                    .map(|c| c.to_lowercase().contains(&search_lower))
+                    .unwrap_or(false);
+
+                // Check search categories
+                let matches_search = p.search_categories
+                    .as_ref()
+                    .map(|categories| {
+                        categories
+                            .iter()
+                            .any(|c| c.to_lowercase().contains(&search_lower))
+                    })
+                    .unwrap_or(false);
+
+                matches_primary || matches_search
+            })
             .collect()
     }
 

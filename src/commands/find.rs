@@ -10,13 +10,13 @@ impl FindCommand {
     pub fn execute(
         name: Option<&str>,
         category: Option<&str>,
-        kind: Option<&str>,
+        _kind: Option<&str>, // Keep for compatibility but don't use
     ) -> Result<()> {
         // Load the collection
         let manager = CollectionManager::load()?;
 
         // If no search criteria provided via CLI, ask interactively
-        let projects = if name.is_none() && category.is_none() && kind.is_none() {
+        let projects = if name.is_none() && category.is_none() {
             Self::interactive_search(&manager)?
         } else {
             // Find projects based on CLI criteria
@@ -24,8 +24,6 @@ impl FindCommand {
                 manager.find_by_name(name)
             } else if let Some(category) = category {
                 manager.find_by_category(category)
-            } else if let Some(kind) = kind {
-                manager.find_by_kind(kind)
             } else {
                 // If no criteria specified, return all projects
                 manager.get_all_projects().iter().collect()
@@ -41,7 +39,11 @@ impl FindCommand {
     /// Interactive search - ask user for search type and criteria
     fn interactive_search(manager: &CollectionManager) -> Result<Vec<&ProjectReference>> {
         // Ask user what type of search they want to perform
-        let search_type_options = vec!["Search by name", "Search by category", "Show all projects"];
+        let search_type_options = vec![
+            "Search by name",
+            "Search by category",
+            "Show all projects"
+        ];
         let search_type = Select::new("How would you like to search?", search_type_options)
             .prompt()
             .context("Failed to select search type")?;

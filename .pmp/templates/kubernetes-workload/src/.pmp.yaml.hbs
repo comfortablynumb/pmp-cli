@@ -1,0 +1,31 @@
+apiVersion: {{resource_api_version}}
+kind: {{resource_kind}}
+metadata:
+  name: "{{name}}"
+  description: "Kubernetes workload for {{name}} in {{namespace}} namespace"
+
+spec:
+  # IaC executor configuration (optional)
+  iac:
+    executor: kubectl
+    commands:
+      plan: "kubectl diff -f ."
+      apply: "kubectl apply -f ."
+
+  # Hooks for deployment lifecycle (optional)
+  hooks:
+    pre_preview:
+      - "echo 'Validating Kubernetes manifests...'"
+      - "kubectl --dry-run=client -f ."
+
+    post_preview:
+      - "echo 'Preview completed for {{name}}'"
+
+    pre_apply:
+      - "echo 'Deploying {{name}} to {{namespace}} namespace...'"
+      - "kubectl create namespace {{namespace}} --dry-run=client -o yaml | kubectl apply -f -"
+
+    post_apply:
+      - "echo 'Deployment completed for {{name}}'"
+      - "kubectl -n {{namespace}} get deployment {{name}}"
+      - "kubectl -n {{namespace}} get pods -l app={{name}}"

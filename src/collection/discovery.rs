@@ -51,6 +51,7 @@ impl CollectionDiscovery {
     }
 
     /// Discover all projects in the "projects" folder of a collection
+    /// Scans all levels of subdirectories to find .pmp.yaml files
     pub fn discover_projects(collection_root: &Path) -> Result<Vec<ProjectReference>> {
         let projects_dir = collection_root.join("projects");
 
@@ -60,52 +61,52 @@ impl CollectionDiscovery {
 
         let mut projects = Vec::new();
 
-        // Walk through the projects directory looking for .pmp.project.yaml files
-        // When a project is found, skip scanning its subdirectories
-        let mut walker = WalkDir::new(&projects_dir)
+        // Walk through the projects directory recursively looking for .pmp.yaml files
+        // Scan all levels, no depth limit
+        for entry in WalkDir::new(&projects_dir)
             .min_depth(1)
-            .into_iter();
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
+            let path = entry.path();
 
-        while let Some(entry) = walker.next() {
-            if let Ok(entry) = entry {
-                let path = entry.path();
+            // Look for .pmp.yaml files (not .pmp.project.yaml)
+            if path.is_file() && path.file_name() == Some(std::ffi::OsStr::new(".pmp.yaml")) {
+                if let Some(project_dir) = path.parent() {
+                    // Try to load as a Project resource
+                    match ProjectResource::from_file(path) {
+                        Ok(resource) => {
+                            // Calculate relative path from collection root
+                            let relative_path = project_dir
+                                .strip_prefix(collection_root)
+                                .unwrap_or(project_dir)
+                                .to_string_lossy()
+                                .to_string();
 
-                if path.is_file() && path.file_name() == Some(std::ffi::OsStr::new(".pmp.project.yaml"))
-                    && let Some(project_dir) = path.parent() {
-                        // Try to load as a Project resource
-                        match ProjectResource::from_file(path) {
-                            Ok(resource) => {
-                                // Calculate relative path from collection root
-                                let relative_path = project_dir
-                                    .strip_prefix(collection_root)
-                                    .unwrap_or(project_dir)
-                                    .to_string_lossy()
-                                    .to_string();
+                            // Extract category from path if organize_by_category is used
+                            // Format: projects/<category>/... or projects/<resource-kind>/<project-name>
+                            let path_components: Vec<&str> = relative_path
+                                .split(std::path::MAIN_SEPARATOR)
+                                .collect();
+                            let category = if path_components.len() > 2 && path_components[0] == "projects" {
+                                Some(path_components[1].to_string())
+                            } else {
+                                None
+                            };
 
-                                // Extract category from path if organize_by_category is used
-                                // Format: projects/<category>/<project-name>
-                                let path_components: Vec<&str> = relative_path.split(std::path::MAIN_SEPARATOR).collect();
-                                let category = if path_components.len() > 2 && path_components[0] == "projects" {
-                                    Some(path_components[1].to_string())
-                                } else {
-                                    None
-                                };
-
-                                projects.push(ProjectReference {
-                                    name: resource.metadata.name,
-                                    kind: resource.kind,
-                                    path: relative_path,
-                                    category,
-                                });
-
-                                // Skip scanning this project's subdirectories
-                                walker.skip_current_dir();
-                            }
-                            Err(e) => {
-                                eprintln!("Warning: Failed to load project from {:?}: {}", path, e);
-                            }
+                            projects.push(ProjectReference {
+                                name: resource.metadata.name.clone(),
+                                kind: resource.kind.clone(),
+                                path: relative_path,
+                                category,
+                                search_categories: resource.spec.search_categories.clone(),
+                            });
+                        }
+                        Err(e) => {
+                            eprintln!("Warning: Failed to load project from {:?}: {}", path, e);
                         }
                     }
+                }
             }
         }
 

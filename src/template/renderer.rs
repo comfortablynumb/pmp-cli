@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use handlebars::Handlebars;
+use handlebars::{Handlebars, Helper, HelperResult, Output, RenderContext};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::fs;
@@ -14,9 +14,13 @@ pub struct TemplateRenderer {
 impl TemplateRenderer {
     /// Create a new template renderer
     pub fn new() -> Self {
-        Self {
-            handlebars: Handlebars::new(),
-        }
+        let mut handlebars = Handlebars::new();
+
+        // Register custom helpers
+        handlebars.register_helper("eq", Box::new(eq_helper));
+        handlebars.register_helper("contains", Box::new(contains_helper));
+
+        Self { handlebars }
     }
 
     /// Render all template files from src directory to output directory
@@ -103,4 +107,49 @@ impl Default for TemplateRenderer {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Helper function for equality comparison
+fn eq_helper(
+    h: &Helper,
+    _: &Handlebars,
+    _: &handlebars::Context,
+    _: &mut RenderContext,
+    out: &mut dyn Output,
+) -> HelperResult {
+    let param1 = h.param(0).and_then(|v| v.value().as_str());
+    let param2 = h.param(1).and_then(|v| v.value().as_str());
+
+    if let (Some(p1), Some(p2)) = (param1, param2) {
+        if p1 == p2 {
+            out.write("true")?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Helper function to check if an array contains a value
+fn contains_helper(
+    h: &Helper,
+    _: &Handlebars,
+    _: &handlebars::Context,
+    _: &mut RenderContext,
+    out: &mut dyn Output,
+) -> HelperResult {
+    let array = h.param(0).and_then(|v| v.value().as_array());
+    let search_value = h.param(1).and_then(|v| v.value().as_str());
+
+    if let (Some(arr), Some(search)) = (array, search_value) {
+        for item in arr {
+            if let Some(item_str) = item.as_str() {
+                if item_str == search {
+                    out.write("true")?;
+                    return Ok(());
+                }
+            }
+        }
+    }
+
+    Ok(())
 }

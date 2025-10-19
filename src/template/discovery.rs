@@ -85,17 +85,16 @@ impl TemplateDiscovery {
         Ok(templates)
     }
 
-    /// Group templates by category
-    pub fn group_by_category(templates: &[TemplateInfo]) -> HashMap<String, Vec<&TemplateInfo>> {
+    /// Group templates by resource kind
+    pub fn group_by_resource_kind(templates: &[TemplateInfo]) -> HashMap<String, Vec<&TemplateInfo>> {
         let mut grouped: HashMap<String, Vec<&TemplateInfo>> = HashMap::new();
 
         for template in templates {
-            for category in &template.resource.spec.categories {
-                grouped
-                    .entry(category.clone())
-                    .or_default()
-                    .push(template);
-            }
+            let key = format!("{}/{}", template.resource.spec.resource.api_version, template.resource.spec.resource.kind);
+            grouped
+                .entry(key)
+                .or_default()
+                .push(template);
         }
 
         grouped
@@ -112,11 +111,6 @@ pub struct TemplateInfo {
 }
 
 impl TemplateInfo {
-    /// Get the full path to the schema.json file
-    pub fn schema_path(&self) -> PathBuf {
-        self.resource.schema_path(&self.path)
-    }
-
     /// Get the full path to the src directory
     pub fn src_path(&self) -> PathBuf {
         self.resource.src_path(&self.path)
