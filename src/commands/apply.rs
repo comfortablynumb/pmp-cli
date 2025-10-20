@@ -1,3 +1,4 @@
+use crate::collection::CollectionDiscovery;
 use crate::hooks::HooksRunner;
 use crate::iac::{executor::IacConfig, IacExecutor, OpenTofuExecutor};
 use crate::template::ProjectResource;
@@ -15,11 +16,11 @@ impl ApplyCommand {
         let project_path_obj = Path::new(project_dir);
 
         // Load project metadata
-        let metadata_path = project_path_obj.join(".pmp.project.yaml");
+        let metadata_path = project_path_obj.join(".pmp.yaml");
 
         if !metadata_path.exists() {
             anyhow::bail!(
-                "No .pmp.project.yaml found in {}. Is this a PMP project?",
+                "No .pmp.yaml found in {}. Is this a PMP project?",
                 project_dir
             );
         }
@@ -33,11 +34,16 @@ impl ApplyCommand {
             println!("Description: {}", desc);
         }
 
-        println!("Kind: {}", resource.kind);
+        println!("Kind: {}", resource.spec.resource.kind);
 
         // Get IaC configuration
         let iac_config = resource.get_iac_config();
-        let hooks = resource.get_hooks();
+
+        // Load collection to get hooks
+        let (collection, _collection_root) = CollectionDiscovery::find_collection()?
+            .context("ProjectCollection is required to run commands")?;
+
+        let hooks = collection.get_hooks();
 
         // Get executor
         let executor = Self::get_executor(&iac_config.executor)?;
@@ -62,7 +68,7 @@ impl ApplyCommand {
         // Build IaC config
         let iac_execution_config = IacConfig {
             plan_command: None,
-            apply_command: iac_config.commands.as_ref().and_then(|c| c.apply.clone()),
+            apply_command: None,
         };
 
         // Run apply

@@ -4,43 +4,30 @@ metadata:
   name: "Kubernetes Workload"
   description: "Creates a simple Kubernetes workload"
 spec:
-  categories:
-    - compute
-  environments:
-    development:
-      description: "Development environment with relaxed constraints"
-      overrides:
-        instance_type:
-          enum_values: [ "t3.micro", "t3.small" ]
-          default: "t3.micro"
-          description: "EC2 instance type (development options)"
-        replicas:
-          default: 1
-        enable_monitoring:
-          default: false
-    staging:
-      description: "Staging environment for testing"
-      overrides:
-        instance_type:
-          enum_values: [ "t3.small", "t3.medium" ]
-          default: "t3.small"
-          description: "EC2 instance type (staging options)"
-        replicas:
-          default: 2
-        enable_monitoring:
-          default: true
-    production:
-      description: "Production environment with strict requirements"
-      overrides:
-        instance_type:
-          enum_values: [ "t3.medium", "t3.large", "t3.xlarge" ]
-          default: "t3.medium"
-          description: "EC2 instance type (production options)"
-        replicas:
-          default: 3
-        enable_monitoring:
-          default: true
   resource:
     apiVersion: pmp.io/v1
     kind: Workload
-    
+    iac:
+      provider: opentofu
+    # Inputs applied to all environments
+    inputs:
+      instance_type:
+        enum_values: [ "t3.micro", "t3.small" ]
+        default: "t3.micro"
+        description: "EC2 instance type (development options)"
+      replicas:
+        default: 1
+      enable_monitoring:
+        default: true
+    environments:
+      production:
+        overrides:
+          # Each input defined here overrides the ones at $.spec.resource.inputs
+          # for this environment
+          inputs:
+            instance_type:
+              enum_values: [ "t3.medium", "t3.large", "t3.xlarge" ]
+              default: "t3.medium"
+              description: "EC2 instance type (production options)"
+            replicas:
+              default: 3

@@ -4,8 +4,7 @@ A CLI for managing Infrastructure as Code projects using OpenTofu/Terraform with
 
 ## Features
 
-- **ProjectCollection-based organization** - All projects live in a collection with defined categories and environments
-- **Category-driven template selection** - Categories define which resource kinds are allowed
+- **ProjectCollection-based organization** - All projects live in a collection with defined environments and resource kinds
 - **Template-based project creation** with custom input definitions (no JSON Schema)
 - **Multiple IaC executors** via trait-based architecture (OpenTofu included)
 - **Pre/post execution hooks** for custom workflows
@@ -48,17 +47,12 @@ spec:
       name: "Production"
       description: "Production environment"
 
-  # Define categories with allowed resource kinds
-  categories:
-    workload:
-      name: "Workloads"
-      description: "Application workloads"
-      resource_kinds:
-        - apiVersion: pmp.io/v1
-          kind: KubernetesWorkload
-
-  # Optional: Organize by category
-  organize_by_category: false
+  # Define allowed resource kinds
+  resource_kinds:
+    - apiVersion: pmp.io/v1
+      kind: KubernetesWorkload
+    - apiVersion: pmp.io/v1
+      kind: Infrastructure
 ```
 
 ### 2. Create a Template
@@ -69,9 +63,10 @@ Templates use `.pmp.template.yaml` in their root directory:
 ~/.pmp/templates/kubernetes-workload/
 ├── .pmp.template.yaml
 └── src/
-    ├── deployment.yaml.hbs
-    └── .pmp.yaml.hbs
+    └── deployment.yaml.hbs
 ```
+
+**Note**: `.pmp.yaml` is auto-generated and should NOT be in templates.
 
 See full documentation below for template examples.
 
@@ -86,7 +81,7 @@ pmp create
 
 ```bash
 pmp find --name my-api
-pmp find --category workload
+pmp find --kind KubernetesWorkload
 ```
 
 For full documentation, see the complete README sections below.
@@ -142,25 +137,6 @@ spec:
 
 **Handlebars Helpers**: `{{#if (eq var "value")}}`, `{{#if (contains array "value")}}`
 
-## ProjectCollection Categories
-
-Categories define which resource kinds are allowed. Templates are filtered by category selection.
-
-```yaml
-categories:
-  workload:
-    name: "Workloads"
-    resource_kinds:
-      - apiVersion: pmp.io/v1
-        kind: KubernetesWorkload
-    children:
-      critical:
-        name: "Critical"
-        resource_kinds:
-          - apiVersion: pmp.io/v1
-            kind: KubernetesWorkload
-```
-
 ## Project Structure
 
 Projects are organized as: `projects/{resource-kind}/{project-name}/`
@@ -170,18 +146,23 @@ Example:
 projects/
 └── kubernetes_workload/
     ├── api-service/
-    │   ├── .pmp.yaml
+    │   ├── .pmp.yaml          # Auto-generated from template + inputs
     │   └── deployment.yaml
     └── worker/
-        └── .pmp.yaml
+        └── .pmp.yaml          # Auto-generated from template + inputs
 ```
+
+**Important**: The `.pmp.yaml` file is automatically generated when you create a project. It contains:
+- Template resource definition (apiVersion, kind)
+- All user inputs collected during creation
+- Custom fields from the template
 
 ## Commands
 
 - `pmp create` - Create new project (requires ProjectCollection)
 - `pmp preview` - Preview changes (plan)
 - `pmp apply` - Apply changes
-- `pmp find` - Search projects by name or category
+- `pmp find` - Search projects by name or kind
 
 ## Development
 

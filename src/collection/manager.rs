@@ -59,10 +59,9 @@ impl CollectionManager {
             kind: "ProjectCollection".to_string(),
             metadata: ProjectCollectionMetadata { name, description },
             spec: ProjectCollectionSpec {
-                allowed_resources: vec![],
+                resource_kinds: vec![],
                 environments: std::collections::HashMap::new(),
-                organize_by_category: false,
-                categories: None,
+                hooks: None,
             },
         };
 
@@ -95,51 +94,11 @@ impl CollectionManager {
             .collect()
     }
 
-    /// Find projects by category
-    pub fn find_by_category(&self, category: &str) -> Vec<&ProjectReference> {
-        self.projects
-            .iter()
-            .filter(|p| {
-                p.category
-                    .as_ref()
-                    .map(|c| c.eq_ignore_ascii_case(category))
-                    .unwrap_or(false)
-            })
-            .collect()
-    }
-
     /// Find projects by kind
     pub fn find_by_kind(&self, kind: &str) -> Vec<&ProjectReference> {
         self.projects
             .iter()
             .filter(|p| p.kind.eq_ignore_ascii_case(kind))
-            .collect()
-    }
-
-    /// Find projects by search category (checks both primary category and search_categories)
-    pub fn find_by_search_category(&self, search_term: &str) -> Vec<&ProjectReference> {
-        let search_lower = search_term.to_lowercase();
-        self.projects
-            .iter()
-            .filter(|p| {
-                // Check primary category
-                let matches_primary = p.category
-                    .as_ref()
-                    .map(|c| c.to_lowercase().contains(&search_lower))
-                    .unwrap_or(false);
-
-                // Check search categories
-                let matches_search = p.search_categories
-                    .as_ref()
-                    .map(|categories| {
-                        categories
-                            .iter()
-                            .any(|c| c.to_lowercase().contains(&search_lower))
-                    })
-                    .unwrap_or(false);
-
-                matches_primary || matches_search
-            })
             .collect()
     }
 
@@ -164,23 +123,4 @@ impl CollectionManager {
         self.root_path.join(&project.path)
     }
 
-    /// Set whether to organize projects by category
-    #[allow(dead_code)]
-    pub fn set_organize_by_category(&mut self, organize: bool) -> Result<()> {
-        self.collection.spec.organize_by_category = organize;
-        let pmp_file = self.root_path.join(".pmp.project-collection.yaml");
-        self.collection.save(&pmp_file)?;
-        Ok(())
-    }
-
-    /// Check if the collection organizes projects by category
-    #[allow(dead_code)]
-    pub fn organizes_by_category(&self) -> bool {
-        self.collection.spec.organize_by_category
-    }
-
-    /// Get the categories defined in the collection (if any)
-    pub fn get_categories(&self) -> Option<&std::collections::HashMap<String, crate::template::metadata::Category>> {
-        self.collection.spec.categories.as_ref()
-    }
 }

@@ -86,6 +86,7 @@ impl TemplateDiscovery {
     }
 
     /// Group templates by resource kind
+    #[allow(dead_code)]
     pub fn group_by_resource_kind(templates: &[TemplateInfo]) -> HashMap<String, Vec<&TemplateInfo>> {
         let mut grouped: HashMap<String, Vec<&TemplateInfo>> = HashMap::new();
 

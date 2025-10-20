@@ -66,6 +66,12 @@ impl TemplateRenderer {
         let output_path = if let Some(file_name) = relative_path.file_name() {
             let file_name_str = file_name.to_string_lossy();
 
+            // Skip .pmp.yaml files - these are auto-generated
+            if file_name_str == ".pmp.yaml.hbs" || file_name_str == ".pmp.yaml" {
+                println!("  Skipped: {} (auto-generated)", file_name_str);
+                return Ok(());
+            }
+
             if file_name_str.ends_with(".hbs") {
                 let new_name = file_name_str.trim_end_matches(".hbs");
                 let parent = relative_path.parent().unwrap_or_else(|| Path::new(""));

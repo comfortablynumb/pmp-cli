@@ -83,23 +83,10 @@ impl CollectionDiscovery {
                                 .to_string_lossy()
                                 .to_string();
 
-                            // Extract category from path if organize_by_category is used
-                            // Format: projects/<category>/... or projects/<resource-kind>/<project-name>
-                            let path_components: Vec<&str> = relative_path
-                                .split(std::path::MAIN_SEPARATOR)
-                                .collect();
-                            let category = if path_components.len() > 2 && path_components[0] == "projects" {
-                                Some(path_components[1].to_string())
-                            } else {
-                                None
-                            };
-
                             projects.push(ProjectReference {
                                 name: resource.metadata.name.clone(),
-                                kind: resource.kind.clone(),
+                                kind: resource.spec.resource.kind.clone(),
                                 path: relative_path,
-                                category,
-                                search_categories: resource.spec.search_categories.clone(),
                             });
                         }
                         Err(e) => {

@@ -1,4 +1,4 @@
-use crate::collection::{CategorySelector, CollectionDiscovery};
+use crate::collection::CollectionDiscovery;
 use crate::schema::SchemaValidator;
 use crate::template::{TemplateDiscovery, TemplateRenderer};
 use anyhow::{Context, Result};
@@ -19,29 +19,16 @@ impl CreateCommand {
             println!("Description: {}", desc);
         }
 
-        // Step 2: Select category first (categories define which resource kinds are allowed)
-        let selected_category = if let Some(categories) = &collection.spec.categories {
-            println!("\nPlease select a category:");
-            CategorySelector::select_category(categories)
-                .context("Failed to select category")?
-        } else {
-            anyhow::bail!("ProjectCollection must define categories with resource kinds");
-        };
+        // Step 2: Get resource kinds from collection
+        let allowed_resource_kinds = &collection.spec.resource_kinds;
 
-        // Step 3: Get the category to find allowed resource kinds
-        let category_resource_kinds = Self::get_category_resource_kinds(
-            &collection.spec.categories,
-            &selected_category
-        )?;
-
-        if category_resource_kinds.is_empty() {
+        if allowed_resource_kinds.is_empty() {
             anyhow::bail!(
-                "Category '{}' has no resource kinds defined.\n\nPlease add resource kinds to this category in the ProjectCollection.",
-                selected_category
+                "ProjectCollection must define resource_kinds.\n\nPlease add resource kinds to the ProjectCollection."
             );
         }
 
-        // Step 4: Discover templates
+        // Step 3: Discover templates
         let custom_paths = if let Some(path) = templates_path {
             vec![path]
         } else {
@@ -57,30 +44,29 @@ impl CreateCommand {
             );
         }
 
-        // Step 5: Filter templates by category's allowed resource kinds
+        // Step 4: Filter templates by collection's allowed resource kinds
         let filtered_templates: Vec<_> = all_templates
             .iter()
             .filter(|t| {
-                category_resource_kinds.iter().any(|filter| {
-                    filter.matches(&t.resource.spec.resource)
+                allowed_resource_kinds.iter().any(|filter| {
+                    filter.matches_spec(&t.resource.spec.resource)
                 })
             })
             .collect();
 
         if filtered_templates.is_empty() {
             anyhow::bail!(
-                "No templates match the resource kinds allowed in category '{}'.\n\nAllowed resource kinds: {}",
-                selected_category,
-                category_resource_kinds.iter()
+                "No templates match the resource kinds allowed in this collection.\n\nAllowed resource kinds: {}",
+                allowed_resource_kinds.iter()
                     .map(|r| format!("{}/{}", r.api_version, r.kind))
                     .collect::<Vec<_>>()
                     .join(", ")
             );
         }
 
-        println!("\nFound {} compatible template(s) for category '{}'", filtered_templates.len(), selected_category);
+        println!("\nFound {} compatible template(s)", filtered_templates.len());
 
-        // Step 6: Select template
+        // Step 5: Select template
         let template_options: Vec<String> = filtered_templates
             .iter()
             .map(|t| {
@@ -109,7 +95,7 @@ impl CreateCommand {
             println!("Description: {}", desc);
         }
 
-        // Step 7: Select environment from ProjectCollection
+        // Step 6: Select environment from ProjectCollection
         let selected_environment = if collection.spec.environments.is_empty() {
             anyhow::bail!("ProjectCollection must define at least one environment");
         } else if collection.spec.environments.len() == 1 {
@@ -151,7 +137,7 @@ impl CreateCommand {
             env_key
         };
 
-        // Step 8: Validate resource kind
+        // Step 7: Validate resource kind
         // Validate resource kind contains only alphanumeric characters
         let resource_kind = &selected_template.resource.spec.resource.kind;
         if !resource_kind.chars().all(|c| c.is_alphanumeric()) {
@@ -164,7 +150,7 @@ impl CreateCommand {
         // Convert resource kind from CamelCase to snake_case for directory name
         let resource_kind_snake = Self::camel_to_snake_case(resource_kind);
 
-        // Step 9: Prompt for project name
+        // Step 8: Prompt for project name
         println!("\nPlease provide the project name:");
         let mut project_name = SchemaValidator::prompt_for_project_name()
             .context("Failed to get project name")?;
@@ -173,8 +159,6 @@ impl CreateCommand {
         loop {
             let final_path = if let Some(path) = output_path {
                 std::path::PathBuf::from(path)
-            } else if collection.spec.organize_by_category {
-                collection_root.join("projects").join(&selected_category).join(&resource_kind_snake).join(&project_name)
             } else {
                 collection_root.join("projects").join(&resource_kind_snake).join(&project_name)
             };
@@ -189,26 +173,24 @@ impl CreateCommand {
             }
         }
 
-        // Step 10: Validate category is a leaf (if collection has defined categories)
-        if let Some(categories) = &collection.spec.categories {
-            let all_leaf_paths = CategorySelector::get_all_leaf_paths(categories);
-            if !all_leaf_paths.contains(&selected_category) {
-                anyhow::bail!(
-                    "Category '{}' is not a leaf category. Projects can only be assigned to leaf categories.\nAvailable leaf categories: {}",
-                    selected_category,
-                    all_leaf_paths.join(", ")
-                );
+        // Step 9: Collect inputs based on template's input definitions
+        println!("\nPlease provide the following information:");
+
+        // Start with base inputs from $.spec.resource.inputs
+        let mut merged_inputs = selected_template.resource.spec.resource.inputs.clone();
+
+        // Override with environment-specific inputs if they exist
+        if let Some(env_overrides) = selected_template.resource.spec.resource.environments.get(&selected_environment) {
+            for (input_name, input_spec) in &env_overrides.overrides.inputs {
+                merged_inputs.insert(input_name.clone(), input_spec.clone());
             }
         }
 
-        // Step 11: Collect inputs based on template's input definitions
-        println!("\nPlease provide the following information:");
-        let mut inputs = SchemaValidator::collect_inputs(
-            &selected_template.resource.spec.inputs,
-            project_name.clone()
-        ).context("Failed to collect inputs")?;
+        // Collect inputs from user
+        let mut inputs = Self::collect_template_inputs(&merged_inputs, &project_name)
+            .context("Failed to collect inputs")?;
 
-        // Step 12: Add internal fields for template rendering
+        // Step 10: Add internal fields for template rendering
         inputs.insert(
             "environment".to_string(),
             serde_json::Value::String(selected_environment),
@@ -222,22 +204,20 @@ impl CreateCommand {
             serde_json::Value::String(selected_template.resource.spec.resource.kind.clone()),
         );
 
-        // Step 13: Determine final output path
+        // Step 11: Determine final output path
         let final_path = if let Some(path) = output_path {
             std::path::PathBuf::from(path)
-        } else if collection.spec.organize_by_category {
-            collection_root.join("projects").join(&selected_category).join(&resource_kind_snake).join(&project_name)
         } else {
             collection_root.join("projects").join(&resource_kind_snake).join(&project_name)
         };
 
-        // Step 14: Create the output directory
+        // Step 12: Create the output directory
         if !final_path.exists() {
             std::fs::create_dir_all(&final_path)
                 .context(format!("Failed to create output directory: {}", final_path.display()))?;
         }
 
-        // Step 15: Render template
+        // Step 13: Render template
         println!("\nRendering template...");
         let renderer = TemplateRenderer::new();
         let template_src = selected_template.src_path();
@@ -253,13 +233,18 @@ impl CreateCommand {
             .render_template(&template_src, final_path.as_path(), &inputs)
             .context("Failed to render template")?;
 
+        // Step 14: Auto-generate .pmp.yaml file
+        println!("  Generating .pmp.yaml...");
+        Self::generate_project_yaml(
+            &final_path,
+            &selected_template.resource,
+            &inputs,
+        ).context("Failed to generate .pmp.yaml file")?;
+
         println!("\n✓ Project created successfully in: {}", final_path.display());
         println!("\n✓ Project created in collection '{}' and will be automatically discovered", collection.metadata.name);
         println!("  Name: {}", &project_name);
         println!("  Kind: {}", selected_template.resource.spec.resource.kind);
-        if collection.spec.organize_by_category {
-            println!("  Category: {}", selected_category);
-        }
 
         println!("\nNext steps:");
         println!("  1. Review the generated files");
@@ -269,38 +254,95 @@ impl CreateCommand {
         Ok(())
     }
 
-    /// Get resource kinds allowed in a category (including from parent categories)
-    fn get_category_resource_kinds(
-        categories: &Option<std::collections::HashMap<String, crate::template::metadata::Category>>,
-        category_path: &str,
-    ) -> Result<Vec<crate::template::metadata::ResourceKindFilter>> {
-        let categories = categories.as_ref()
-            .context("No categories defined")?;
+    /// Collect inputs from user based on template input specifications
+    fn collect_template_inputs(
+        inputs_spec: &std::collections::HashMap<String, crate::template::metadata::InputSpec>,
+        project_name: &str,
+    ) -> Result<std::collections::HashMap<String, serde_json::Value>> {
+        use inquire::{Select, Text, Confirm};
 
-        // Split the path into components
-        let path_parts: Vec<&str> = category_path.split('/').collect();
+        let mut inputs = std::collections::HashMap::new();
 
-        let mut current_categories = categories;
-        let mut resource_kinds = Vec::new();
+        // Always add name
+        inputs.insert("name".to_string(), serde_json::Value::String(project_name.to_string()));
 
-        // Walk through the path
-        for part in path_parts {
-            if let Some(cat) = current_categories.get(part) {
-                // Add this category's resource kinds
-                resource_kinds.extend(cat.resource_kinds.clone());
+        // Collect each input defined in the template
+        for (input_name, input_spec) in inputs_spec {
+            let description = input_spec.description.as_deref().unwrap_or(input_name.as_str());
 
-                // Move to children if they exist
-                if let Some(children) = &cat.children {
-                    current_categories = children;
+            let value = if let Some(enum_values) = &input_spec.enum_values {
+                // This is a select input
+                let default_str = input_spec.default
+                    .as_ref()
+                    .and_then(|v| v.as_str())
+                    .or_else(|| enum_values.first().map(|s| s.as_str()));
+
+                let selected = if let Some(default) = default_str {
+                    Select::new(description, enum_values.clone())
+                        .with_starting_cursor(enum_values.iter().position(|v| v == default).unwrap_or(0))
+                        .prompt()
+                        .context("Failed to get input")?
                 } else {
-                    break;
+                    Select::new(description, enum_values.clone())
+                        .prompt()
+                        .context("Failed to get input")?
+                };
+
+                serde_json::Value::String(selected)
+            } else if let Some(default) = &input_spec.default {
+                // Determine type from default value
+                match default {
+                    serde_json::Value::Bool(b) => {
+                        let answer = Confirm::new(description)
+                            .with_default(*b)
+                            .prompt()
+                            .context("Failed to get input")?;
+                        serde_json::Value::Bool(answer)
+                    }
+                    serde_json::Value::Number(n) => {
+                        let prompt_text = format!("{} (default: {})", description, n);
+                        let answer = Text::new(&prompt_text)
+                            .with_default(&n.to_string())
+                            .prompt()
+                            .context("Failed to get input")?;
+
+                        // Try to parse as number
+                        if let Ok(num) = answer.parse::<i64>() {
+                            serde_json::Value::Number(num.into())
+                        } else if let Ok(num) = answer.parse::<f64>() {
+                            serde_json::Value::Number(serde_json::Number::from_f64(num).unwrap())
+                        } else {
+                            serde_json::Value::String(answer)
+                        }
+                    }
+                    serde_json::Value::String(s) => {
+                        let prompt_text = format!("{} (default: {})", description, s);
+                        let answer = Text::new(&prompt_text)
+                            .with_default(s)
+                            .prompt()
+                            .context("Failed to get input")?;
+                        serde_json::Value::String(answer)
+                    }
+                    _ => {
+                        // Fallback to string input
+                        let answer = Text::new(description)
+                            .prompt()
+                            .context("Failed to get input")?;
+                        serde_json::Value::String(answer)
+                    }
                 }
             } else {
-                anyhow::bail!("Category '{}' not found in path '{}'", part, category_path);
-            }
+                // No default, prompt for string
+                let answer = Text::new(description)
+                    .prompt()
+                    .context("Failed to get input")?;
+                serde_json::Value::String(answer)
+            };
+
+            inputs.insert(input_name.clone(), value);
         }
 
-        Ok(resource_kinds)
+        Ok(inputs)
     }
 
     /// Convert CamelCase to snake_case
@@ -322,5 +364,56 @@ impl CreateCommand {
         }
 
         result
+    }
+
+    /// Generate the .pmp.yaml file for the project
+    fn generate_project_yaml(
+        project_path: &std::path::Path,
+        template: &crate::template::metadata::TemplateResource,
+        inputs: &std::collections::HashMap<String, serde_json::Value>,
+    ) -> Result<()> {
+        use crate::template::metadata::{ProjectResource, ProjectMetadata, ProjectSpec, ResourceDefinition};
+
+        // Extract project name from inputs
+        let project_name = inputs.get("name")
+            .and_then(|v| v.as_str())
+            .context("Project name not found in inputs")?
+            .to_string();
+
+        // Create ProjectResource structure
+        let project = ProjectResource {
+            api_version: "pmp.io/v1".to_string(),
+            kind: "Project".to_string(),
+            metadata: ProjectMetadata {
+                name: project_name.clone(),
+                description: inputs.get("description")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+            },
+            spec: ProjectSpec {
+                resource: ResourceDefinition {
+                    api_version: template.spec.resource.api_version.clone(),
+                    kind: template.spec.resource.kind.clone(),
+                },
+                iac: crate::template::metadata::IacProjectConfig {
+                    executor: template.spec.resource.iac.provider.clone(),
+                },
+                inputs: inputs.clone(),
+                custom: template.spec.custom.clone(),
+            },
+        };
+
+        // Serialize to YAML
+        let yaml_content = serde_yaml::to_string(&project)
+            .context("Failed to serialize project to YAML")?;
+
+        // Write to .pmp.yaml file
+        let pmp_yaml_path = project_path.join(".pmp.yaml");
+        std::fs::write(&pmp_yaml_path, yaml_content)
+            .with_context(|| format!("Failed to write .pmp.yaml file: {:?}", pmp_yaml_path))?;
+
+        println!("  Created: {}", pmp_yaml_path.display());
+
+        Ok(())
     }
 }

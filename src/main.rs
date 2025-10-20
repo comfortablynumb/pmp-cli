@@ -49,15 +49,11 @@ enum Commands {
     },
 
     /// Find projects in a ProjectCollection
-    #[command(long_about = "Find projects in a ProjectCollection\n\nExamples:\n  pmp find\n  pmp find --name my-api\n  pmp find --category workload\n  pmp find --kind Infrastructure")]
+    #[command(long_about = "Find projects in a ProjectCollection\n\nExamples:\n  pmp find\n  pmp find --name my-api\n  pmp find --kind KubernetesWorkload")]
     Find {
         /// Filter by project name (case-insensitive substring match)
         #[arg(short, long)]
         name: Option<String>,
-
-        /// Filter by category
-        #[arg(short, long)]
-        category: Option<String>,
 
         /// Filter by kind
         #[arg(short, long)]
@@ -78,10 +74,9 @@ fn main() -> Result<()> {
         Commands::Apply { path } => {
             ApplyCommand::execute(path.as_deref())?;
         }
-        Commands::Find { name, category, kind } => {
+        Commands::Find { name, kind } => {
             FindCommand::execute(
                 name.as_deref(),
-                category.as_deref(),
                 kind.as_deref(),
             )?;
         }
