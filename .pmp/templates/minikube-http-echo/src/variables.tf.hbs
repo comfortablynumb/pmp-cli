@@ -1,0 +1,28 @@
+variable "replicas" {
+  description = "Number of pod replicas"
+  type        = number
+  default     = {{replicas}}
+}
+
+variable "port" {
+  description = "Container port for the http-echo service"
+  type        = number
+  default     = {{port}}
+}
+
+variable "text" {
+  description = "Text message to be echoed by the service"
+  type        = string
+  default     = "{{text}}"
+}
+
+variable "service_type" {
+  description = "Kubernetes service type"
+  type        = string
+  default     = "{{service_type}}"
+
+  validation {
+    condition     = contains(["ClusterIP", "NodePort", "LoadBalancer"], var.service_type)
+    error_message = "Service type must be one of: ClusterIP, NodePort, or LoadBalancer"
+  }
+}

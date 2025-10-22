@@ -395,8 +395,8 @@ impl CreateCommand {
                     api_version: template.spec.resource.api_version.clone(),
                     kind: template.spec.resource.kind.clone(),
                 },
-                iac: crate::template::metadata::IacProjectConfig {
-                    executor: template.spec.resource.iac.provider.clone(),
+                executor: crate::template::metadata::ExecutorProjectConfig {
+                    name: template.spec.resource.executor.clone(),
                 },
                 inputs: inputs.clone(),
                 custom: template.spec.custom.clone(),

@@ -1,11 +1,11 @@
 use crate::collection::CollectionDiscovery;
+use crate::executor::{Executor, ExecutorConfig, OpenTofuExecutor};
 use crate::hooks::HooksRunner;
-use crate::iac::{executor::IacConfig, IacExecutor, OpenTofuExecutor};
 use crate::template::ProjectResource;
 use anyhow::{Context, Result};
 use std::path::Path;
 
-/// Handles the 'preview' command - runs IaC plan with hooks
+/// Handles the 'preview' command - runs executor plan with hooks
 pub struct PreviewCommand;
 
 impl PreviewCommand {
@@ -36,8 +36,8 @@ impl PreviewCommand {
 
         println!("Kind: {}", resource.spec.resource.kind);
 
-        // Get IaC configuration
-        let iac_config = resource.get_iac_config();
+        // Get executor configuration
+        let executor_config = resource.get_executor_config();
 
         // Load collection to get hooks
         let (collection, _collection_root) = CollectionDiscovery::find_collection()?
@@ -46,7 +46,7 @@ impl PreviewCommand {
         let hooks = collection.get_hooks();
 
         // Get executor
-        let executor = Self::get_executor(&iac_config.executor)?;
+        let executor = Self::get_executor(&executor_config.name)?;
 
         // Check if executor is installed
         println!("\nChecking if {} is installed...", executor.get_name());
@@ -65,15 +65,34 @@ impl PreviewCommand {
             HooksRunner::run_hooks(&hooks.pre_preview, project_dir, "pre-preview")?;
         }
 
-        // Build IaC config
-        let iac_execution_config = IacConfig {
+        // Initialize executor
+        println!("\nInitializing {}...", executor.get_name());
+        let init_output = executor.init(project_dir)?;
+
+        // Print init output
+        if !init_output.stdout.is_empty() {
+            println!("{}", String::from_utf8_lossy(&init_output.stdout));
+        }
+
+        if !init_output.stderr.is_empty() {
+            eprintln!("{}", String::from_utf8_lossy(&init_output.stderr));
+        }
+
+        if !init_output.status.success() {
+            anyhow::bail!("Initialization failed");
+        }
+
+        println!("✓ Initialization completed");
+
+        // Build executor config
+        let execution_config = ExecutorConfig {
             plan_command: None,
             apply_command: None,
         };
 
         // Run plan
         println!("\nRunning {} plan...", executor.get_name());
-        let output = executor.plan(&iac_execution_config, project_dir)?;
+        let output = executor.plan(&execution_config, project_dir)?;
 
         // Print output
         println!("{}", String::from_utf8_lossy(&output.stdout));
@@ -97,10 +116,10 @@ impl PreviewCommand {
     }
 
     /// Get the appropriate executor based on name
-    fn get_executor(name: &str) -> Result<Box<dyn IacExecutor>> {
+    fn get_executor(name: &str) -> Result<Box<dyn Executor>> {
         match name {
             "opentofu" => Ok(Box::new(OpenTofuExecutor::new())),
-            _ => anyhow::bail!("Unknown IaC executor: {}", name),
+            _ => anyhow::bail!("Unknown executor: {}", name),
         }
     }
 }

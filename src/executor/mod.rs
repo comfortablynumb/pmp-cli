@@ -1,5 +1,5 @@
 pub mod executor;
 pub mod opentofu;
 
-pub use executor::IacExecutor;
+pub use executor::{Executor, ExecutorConfig};
 pub use opentofu::OpenTofuExecutor;

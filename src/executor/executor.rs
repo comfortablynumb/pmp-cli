@@ -1,9 +1,9 @@
 use anyhow::Result;
 use std::process::Output;
 
-/// Configuration for IaC execution, typically loaded from .pmp.yaml
+/// Configuration for executor execution, typically loaded from .pmp.yaml
 #[derive(Debug, Clone)]
-pub struct IacConfig {
+pub struct ExecutorConfig {
     /// Optional custom plan command (overrides default)
     pub plan_command: Option<String>,
     /// Optional custom apply command (overrides default)
@@ -11,18 +11,22 @@ pub struct IacConfig {
 }
 
 /// Trait for Infrastructure as Code executors (OpenTofu, Terraform, etc.)
-pub trait IacExecutor {
-    /// Check if the IaC executor is installed and available
+pub trait Executor {
+    /// Check if the executor is installed and available
     /// Typically runs a help or version command to verify
     fn check_installed(&self) -> Result<bool>;
 
+    /// Initialize the executor in the working directory
+    /// For OpenTofu/Terraform, this runs 'tofu init' or 'terraform init'
+    fn init(&self, working_dir: &str) -> Result<Output>;
+
     /// Execute the plan command (preview changes)
     /// Uses custom command from config if provided, otherwise uses default
-    fn plan(&self, config: &IacConfig, working_dir: &str) -> Result<Output>;
+    fn plan(&self, config: &ExecutorConfig, working_dir: &str) -> Result<Output>;
 
     /// Execute the apply command (apply changes)
     /// Uses custom command from config if provided, otherwise uses default
-    fn apply(&self, config: &IacConfig, working_dir: &str) -> Result<Output>;
+    fn apply(&self, config: &ExecutorConfig, working_dir: &str) -> Result<Output>;
 
     /// Get the name of this executor (e.g., "opentofu", "terraform")
     fn get_name(&self) -> &str;
