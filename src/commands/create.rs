@@ -109,9 +109,7 @@ impl CreateCommand {
         } else {
             // Multiple environments, let user choose
             println!("\nSelect an environment:");
-            let env_options: Vec<String> = collection.spec.environments
-                .iter()
-                .map(|(_key, env)| {
+            let env_options: Vec<String> = collection.spec.environments.values().map(|env| {
                     if let Some(desc) = &env.description {
                         format!("{} - {}", env.name, desc)
                     } else {
@@ -128,13 +126,11 @@ impl CreateCommand {
             let env_index = env_options.iter().position(|opt| opt == &selected_env_display)
                 .context("Environment not found")?;
 
-            let env_key = collection.spec.environments
+            collection.spec.environments
                 .keys()
                 .nth(env_index)
                 .context("Environment key not found")?
-                .clone();
-
-            env_key
+                .clone()
         };
 
         // Step 7: Validate resource kind
@@ -157,14 +153,14 @@ impl CreateCommand {
 
         // Validate the project name doesn't already exist
         loop {
-            let final_path = if let Some(path) = output_path {
+            let check_path = if let Some(path) = output_path {
                 std::path::PathBuf::from(path)
             } else {
                 collection_root.join("projects").join(&resource_kind_snake).join(&project_name)
             };
 
-            if final_path.exists() {
-                println!("\n⚠ Warning: A project with this name already exists at: {}", final_path.display());
+            if check_path.exists() {
+                println!("\n⚠ Warning: A project with this name already exists at: {}", check_path.display());
                 println!("Please choose a different name:");
                 project_name = SchemaValidator::prompt_for_project_name()
                     .context("Failed to get project name")?;
@@ -193,7 +189,7 @@ impl CreateCommand {
         // Step 10: Add internal fields for template rendering
         inputs.insert(
             "environment".to_string(),
-            serde_json::Value::String(selected_environment),
+            serde_json::Value::String(selected_environment.clone()),
         );
         inputs.insert(
             "resource_api_version".to_string(),
@@ -204,20 +200,27 @@ impl CreateCommand {
             serde_json::Value::String(selected_template.resource.spec.resource.kind.clone()),
         );
 
-        // Step 11: Determine final output path
-        let final_path = if let Some(path) = output_path {
+        // Step 11: Determine project root path
+        let project_root = if let Some(path) = output_path {
             std::path::PathBuf::from(path)
         } else {
             collection_root.join("projects").join(&resource_kind_snake).join(&project_name)
         };
 
-        // Step 12: Create the output directory
-        if !final_path.exists() {
-            std::fs::create_dir_all(&final_path)
-                .context(format!("Failed to create output directory: {}", final_path.display()))?;
+        // Step 12: Determine environment path
+        let environment_path = project_root.join("environments").join(&selected_environment);
+
+        // Step 13: Create the directories
+        if !project_root.exists() {
+            std::fs::create_dir_all(&project_root)
+                .context(format!("Failed to create project root directory: {}", project_root.display()))?;
+        }
+        if !environment_path.exists() {
+            std::fs::create_dir_all(&environment_path)
+                .context(format!("Failed to create environment directory: {}", environment_path.display()))?;
         }
 
-        // Step 13: Render template
+        // Step 14: Render template into environment directory
         println!("\nRendering template...");
         let renderer = TemplateRenderer::new();
         let template_src = selected_template.src_path();
@@ -230,24 +233,37 @@ impl CreateCommand {
         }
 
         renderer
-            .render_template(&template_src, final_path.as_path(), &inputs)
+            .render_template(&template_src, environment_path.as_path(), &inputs)
             .context("Failed to render template")?;
 
-        // Step 14: Auto-generate .pmp.yaml file
-        println!("  Generating .pmp.yaml...");
-        Self::generate_project_yaml(
-            &final_path,
+        // Step 15: Auto-generate .pmp.project.yaml file (identifier only)
+        println!("  Generating .pmp.project.yaml...");
+        Self::generate_project_identifier_yaml(
+            &project_root,
+            &project_name,
+            inputs.get("description").and_then(|v| v.as_str()),
+        ).context("Failed to generate .pmp.project.yaml file")?;
+
+        // Step 16: Auto-generate .pmp.environment.yaml file (with spec)
+        println!("  Generating .pmp.environment.yaml...");
+        Self::generate_project_environment_yaml(
+            &environment_path,
+            &selected_environment,
+            &project_name,
             &selected_template.resource,
             &inputs,
-        ).context("Failed to generate .pmp.yaml file")?;
+        ).context("Failed to generate .pmp.environment.yaml file")?;
 
-        println!("\n✓ Project created successfully in: {}", final_path.display());
-        println!("\n✓ Project created in collection '{}' and will be automatically discovered", collection.metadata.name);
+        println!("\n✓ Project created successfully!");
+        println!("\n✓ Project created in collection '{}'", collection.metadata.name);
         println!("  Name: {}", &project_name);
         println!("  Kind: {}", selected_template.resource.spec.resource.kind);
+        println!("  Environment: {}", &selected_environment);
+        println!("  Project root: {}", project_root.display());
+        println!("  Environment path: {}", environment_path.display());
 
         println!("\nNext steps:");
-        println!("  1. Review the generated files");
+        println!("  1. Review the generated files in {}", environment_path.display());
         println!("  2. Run 'pmp preview' to see what will be created");
         println!("  3. Run 'pmp apply' to apply the infrastructure");
 
@@ -366,26 +382,58 @@ impl CreateCommand {
         result
     }
 
-    /// Generate the .pmp.yaml file for the project
-    fn generate_project_yaml(
-        project_path: &std::path::Path,
-        template: &crate::template::metadata::TemplateResource,
-        inputs: &std::collections::HashMap<String, serde_json::Value>,
+    /// Generate the .pmp.project.yaml file for the project (identifier only, no spec)
+    fn generate_project_identifier_yaml(
+        project_root: &std::path::Path,
+        project_name: &str,
+        description: Option<&str>,
     ) -> Result<()> {
-        use crate::template::metadata::{ProjectResource, ProjectMetadata, ProjectSpec, ResourceDefinition};
+        use crate::template::metadata::{ProjectResource, ProjectMetadata};
 
-        // Extract project name from inputs
-        let project_name = inputs.get("name")
-            .and_then(|v| v.as_str())
-            .context("Project name not found in inputs")?
-            .to_string();
-
-        // Create ProjectResource structure
+        // Create ProjectResource structure without spec
         let project = ProjectResource {
             api_version: "pmp.io/v1".to_string(),
             kind: "Project".to_string(),
             metadata: ProjectMetadata {
-                name: project_name.clone(),
+                name: project_name.to_string(),
+                description: description.map(|s| s.to_string()),
+            },
+            spec: None,
+        };
+
+        // Serialize to YAML
+        let yaml_content = serde_yaml::to_string(&project)
+            .context("Failed to serialize project identifier to YAML")?;
+
+        // Write to .pmp.project.yaml file
+        let pmp_yaml_path = project_root.join(".pmp.project.yaml");
+        std::fs::write(&pmp_yaml_path, yaml_content)
+            .with_context(|| format!("Failed to write .pmp.project.yaml file: {:?}", pmp_yaml_path))?;
+
+        println!("  Created: {}", pmp_yaml_path.display());
+
+        Ok(())
+    }
+
+    /// Generate the .pmp.environment.yaml file for the project environment (with spec)
+    fn generate_project_environment_yaml(
+        environment_path: &std::path::Path,
+        environment_name: &str,
+        project_name: &str,
+        template: &crate::template::metadata::TemplateResource,
+        inputs: &std::collections::HashMap<String, serde_json::Value>,
+    ) -> Result<()> {
+        use crate::template::metadata::{
+            ProjectEnvironmentResource, ProjectEnvironmentMetadata, ProjectSpec, ResourceDefinition,
+        };
+
+        // Create ProjectEnvironmentResource structure
+        let project_env = ProjectEnvironmentResource {
+            api_version: "pmp.io/v1".to_string(),
+            kind: "ProjectEnvironment".to_string(),
+            metadata: ProjectEnvironmentMetadata {
+                name: environment_name.to_string(),
+                project_name: project_name.to_string(),
                 description: inputs.get("description")
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string()),
@@ -404,15 +452,15 @@ impl CreateCommand {
         };
 
         // Serialize to YAML
-        let yaml_content = serde_yaml::to_string(&project)
-            .context("Failed to serialize project to YAML")?;
+        let yaml_content = serde_yaml::to_string(&project_env)
+            .context("Failed to serialize project environment to YAML")?;
 
-        // Write to .pmp.yaml file
-        let pmp_yaml_path = project_path.join(".pmp.yaml");
-        std::fs::write(&pmp_yaml_path, yaml_content)
-            .with_context(|| format!("Failed to write .pmp.yaml file: {:?}", pmp_yaml_path))?;
+        // Write to .pmp.environment.yaml file
+        let pmp_env_yaml_path = environment_path.join(".pmp.environment.yaml");
+        std::fs::write(&pmp_env_yaml_path, yaml_content)
+            .with_context(|| format!("Failed to write .pmp.environment.yaml file: {:?}", pmp_env_yaml_path))?;
 
-        println!("  Created: {}", pmp_yaml_path.display());
+        println!("  Created: {}", pmp_env_yaml_path.display());
 
         Ok(())
     }

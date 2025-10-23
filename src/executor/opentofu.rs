@@ -1,6 +1,6 @@
 use super::executor::{Executor, ExecutorConfig};
 use anyhow::{Context, Result};
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 
 /// OpenTofu executor implementation
 pub struct OpenTofuExecutor;
@@ -34,7 +34,7 @@ impl Executor for OpenTofuExecutor {
         Ok(output)
     }
 
-    fn plan(&self, config: &ExecutorConfig, working_dir: &str) -> Result<Output> {
+    fn plan(&self, config: &ExecutorConfig, working_dir: &str) -> Result<()> {
         let command = config
             .plan_command.as_deref()
             .unwrap_or(self.default_plan_command());
@@ -46,16 +46,23 @@ impl Executor for OpenTofuExecutor {
             anyhow::bail!("Empty command provided");
         }
 
-        let output = Command::new(parts[0])
+        let status = Command::new(parts[0])
             .args(&parts[1..])
             .current_dir(working_dir)
-            .output()
+            .stdin(Stdio::inherit())
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .status()
             .context("Failed to execute plan command")?;
 
-        Ok(output)
+        if !status.success() {
+            anyhow::bail!("Plan command failed with exit code: {:?}", status.code());
+        }
+
+        Ok(())
     }
 
-    fn apply(&self, config: &ExecutorConfig, working_dir: &str) -> Result<Output> {
+    fn apply(&self, config: &ExecutorConfig, working_dir: &str) -> Result<()> {
         let command = config
             .apply_command.as_deref()
             .unwrap_or(self.default_apply_command());
@@ -67,13 +74,20 @@ impl Executor for OpenTofuExecutor {
             anyhow::bail!("Empty command provided");
         }
 
-        let output = Command::new(parts[0])
+        let status = Command::new(parts[0])
             .args(&parts[1..])
             .current_dir(working_dir)
-            .output()
+            .stdin(Stdio::inherit())
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .status()
             .context("Failed to execute apply command")?;
 
-        Ok(output)
+        if !status.success() {
+            anyhow::bail!("Apply command failed with exit code: {:?}", status.code());
+        }
+
+        Ok(())
     }
 
     fn get_name(&self) -> &str {

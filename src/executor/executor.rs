@@ -22,11 +22,13 @@ pub trait Executor {
 
     /// Execute the plan command (preview changes)
     /// Uses custom command from config if provided, otherwise uses default
-    fn plan(&self, config: &ExecutorConfig, working_dir: &str) -> Result<Output>;
+    /// Runs interactively with inherited stdio for user interaction
+    fn plan(&self, config: &ExecutorConfig, working_dir: &str) -> Result<()>;
 
     /// Execute the apply command (apply changes)
     /// Uses custom command from config if provided, otherwise uses default
-    fn apply(&self, config: &ExecutorConfig, working_dir: &str) -> Result<Output>;
+    /// Runs interactively with inherited stdio for user interaction
+    fn apply(&self, config: &ExecutorConfig, working_dir: &str) -> Result<()>;
 
     /// Get the name of this executor (e.g., "opentofu", "terraform")
     fn get_name(&self) -> &str;

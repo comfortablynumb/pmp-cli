@@ -1,0 +1,406 @@
+use crate::collection::{CollectionDiscovery, CollectionManager};
+use crate::template::{
+    TemplateDiscovery, TemplateRenderer, ProjectResource, ProjectEnvironmentResource,
+};
+use anyhow::{Context, Result};
+use inquire::Select;
+use std::path::{Path, PathBuf};
+
+/// Handles the 'update' command - regenerates project environment files from the original template
+pub struct UpdateCommand;
+
+impl UpdateCommand {
+    /// Execute the update command
+    pub fn execute(project_path: Option<&str>, templates_path: Option<&str>) -> Result<()> {
+        // Determine working directory
+        let work_dir = if let Some(path) = project_path {
+            PathBuf::from(path)
+        } else {
+            std::env::current_dir().context("Failed to get current directory")?
+        };
+
+        // Detect context and get environment path
+        let (env_path, project_name, env_name) = Self::detect_and_select_environment(&work_dir)?;
+
+        // Load environment resource to get current configuration
+        let env_file = env_path.join(".pmp.environment.yaml");
+        if !env_file.exists() {
+            anyhow::bail!("Environment file not found: {:?}", env_file);
+        }
+
+        let current_env_resource = ProjectEnvironmentResource::from_file(&env_file)
+            .context("Failed to load environment resource")?;
+
+        println!("Project: {}", project_name);
+        println!("Environment: {}", env_name);
+        println!("Resource Kind: {}", current_env_resource.spec.resource.kind);
+
+        if let Some(desc) = &current_env_resource.metadata.description {
+            println!("Description: {}", desc);
+        }
+
+        // Load collection to ensure we're in a valid collection context
+        let (_collection, _collection_root) = CollectionDiscovery::find_collection()?
+            .context("ProjectCollection is required to run commands")?;
+
+        // Discover templates
+        println!("\nDiscovering templates...");
+        let custom_paths = if let Some(path) = templates_path {
+            vec![path]
+        } else {
+            vec![]
+        };
+
+        let all_templates = TemplateDiscovery::discover_templates_with_custom_paths(&custom_paths)
+            .context("Failed to discover templates")?;
+
+        if all_templates.is_empty() {
+            anyhow::bail!("No templates found. Please create templates in ~/.pmp/templates or .pmp/templates");
+        }
+
+        // Find the template matching the current resource kind
+        let matching_template = all_templates
+            .iter()
+            .find(|t| {
+                t.resource.spec.resource.api_version == current_env_resource.spec.resource.api_version
+                    && t.resource.spec.resource.kind == current_env_resource.spec.resource.kind
+            })
+            .context(format!(
+                "No template found for resource kind: {}/{}",
+                current_env_resource.spec.resource.api_version,
+                current_env_resource.spec.resource.kind
+            ))?;
+
+        println!("Using template: {}", matching_template.resource.metadata.name);
+        if let Some(desc) = &matching_template.resource.metadata.description {
+            println!("Description: {}", desc);
+        }
+
+        // Get current inputs (these will be used as defaults)
+        let current_inputs = &current_env_resource.spec.inputs;
+
+        // Get template inputs, merging base inputs with environment-specific overrides
+        let mut merged_inputs = matching_template.resource.spec.resource.inputs.clone();
+
+        // Override with environment-specific inputs if they exist
+        if let Some(env_overrides) = matching_template.resource.spec.resource.environments.get(&env_name) {
+            for (input_name, input_spec) in &env_overrides.overrides.inputs {
+                merged_inputs.insert(input_name.clone(), input_spec.clone());
+            }
+        }
+
+        // Prompt for inputs with current values as defaults
+        println!("\nPlease provide the following information (current values shown as defaults):");
+
+        let mut new_inputs = Self::collect_template_inputs_with_defaults(
+            &merged_inputs,
+            current_inputs,
+            &project_name,
+        ).context("Failed to collect inputs")?;
+
+        // Add internal fields for template rendering
+        new_inputs.insert(
+            "environment".to_string(),
+            serde_json::Value::String(env_name.clone()),
+        );
+        new_inputs.insert(
+            "resource_api_version".to_string(),
+            serde_json::Value::String(matching_template.resource.spec.resource.api_version.clone()),
+        );
+        new_inputs.insert(
+            "resource_kind".to_string(),
+            serde_json::Value::String(matching_template.resource.spec.resource.kind.clone()),
+        );
+
+        // Confirm before regenerating
+        let confirm = inquire::Confirm::new("Regenerate environment files with these inputs?")
+            .with_default(true)
+            .prompt()
+            .context("Failed to get confirmation")?;
+
+        if !confirm {
+            println!("Update cancelled.");
+            return Ok(());
+        }
+
+        // Render template into environment directory
+        println!("\nRegenerating template files...");
+        let renderer = TemplateRenderer::new();
+        let template_src = matching_template.src_path();
+
+        if !template_src.exists() {
+            anyhow::bail!(
+                "Template src directory not found: {}",
+                template_src.display()
+            );
+        }
+
+        renderer
+            .render_template(&template_src, env_path.as_path(), &new_inputs)
+            .context("Failed to render template")?;
+
+        // Regenerate .pmp.environment.yaml file
+        println!("  Updating .pmp.environment.yaml...");
+        Self::generate_project_environment_yaml(
+            &env_path,
+            &env_name,
+            &project_name,
+            &matching_template.resource,
+            &new_inputs,
+        ).context("Failed to update .pmp.environment.yaml file")?;
+
+        println!("\n✓ Environment updated successfully!");
+        println!("  Project: {}", project_name);
+        println!("  Environment: {}", env_name);
+        println!("  Path: {}", env_path.display());
+
+        println!("\nNext steps:");
+        println!("  1. Review the regenerated files in {}", env_path.display());
+        println!("  2. Run 'pmp preview' to see what changes will be applied");
+        println!("  3. Run 'pmp apply' to apply the infrastructure");
+
+        Ok(())
+    }
+
+    /// Detect context and select project/environment
+    /// Returns: (environment_path, project_name, environment_name)
+    fn detect_and_select_environment(work_dir: &Path) -> Result<(PathBuf, String, String)> {
+        // Check if we're in an environment directory
+        if let Some(env_info) = Self::check_in_environment(work_dir)? {
+            return Ok(env_info);
+        }
+
+        // Check if we're in a project directory
+        if let Some((project_path, project_name)) = Self::check_in_project(work_dir)? {
+            let env_name = Self::select_environment(&project_path)?;
+            let env_path = project_path.join("environments").join(&env_name);
+            return Ok((env_path, project_name, env_name));
+        }
+
+        // We're in the collection or elsewhere - use find/search UI
+        Self::select_project_and_environment()
+    }
+
+    /// Check if we're inside an environment directory
+    fn check_in_environment(dir: &Path) -> Result<Option<(PathBuf, String, String)>> {
+        let env_file = dir.join(".pmp.environment.yaml");
+
+        if env_file.exists() {
+            let resource = ProjectEnvironmentResource::from_file(&env_file)?;
+            let env_name = resource.metadata.name.clone();
+            let project_name = resource.metadata.project_name.clone();
+
+            return Ok(Some((dir.to_path_buf(), project_name, env_name)));
+        }
+
+        Ok(None)
+    }
+
+    /// Check if we're inside a project directory (but not in an environment)
+    fn check_in_project(dir: &Path) -> Result<Option<(PathBuf, String)>> {
+        let project_file = dir.join(".pmp.project.yaml");
+
+        if project_file.exists() {
+            let resource = ProjectResource::from_file(&project_file)?;
+            return Ok(Some((dir.to_path_buf(), resource.metadata.name.clone())));
+        }
+
+        Ok(None)
+    }
+
+    /// Select an environment from a project
+    fn select_environment(project_path: &Path) -> Result<String> {
+        let environments = CollectionDiscovery::discover_environments(project_path)
+            .context("Failed to discover environments")?;
+
+        if environments.is_empty() {
+            anyhow::bail!("No environments found in project: {:?}", project_path);
+        }
+
+        if environments.len() == 1 {
+            println!("Using environment: {}", &environments[0]);
+            return Ok(environments[0].clone());
+        }
+
+        let selected = Select::new("Select an environment:", environments.clone())
+            .prompt()
+            .context("Failed to select environment")?;
+
+        Ok(selected)
+    }
+
+    /// Select project and environment using find/search UI
+    fn select_project_and_environment() -> Result<(PathBuf, String, String)> {
+        let manager = CollectionManager::load()
+            .context("Failed to load collection")?;
+
+        let all_projects = manager.get_all_projects();
+
+        if all_projects.is_empty() {
+            anyhow::bail!("No projects found in collection");
+        }
+
+        // Select project
+        let project_options: Vec<String> = all_projects
+            .iter()
+            .map(|p| format!("{} ({})", p.name, p.kind))
+            .collect();
+
+        let selected_project_display = Select::new("Select a project:", project_options.clone())
+            .prompt()
+            .context("Failed to select project")?;
+
+        let project_index = project_options.iter().position(|opt| opt == &selected_project_display)
+            .context("Project not found")?;
+
+        let selected_project = &all_projects[project_index];
+        let project_path = manager.get_project_path(selected_project);
+
+        // Select environment
+        let env_name = Self::select_environment(&project_path)?;
+        let env_path = project_path.join("environments").join(&env_name);
+
+        Ok((env_path, selected_project.name.clone(), env_name))
+    }
+
+    /// Collect inputs from user based on template input specifications, using current values as defaults
+    fn collect_template_inputs_with_defaults(
+        inputs_spec: &std::collections::HashMap<String, crate::template::metadata::InputSpec>,
+        current_inputs: &std::collections::HashMap<String, serde_json::Value>,
+        project_name: &str,
+    ) -> Result<std::collections::HashMap<String, serde_json::Value>> {
+        use inquire::{Select, Text, Confirm};
+
+        let mut inputs = std::collections::HashMap::new();
+
+        // Always add name
+        inputs.insert("name".to_string(), serde_json::Value::String(project_name.to_string()));
+
+        // Collect each input defined in the template
+        for (input_name, input_spec) in inputs_spec {
+            let description = input_spec.description.as_deref().unwrap_or(input_name.as_str());
+
+            // Get the current value for this input
+            let current_value = current_inputs.get(input_name);
+
+            let value = if let Some(enum_values) = &input_spec.enum_values {
+                // This is a select input
+                let default_str = current_value
+                    .and_then(|v| v.as_str())
+                    .or_else(|| input_spec.default.as_ref().and_then(|v| v.as_str()))
+                    .or_else(|| enum_values.first().map(|s| s.as_str()));
+
+                let selected = if let Some(default) = default_str {
+                    Select::new(description, enum_values.clone())
+                        .with_starting_cursor(enum_values.iter().position(|v| v == default).unwrap_or(0))
+                        .prompt()
+                        .context("Failed to get input")?
+                } else {
+                    Select::new(description, enum_values.clone())
+                        .prompt()
+                        .context("Failed to get input")?
+                };
+
+                serde_json::Value::String(selected)
+            } else {
+                // Determine the default value (prefer current value over template default)
+                let default_value = current_value.or(input_spec.default.as_ref());
+
+                match default_value {
+                    Some(serde_json::Value::Bool(b)) => {
+                        let answer = Confirm::new(description)
+                            .with_default(*b)
+                            .prompt()
+                            .context("Failed to get input")?;
+                        serde_json::Value::Bool(answer)
+                    }
+                    Some(serde_json::Value::Number(n)) => {
+                        let prompt_text = format!("{} (current: {})", description, n);
+                        let answer = Text::new(&prompt_text)
+                            .with_default(&n.to_string())
+                            .prompt()
+                            .context("Failed to get input")?;
+
+                        // Try to parse as number
+                        if let Ok(num) = answer.parse::<i64>() {
+                            serde_json::Value::Number(num.into())
+                        } else if let Ok(num) = answer.parse::<f64>() {
+                            serde_json::Value::Number(serde_json::Number::from_f64(num).unwrap())
+                        } else {
+                            serde_json::Value::String(answer)
+                        }
+                    }
+                    Some(serde_json::Value::String(s)) => {
+                        let prompt_text = format!("{} (current: {})", description, s);
+                        let answer = Text::new(&prompt_text)
+                            .with_default(s)
+                            .prompt()
+                            .context("Failed to get input")?;
+                        serde_json::Value::String(answer)
+                    }
+                    _ => {
+                        // No current value or default, prompt for string
+                        let answer = Text::new(description)
+                            .prompt()
+                            .context("Failed to get input")?;
+                        serde_json::Value::String(answer)
+                    }
+                }
+            };
+
+            inputs.insert(input_name.clone(), value);
+        }
+
+        Ok(inputs)
+    }
+
+    /// Generate the .pmp.environment.yaml file for the project environment (with spec)
+    fn generate_project_environment_yaml(
+        environment_path: &Path,
+        environment_name: &str,
+        project_name: &str,
+        template: &crate::template::metadata::TemplateResource,
+        inputs: &std::collections::HashMap<String, serde_json::Value>,
+    ) -> Result<()> {
+        use crate::template::metadata::{
+            ProjectEnvironmentResource, ProjectEnvironmentMetadata, ProjectSpec, ResourceDefinition,
+        };
+
+        // Create ProjectEnvironmentResource structure
+        let project_env = ProjectEnvironmentResource {
+            api_version: "pmp.io/v1".to_string(),
+            kind: "ProjectEnvironment".to_string(),
+            metadata: ProjectEnvironmentMetadata {
+                name: environment_name.to_string(),
+                project_name: project_name.to_string(),
+                description: inputs.get("description")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+            },
+            spec: ProjectSpec {
+                resource: ResourceDefinition {
+                    api_version: template.spec.resource.api_version.clone(),
+                    kind: template.spec.resource.kind.clone(),
+                },
+                executor: crate::template::metadata::ExecutorProjectConfig {
+                    name: template.spec.resource.executor.clone(),
+                },
+                inputs: inputs.clone(),
+                custom: template.spec.custom.clone(),
+            },
+        };
+
+        // Serialize to YAML
+        let yaml_content = serde_yaml::to_string(&project_env)
+            .context("Failed to serialize project environment to YAML")?;
+
+        // Write to .pmp.environment.yaml file
+        let pmp_env_yaml_path = environment_path.join(".pmp.environment.yaml");
+        std::fs::write(&pmp_env_yaml_path, yaml_content)
+            .with_context(|| format!("Failed to write .pmp.environment.yaml file: {:?}", pmp_env_yaml_path))?;
+
+        println!("  Updated: {}", pmp_env_yaml_path.display());
+
+        Ok(())
+    }
+}

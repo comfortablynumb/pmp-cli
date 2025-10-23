@@ -3,5 +3,5 @@ pub mod metadata;
 pub mod renderer;
 
 pub use discovery::TemplateDiscovery;
-pub use metadata::{ProjectResource};
+pub use metadata::{ProjectResource, ProjectEnvironmentResource};
 pub use renderer::TemplateRenderer;

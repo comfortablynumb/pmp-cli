@@ -66,8 +66,10 @@ impl TemplateRenderer {
         let output_path = if let Some(file_name) = relative_path.file_name() {
             let file_name_str = file_name.to_string_lossy();
 
-            // Skip .pmp.yaml files - these are auto-generated
-            if file_name_str == ".pmp.yaml.hbs" || file_name_str == ".pmp.yaml" {
+            // Skip .pmp.* files - these are auto-generated
+            if file_name_str == ".pmp.yaml.hbs" || file_name_str == ".pmp.yaml"
+                || file_name_str == ".pmp.project.yaml.hbs" || file_name_str == ".pmp.project.yaml"
+                || file_name_str == ".pmp.environment.yaml.hbs" || file_name_str == ".pmp.environment.yaml" {
                 println!("  Skipped: {} (auto-generated)", file_name_str);
                 return Ok(());
             }
@@ -126,11 +128,10 @@ fn eq_helper(
     let param1 = h.param(0).and_then(|v| v.value().as_str());
     let param2 = h.param(1).and_then(|v| v.value().as_str());
 
-    if let (Some(p1), Some(p2)) = (param1, param2) {
-        if p1 == p2 {
+    if let (Some(p1), Some(p2)) = (param1, param2)
+        && p1 == p2 {
             out.write("true")?;
         }
-    }
 
     Ok(())
 }
@@ -148,12 +149,11 @@ fn contains_helper(
 
     if let (Some(arr), Some(search)) = (array, search_value) {
         for item in arr {
-            if let Some(item_str) = item.as_str() {
-                if item_str == search {
+            if let Some(item_str) = item.as_str()
+                && item_str == search {
                     out.write("true")?;
                     return Ok(());
                 }
-            }
         }
     }
 

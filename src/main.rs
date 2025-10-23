@@ -7,7 +7,7 @@ mod template;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use commands::{ApplyCommand, CreateCommand, FindCommand, PreviewCommand};
+use commands::{ApplyCommand, CreateCommand, FindCommand, PreviewCommand, UpdateCommand};
 
 #[derive(Parser)]
 #[command(name = "pmp")]
@@ -59,6 +59,18 @@ enum Commands {
         #[arg(short, long)]
         kind: Option<String>,
     },
+
+    /// Update an existing project environment by regenerating files from the original template
+    #[command(long_about = "Update an existing project environment by regenerating files from the original template\n\nExamples:\n  pmp update\n  pmp update --path ./my-project\n  pmp update --templates-path /custom/templates")]
+    Update {
+        /// Path to the project directory (defaults to current directory)
+        #[arg(short, long)]
+        path: Option<String>,
+
+        /// Additional templates directory to search
+        #[arg(short, long)]
+        templates_path: Option<String>,
+    },
 }
 
 fn main() -> Result<()> {
@@ -79,6 +91,9 @@ fn main() -> Result<()> {
                 name.as_deref(),
                 kind.as_deref(),
             )?;
+        }
+        Commands::Update { path, templates_path } => {
+            UpdateCommand::execute(path.as_deref(), templates_path.as_deref())?;
         }
     }
 

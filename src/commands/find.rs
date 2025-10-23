@@ -67,6 +67,9 @@ impl FindCommand {
 
     /// Display the search results
     fn display_results(manager: &CollectionManager, projects: &[&ProjectReference]) -> Result<()> {
+        use crate::collection::CollectionDiscovery;
+        use crate::template::{ProjectResource, ProjectEnvironmentResource};
+
         if projects.is_empty() {
             println!("No projects found.");
             return Ok(());
@@ -78,14 +81,91 @@ impl FindCommand {
             manager.get_metadata().name
         );
 
-        for project in projects {
-            println!("  Name: {}", project.name);
-            println!("  Kind: {}", project.kind);
-            println!("  Path: {}", project.path);
+        // If multiple projects, let user select one
+        let selected_project = if projects.len() == 1 {
+            projects[0]
+        } else {
+            let project_options: Vec<String> = projects
+                .iter()
+                .map(|p| format!("{} ({})", p.name, p.kind))
+                .collect();
 
-            let full_path = manager.get_project_path(project);
-            println!("  Full path: {}", full_path.display());
-            println!();
+            let selected = Select::new("Select a project to view details:", project_options.clone())
+                .prompt()
+                .context("Failed to select project")?;
+
+            let index = project_options.iter().position(|opt| opt == &selected)
+                .context("Project not found")?;
+
+            projects[index]
+        };
+
+        let full_path = manager.get_project_path(selected_project);
+
+        println!("\nProject Details:");
+        println!("  Name: {}", selected_project.name);
+        println!("  Kind: {}", selected_project.kind);
+        println!("  Path: {}", selected_project.path);
+        println!("  Full path: {}", full_path.display());
+
+        // Load project metadata
+        let project_file = full_path.join(".pmp.project.yaml");
+        if !project_file.exists() {
+            anyhow::bail!("Project file not found: {:?}", project_file);
+        }
+
+        let project_resource = ProjectResource::from_file(&project_file)
+            .context("Failed to load project resource")?;
+
+        if let Some(desc) = &project_resource.metadata.description {
+            println!("  Description: {}", desc);
+        }
+
+        // Discover environments
+        let environments = CollectionDiscovery::discover_environments(&full_path)
+            .context("Failed to discover environments")?;
+
+        if environments.is_empty() {
+            println!("\nNo environments found for this project.");
+            return Ok(());
+        }
+
+        println!("\nAvailable environments: {}", environments.join(", "));
+
+        // Select environment
+        let selected_env = if environments.len() == 1 {
+            println!("Using environment: {}", &environments[0]);
+            environments[0].clone()
+        } else {
+            Select::new("Select an environment:", environments.clone())
+                .prompt()
+                .context("Failed to select environment")?
+        };
+
+        // Load environment resource
+        let env_path = full_path.join("environments").join(selected_env);
+        let env_file = env_path.join(".pmp.environment.yaml");
+
+        if !env_file.exists() {
+            anyhow::bail!("Environment file not found: {:?}", env_file);
+        }
+
+        let env_resource = ProjectEnvironmentResource::from_file(&env_file)
+            .context("Failed to load environment resource")?;
+
+        println!("\nEnvironment Details:");
+        println!("  Name: {}", env_resource.metadata.name);
+        println!("  Project: {}", env_resource.metadata.project_name);
+        if let Some(desc) = &env_resource.metadata.description {
+            println!("  Description: {}", desc);
+        }
+        println!("  Resource: {}/{}", env_resource.spec.resource.api_version, env_resource.spec.resource.kind);
+        println!("  Executor: {}", env_resource.spec.executor.name);
+        println!("  Environment path: {}", env_path.display());
+
+        println!("\nInputs:");
+        for (key, value) in &env_resource.spec.inputs {
+            println!("  {}: {}", key, value);
         }
 
         Ok(())

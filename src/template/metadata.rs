@@ -129,14 +129,16 @@ pub struct ProjectResource {
     #[serde(rename = "apiVersion")]
     pub api_version: String,
 
-    /// Kind of resource (e.g., "Workload", "Infrastructure")
+    /// Kind of resource (always "Project")
     pub kind: String,
 
     /// Metadata about the project
     pub metadata: ProjectMetadata,
 
-    /// Project specification
-    pub spec: ProjectSpec,
+    /// Project specification (optional - only in .pmp.environment.yaml)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    pub spec: Option<ProjectSpec>,
 }
 
 /// Project metadata (Kubernetes-style)
@@ -165,6 +167,41 @@ pub struct ProjectSpec {
     /// Optional: Custom fields from template
     #[serde(default)]
     pub custom: Option<HashMap<String, Value>>,
+}
+
+// ============================================================================
+// ProjectEnvironment Resource (Kubernetes-style)
+// ============================================================================
+
+/// Kubernetes-style ProjectEnvironment resource
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectEnvironmentResource {
+    /// API version (e.g., "pmp.io/v1")
+    #[serde(rename = "apiVersion")]
+    pub api_version: String,
+
+    /// Kind of resource (always "ProjectEnvironment")
+    pub kind: String,
+
+    /// Metadata about the project environment
+    pub metadata: ProjectEnvironmentMetadata,
+
+    /// Project environment specification
+    pub spec: ProjectSpec,
+}
+
+/// ProjectEnvironment metadata (Kubernetes-style)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectEnvironmentMetadata {
+    /// Name of the environment
+    pub name: String,
+
+    /// Name of the project this environment belongs to
+    pub project_name: String,
+
+    /// Description of this environment
+    #[serde(default)]
+    pub description: Option<String>,
 }
 
 /// Executor configuration in project spec
@@ -335,10 +372,31 @@ impl TemplateResource {
 }
 
 impl ProjectResource {
-    /// Load project resource from a .pmp.yaml file
+    /// Load project resource from a .pmp.project.yaml file
     pub fn from_file(path: &std::path::Path) -> anyhow::Result<Self> {
         let content = std::fs::read_to_string(path)?;
         let resource: ProjectResource = serde_yaml::from_str(&content)?;
+
+        // Validate kind
+        if resource.kind != "Project" {
+            anyhow::bail!("Expected kind 'Project', got '{}'", resource.kind);
+        }
+
+        Ok(resource)
+    }
+}
+
+impl ProjectEnvironmentResource {
+    /// Load project environment resource from a .pmp.environment.yaml file
+    pub fn from_file(path: &std::path::Path) -> anyhow::Result<Self> {
+        let content = std::fs::read_to_string(path)?;
+        let resource: ProjectEnvironmentResource = serde_yaml::from_str(&content)?;
+
+        // Validate kind
+        if resource.kind != "ProjectEnvironment" {
+            anyhow::bail!("Expected kind 'ProjectEnvironment', got '{}'", resource.kind);
+        }
+
         Ok(resource)
     }
 
@@ -362,7 +420,22 @@ impl ProjectCollectionResource {
             );
         }
 
+        // Validate environment names
+        for env_key in resource.spec.environments.keys() {
+            if !Self::is_valid_environment_name(env_key) {
+                anyhow::bail!(
+                    "Invalid environment name '{}'. Environment names must be lowercase alphanumeric and may contain hyphens",
+                    env_key
+                );
+            }
+        }
+
         Ok(resource)
+    }
+
+    /// Validate environment name format
+    pub fn is_valid_environment_name(name: &str) -> bool {
+        !name.is_empty() && name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
     }
 
     /// Save the collection to a .pmp.yaml file
