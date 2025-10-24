@@ -7,7 +7,7 @@ mod template;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use commands::{ApplyCommand, CreateCommand, FindCommand, PreviewCommand, UpdateCommand};
+use commands::{ApplyCommand, CreateCommand, FindCommand, InitCommand, PreviewCommand, UpdateCommand};
 
 #[derive(Parser)]
 #[command(name = "pmp")]
@@ -20,6 +20,22 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Initialize a new ProjectCollection
+    #[command(long_about = "Initialize a new ProjectCollection in the current directory\n\nExamples:\n  pmp init\n  pmp init --name \"My Infrastructure\"\n  pmp init --name \"Dev Projects\" --description \"Development infrastructure\"")]
+    Init {
+        /// Name of the project collection (defaults to "My Infrastructure")
+        #[arg(short, long)]
+        name: Option<String>,
+
+        /// Description of the project collection
+        #[arg(short, long)]
+        description: Option<String>,
+
+        /// Additional templates directory to search
+        #[arg(short, long)]
+        templates_path: Option<String>,
+    },
+
     /// Create a new project from a template
     #[command(long_about = "Create a new project from a template\n\nExamples:\n  pmp create\n  pmp create --output ./my-project\n  pmp create --templates-path /custom/templates")]
     Create {
@@ -77,6 +93,9 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
+        Commands::Init { name, description, templates_path } => {
+            InitCommand::execute(name.as_deref(), description.as_deref(), templates_path.as_deref())?;
+        }
         Commands::Create { output, templates_path } => {
             CreateCommand::execute(output.as_deref(), templates_path.as_deref())?;
         }
