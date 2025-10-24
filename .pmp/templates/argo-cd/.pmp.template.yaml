@@ -1,0 +1,54 @@
+apiVersion: pmp.io/v1
+kind: Template
+metadata:
+  name: argo-cd
+  description: Install Argo CD on Kubernetes using Helm
+
+spec:
+  resource:
+    apiVersion: pmp.io/v1
+    kind: KubernetesWorkload
+    executor: opentofu
+
+    inputs:
+      namespace:
+        default: "argocd"
+        description: Kubernetes namespace for Argo CD
+
+      chart_version:
+        default: "5.51.6"
+        description: Argo CD Helm chart version
+
+      create_namespace:
+        default: true
+        description: Whether to create the namespace if it doesn't exist
+
+      server_host:
+        default: ""
+        description: Hostname for Argo CD server (optional, for ingress)
+
+      enable_ingress:
+        default: false
+        description: Enable ingress for Argo CD server
+
+      ingress_class:
+        default: "nginx"
+        description: Ingress class name
+
+      admin_password:
+        default: ""
+        description: Admin password (leave empty for auto-generated)
+
+      server_replicas:
+        default: 1
+        description: Number of Argo CD server replicas
+
+      repo_server_replicas:
+        default: 1
+        description: Number of Argo CD repo-server replicas
+
+      ha_enabled:
+        default: false
+        description: Enable high availability mode
+
+  src_path: src
