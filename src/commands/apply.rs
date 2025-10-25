@@ -1,6 +1,7 @@
 use crate::collection::{CollectionDiscovery, CollectionManager};
 use crate::executor::{Executor, ExecutorConfig, OpenTofuExecutor};
 use crate::hooks::HooksRunner;
+use crate::output;
 use crate::template::{ProjectResource, ProjectEnvironmentResource};
 use anyhow::{Context, Result};
 use inquire::Select;
@@ -31,14 +32,15 @@ impl ApplyCommand {
         let resource = ProjectEnvironmentResource::from_file(&env_file)
             .context("Failed to load environment resource")?;
 
-        println!("Project: {}", project_name);
-        println!("Environment: {}", env_name);
+        output::section("Apply");
+        output::key_value_highlight("Project", &project_name);
+        output::environment_badge(&env_name);
 
         if let Some(desc) = &resource.metadata.description {
-            println!("Description: {}", desc);
+            output::key_value("Description", desc);
         }
 
-        println!("Kind: {}", resource.spec.resource.kind);
+        output::key_value("Kind", &resource.spec.resource.kind);
 
         // Get executor configuration
         let executor_config = resource.get_executor_config();
@@ -53,7 +55,8 @@ impl ApplyCommand {
         let executor = Self::get_executor(&executor_config.name)?;
 
         // Check if executor is installed
-        println!("\nChecking if {} is installed...", executor.get_name());
+        output::subsection("Prerequisites");
+        output::dimmed(&format!("Checking if {} is installed...", executor.get_name()));
 
         if !executor.check_installed()? {
             anyhow::bail!(
@@ -62,7 +65,7 @@ impl ApplyCommand {
             );
         }
 
-        println!("✓ {} is available", executor.get_name());
+        output::status_check(executor.get_name(), true);
 
         // Convert env_path to string for executor
         let env_dir_str = env_path.to_str()
@@ -74,14 +77,15 @@ impl ApplyCommand {
         }
 
         // Initialize executor
-        println!("\nInitializing {}...", executor.get_name());
+        output::subsection("Initialization");
+        output::dimmed(&format!("Initializing {}...", executor.get_name()));
         let init_output = executor.init(env_dir_str)?;
 
         if !init_output.status.success() {
             anyhow::bail!("Initialization failed");
         }
 
-        println!("✓ Initialization completed");
+        output::success("Initialization completed");
 
         // Build executor config
         let execution_config = ExecutorConfig {
@@ -90,7 +94,8 @@ impl ApplyCommand {
         };
 
         // Run apply
-        println!("\nRunning {} apply...", executor.get_name());
+        output::subsection("Running Apply");
+        output::dimmed(&format!("Executing {} apply...", executor.get_name()));
         executor.apply(&execution_config, env_dir_str)?;
 
         // Run post-apply hooks
@@ -98,7 +103,8 @@ impl ApplyCommand {
             HooksRunner::run_hooks(&hooks.post_apply, env_dir_str, "post-apply")?;
         }
 
-        println!("\n✓ Apply completed successfully");
+        output::blank();
+        output::success("Apply completed successfully");
 
         Ok(())
     }
@@ -159,7 +165,7 @@ impl ApplyCommand {
         }
 
         if environments.len() == 1 {
-            println!("Using environment: {}", &environments[0]);
+            output::environment_badge(&environments[0]);
             return Ok(environments[0].clone());
         }
 

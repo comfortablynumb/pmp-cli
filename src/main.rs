@@ -2,6 +2,7 @@ mod collection;
 mod commands;
 mod executor;
 mod hooks;
+mod output;
 mod schema;
 mod template;
 

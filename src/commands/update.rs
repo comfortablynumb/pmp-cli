@@ -1,4 +1,5 @@
 use crate::collection::{CollectionDiscovery, CollectionManager};
+use crate::output;
 use crate::template::{
     TemplateDiscovery, TemplateRenderer, ProjectResource, ProjectEnvironmentResource,
 };
@@ -31,12 +32,13 @@ impl UpdateCommand {
         let current_env_resource = ProjectEnvironmentResource::from_file(&env_file)
             .context("Failed to load environment resource")?;
 
-        println!("Project: {}", project_name);
-        println!("Environment: {}", env_name);
-        println!("Resource Kind: {}", current_env_resource.spec.resource.kind);
+        output::section("Update Environment");
+        output::key_value_highlight("Project", &project_name);
+        output::environment_badge(&env_name);
+        output::key_value("Resource Kind", &current_env_resource.spec.resource.kind);
 
         if let Some(desc) = &current_env_resource.metadata.description {
-            println!("Description: {}", desc);
+            output::key_value("Description", desc);
         }
 
         // Load collection to ensure we're in a valid collection context
@@ -44,7 +46,8 @@ impl UpdateCommand {
             .context("ProjectCollection is required to run commands")?;
 
         // Discover templates
-        println!("\nDiscovering templates...");
+        output::subsection("Template Discovery");
+        output::dimmed("Discovering templates...");
         let custom_paths = if let Some(path) = templates_path {
             vec![path]
         } else {
@@ -71,9 +74,9 @@ impl UpdateCommand {
                 current_env_resource.spec.resource.kind
             ))?;
 
-        println!("Using template: {}", matching_template.resource.metadata.name);
+        output::key_value_highlight("Template", &matching_template.resource.metadata.name);
         if let Some(desc) = &matching_template.resource.metadata.description {
-            println!("Description: {}", desc);
+            output::key_value("Description", desc);
         }
 
         // Get current inputs (these will be used as defaults)
@@ -90,7 +93,8 @@ impl UpdateCommand {
         }
 
         // Prompt for inputs with current values as defaults
-        println!("\nPlease provide the following information (current values shown as defaults):");
+        output::subsection("Update Inputs");
+        output::dimmed("Please provide the following information (current values shown as defaults):");
 
         let mut new_inputs = Self::collect_template_inputs_with_defaults(
             &merged_inputs,
@@ -119,12 +123,13 @@ impl UpdateCommand {
             .context("Failed to get confirmation")?;
 
         if !confirm {
-            println!("Update cancelled.");
+            output::dimmed("Update cancelled");
             return Ok(());
         }
 
         // Render template into environment directory
-        println!("\nRegenerating template files...");
+        output::subsection("Regenerating Files");
+        output::dimmed("Regenerating template files...");
         let renderer = TemplateRenderer::new();
         let template_src = matching_template.src_path();
 
@@ -140,7 +145,7 @@ impl UpdateCommand {
             .context("Failed to render template")?;
 
         // Regenerate .pmp.environment.yaml file
-        println!("  Updating .pmp.environment.yaml...");
+        output::dimmed("  Updating .pmp.environment.yaml...");
         Self::generate_project_environment_yaml(
             &env_path,
             &env_name,
@@ -149,15 +154,20 @@ impl UpdateCommand {
             &new_inputs,
         ).context("Failed to update .pmp.environment.yaml file")?;
 
-        println!("\n✓ Environment updated successfully!");
-        println!("  Project: {}", project_name);
-        println!("  Environment: {}", env_name);
-        println!("  Path: {}", env_path.display());
+        output::blank();
+        output::success("Environment updated successfully!");
 
-        println!("\nNext steps:");
-        println!("  1. Review the regenerated files in {}", env_path.display());
-        println!("  2. Run 'pmp preview' to see what changes will be applied");
-        println!("  3. Run 'pmp apply' to apply the infrastructure");
+        output::subsection("Updated Environment");
+        output::key_value("Project", &project_name);
+        output::environment_badge(&env_name);
+        output::key_value("Path", &env_path.display().to_string());
+
+        let next_steps_list = vec![
+            format!("Review the regenerated files in {}", env_path.display()),
+            "Run 'pmp preview' to see what changes will be applied".to_string(),
+            "Run 'pmp apply' to apply the infrastructure".to_string(),
+        ];
+        output::next_steps(&next_steps_list);
 
         Ok(())
     }
@@ -218,7 +228,7 @@ impl UpdateCommand {
         }
 
         if environments.len() == 1 {
-            println!("Using environment: {}", &environments[0]);
+            output::environment_badge(&environments[0]);
             return Ok(environments[0].clone());
         }
 
@@ -399,7 +409,7 @@ impl UpdateCommand {
         std::fs::write(&pmp_env_yaml_path, yaml_content)
             .with_context(|| format!("Failed to write .pmp.environment.yaml file: {:?}", pmp_env_yaml_path))?;
 
-        println!("  Updated: {}", pmp_env_yaml_path.display());
+        output::dimmed(&format!("  Updated: {}", pmp_env_yaml_path.display()));
 
         Ok(())
     }

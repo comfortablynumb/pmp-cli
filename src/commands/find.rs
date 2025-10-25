@@ -1,4 +1,5 @@
 use crate::collection::CollectionManager;
+use crate::output;
 use crate::template::metadata::ProjectReference;
 use anyhow::{Context, Result};
 use inquire::{Select, Text};
@@ -71,15 +72,13 @@ impl FindCommand {
         use crate::template::{ProjectResource, ProjectEnvironmentResource};
 
         if projects.is_empty() {
-            println!("No projects found.");
+            output::warning("No projects found.");
             return Ok(());
         }
 
-        println!(
-            "Found {} project(s) in collection '{}':\n",
-            projects.len(),
-            manager.get_metadata().name
-        );
+        output::section(&format!("Found {} project(s)", projects.len()));
+        output::key_value("Collection", &manager.get_metadata().name);
+        output::blank();
 
         // If multiple projects, let user select one
         let selected_project = if projects.len() == 1 {
@@ -102,11 +101,11 @@ impl FindCommand {
 
         let full_path = manager.get_project_path(selected_project);
 
-        println!("\nProject Details:");
-        println!("  Name: {}", selected_project.name);
-        println!("  Kind: {}", selected_project.kind);
-        println!("  Path: {}", selected_project.path);
-        println!("  Full path: {}", full_path.display());
+        output::section("Project Details");
+        output::key_value_highlight("Name", &selected_project.name);
+        output::key_value("Kind", &selected_project.kind);
+        output::key_value("Relative path", &selected_project.path);
+        output::key_value("Full path", &full_path.display().to_string());
 
         // Load project metadata
         let project_file = full_path.join(".pmp.project.yaml");
@@ -118,7 +117,7 @@ impl FindCommand {
             .context("Failed to load project resource")?;
 
         if let Some(desc) = &project_resource.metadata.description {
-            println!("  Description: {}", desc);
+            output::key_value("Description", desc);
         }
 
         // Discover environments
@@ -126,15 +125,18 @@ impl FindCommand {
             .context("Failed to discover environments")?;
 
         if environments.is_empty() {
-            println!("\nNo environments found for this project.");
+            output::blank();
+            output::warning("No environments found for this project.");
             return Ok(());
         }
 
-        println!("\nAvailable environments: {}", environments.join(", "));
+        output::blank();
+        output::subsection("Environments");
+        output::dimmed(&format!("Available: {}", environments.join(", ")));
 
         // Select environment
         let selected_env = if environments.len() == 1 {
-            println!("Using environment: {}", &environments[0]);
+            output::environment_badge(&environments[0]);
             environments[0].clone()
         } else {
             Select::new("Select an environment:", environments.clone())
@@ -153,19 +155,22 @@ impl FindCommand {
         let env_resource = ProjectEnvironmentResource::from_file(&env_file)
             .context("Failed to load environment resource")?;
 
-        println!("\nEnvironment Details:");
-        println!("  Name: {}", env_resource.metadata.name);
-        println!("  Project: {}", env_resource.metadata.project_name);
+        output::subsection("Environment Details");
+        output::environment_badge(&env_resource.metadata.name);
+        output::key_value("Project", &env_resource.metadata.project_name);
         if let Some(desc) = &env_resource.metadata.description {
-            println!("  Description: {}", desc);
+            output::key_value("Description", desc);
         }
-        println!("  Resource: {}/{}", env_resource.spec.resource.api_version, env_resource.spec.resource.kind);
-        println!("  Executor: {}", env_resource.spec.executor.name);
-        println!("  Environment path: {}", env_path.display());
+        output::key_value(
+            "Resource",
+            &format!("{}/{}", env_resource.spec.resource.api_version, env_resource.spec.resource.kind)
+        );
+        output::key_value("Executor", &env_resource.spec.executor.name);
+        output::key_value("Environment path", &env_path.display().to_string());
 
-        println!("\nInputs:");
+        output::subsection("Inputs");
         for (key, value) in &env_resource.spec.inputs {
-            println!("  {}: {}", key, value);
+            output::label(key, &value.to_string(), output::LabelColor::White);
         }
 
         Ok(())

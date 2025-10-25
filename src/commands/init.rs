@@ -1,3 +1,4 @@
+use crate::output;
 use crate::template::TemplateDiscovery;
 use crate::template::metadata::{
     Environment, ProjectCollectionMetadata, ProjectCollectionResource,
@@ -41,8 +42,9 @@ impl InitCommand {
         description: Option<&str>,
         templates_path: Option<&str>,
     ) -> Result<()> {
-
-        println!("Initializing a new ProjectCollection in: {}\n", current_dir.display());
+        output::section("Initialize Project Collection");
+        output::key_value("Directory", &current_dir.display().to_string());
+        output::blank();
 
         // Get collection name (use CLI arg or prompt with default)
         let collection_name = if let Some(n) = name {
@@ -98,9 +100,10 @@ impl InitCommand {
 
         // Step 5: Present resource kinds as multi-select
         let resource_kinds = if resource_kinds_map.is_empty() {
-            println!("⚠ Warning: No templates found in the system.");
-            println!("The ProjectCollection will be created without any resource kinds.");
-            println!("You can add templates later and update the collection file.\n");
+            output::warning("No templates found in the system.");
+            output::dimmed("The ProjectCollection will be created without any resource kinds.");
+            output::dimmed("You can add templates later and update the collection file.");
+            output::blank();
             vec![]
         } else {
             let kind_options: Vec<String> = resource_kinds_map.keys().cloned().collect();
@@ -121,8 +124,10 @@ impl InitCommand {
         // Step 6: Collect environments
         let mut environments: HashMap<String, Environment> = HashMap::new();
 
-        println!("\nLet's add environments to the collection.");
-        println!("You need at least one environment.\n");
+        output::subsection("Environments");
+        output::dimmed("Let's add environments to the collection.");
+        output::dimmed("You need at least one environment.");
+        output::blank();
 
         loop {
             // Prompt for environment key
@@ -133,13 +138,13 @@ impl InitCommand {
 
                 // Validate environment key
                 if !ProjectCollectionResource::is_valid_environment_name(&key) {
-                    println!("⚠ Invalid environment key. Must be lowercase alphanumeric and may contain hyphens.");
+                    output::warning("Invalid environment key. Must be lowercase alphanumeric and may contain hyphens.");
                     continue;
                 }
 
                 // Check for duplicate
                 if environments.contains_key(&key) {
-                    println!("⚠ Environment '{}' already exists. Please use a different key.", key);
+                    output::warning(&format!("Environment '{}' already exists. Please use a different key.", key));
                     continue;
                 }
 
@@ -170,7 +175,8 @@ impl InitCommand {
                 },
             );
 
-            println!("✓ Environment '{}' added.\n", env_key);
+            output::success(&format!("Environment '{}' added", env_key));
+            output::blank();
 
             // Ask if they want to add another environment
             let add_another = Confirm::new("Add another environment?")
@@ -213,16 +219,21 @@ impl InitCommand {
             .context("Failed to create projects directory")?;
 
         // Step 10: Display success message
-        println!("\n✓ ProjectCollection created successfully!");
-        println!("\n  Collection: {}", collection_name);
-        println!("  File: {}", collection_file.display());
-        println!("  Projects directory: {}", projects_dir.display());
-        println!("\n  Resource kinds: {}", collection.spec.resource_kinds.len());
-        println!("  Environments: {}", collection.spec.environments.len());
+        output::blank();
+        output::success("ProjectCollection created successfully!");
 
-        println!("\nNext steps:");
-        println!("  1. Review and edit {} if needed", collection_file.display());
-        println!("  2. Run 'pmp create' to create a new project from a template");
+        output::subsection("Summary");
+        output::key_value_highlight("Collection", &collection_name);
+        output::key_value("File", &collection_file.display().to_string());
+        output::key_value("Projects directory", &projects_dir.display().to_string());
+        output::key_value("Resource kinds", &collection.spec.resource_kinds.len().to_string());
+        output::key_value("Environments", &collection.spec.environments.len().to_string());
+
+        let next_steps_list = vec![
+            format!("Review and edit {} if needed", collection_file.display()),
+            "Run 'pmp create' to create a new project from a template".to_string(),
+        ];
+        output::next_steps(&next_steps_list);
 
         Ok(())
     }
@@ -232,7 +243,9 @@ impl InitCommand {
         collection_file: &PathBuf,
         templates_path: Option<&str>,
     ) -> Result<()> {
-        println!("Editing existing ProjectCollection: {}\n", collection_file.display());
+        output::section("Edit Project Collection");
+        output::key_value("File", &collection_file.display().to_string());
+        output::blank();
 
         // Load existing collection
         let mut collection = ProjectCollectionResource::from_file(collection_file)
@@ -263,7 +276,8 @@ impl InitCommand {
                     // Save after editing
                     collection.save(collection_file)
                         .context("Failed to save collection")?;
-                    println!("✓ Changes saved to {}\n", collection_file.display());
+                    output::success(&format!("Changes saved to {}", collection_file.display()));
+                    output::blank();
 
                     // Ask if they want to continue
                     let continue_editing = Confirm::new("Continue editing?")
@@ -281,7 +295,8 @@ impl InitCommand {
                     // Save after editing
                     collection.save(collection_file)
                         .context("Failed to save collection")?;
-                    println!("✓ Changes saved to {}\n", collection_file.display());
+                    output::success(&format!("Changes saved to {}", collection_file.display()));
+                    output::blank();
 
                     // Ask if they want to continue
                     let continue_editing = Confirm::new("Continue editing?")
@@ -299,7 +314,8 @@ impl InitCommand {
                     // Save after editing
                     collection.save(collection_file)
                         .context("Failed to save collection")?;
-                    println!("✓ Changes saved to {}\n", collection_file.display());
+                    output::success(&format!("Changes saved to {}", collection_file.display()));
+                    output::blank();
 
                     // Ask if they want to continue
                     let continue_editing = Confirm::new("Continue editing?")
@@ -318,33 +334,34 @@ impl InitCommand {
             }
         }
 
-        println!("\n✓ Done editing ProjectCollection!");
-        println!("  File: {}", collection_file.display());
+        output::blank();
+        output::success("Done editing ProjectCollection!");
+        output::key_value("File", &collection_file.display().to_string());
 
         Ok(())
     }
 
     /// Display a summary of the current collection
     fn display_collection_summary(collection: &ProjectCollectionResource) {
-        println!("Current collection:");
-        println!("  Name: {}", collection.metadata.name);
+        output::subsection("Current Collection");
+        output::key_value_highlight("Name", &collection.metadata.name);
         if let Some(desc) = &collection.metadata.description {
-            println!("  Description: {}", desc);
+            output::key_value("Description", desc);
         }
-        println!("  Resource kinds: {}", collection.spec.resource_kinds.len());
+        output::key_value("Resource kinds", &collection.spec.resource_kinds.len().to_string());
         for rk in &collection.spec.resource_kinds {
-            println!("    - {}/{}", rk.api_version, rk.kind);
+            output::list_item(&format!("{}/{}", rk.api_version, rk.kind));
         }
-        println!("  Environments: {}", collection.spec.environments.len());
+        output::key_value("Environments", &collection.spec.environments.len().to_string());
         for (key, env) in &collection.spec.environments {
-            println!("    - {} ({})", key, env.name);
+            output::list_item(&format!("{} ({})", key, env.name));
         }
-        println!();
+        output::blank();
     }
 
     /// Edit collection metadata
     fn edit_metadata(collection: &mut ProjectCollectionResource) -> Result<()> {
-        println!("\n--- Editing Metadata ---");
+        output::subsection("Editing Metadata");
 
         let new_name = Text::new("Collection name:")
             .with_default(&collection.metadata.name)
@@ -364,7 +381,8 @@ impl InitCommand {
             Some(new_desc)
         };
 
-        println!("✓ Metadata updated.\n");
+        output::success("Metadata updated");
+        output::blank();
         Ok(())
     }
 
@@ -373,7 +391,7 @@ impl InitCommand {
         collection: &mut ProjectCollectionResource,
         templates_path: Option<&str>,
     ) -> Result<()> {
-        println!("\n--- Editing Resource Kinds ---");
+        output::subsection("Editing Resource Kinds");
 
         // Discover templates
         let custom_paths = if let Some(path) = templates_path {
@@ -403,8 +421,9 @@ impl InitCommand {
         }
 
         if resource_kinds_map.is_empty() {
-            println!("⚠ Warning: No templates found in the system.");
-            println!("Cannot edit resource kinds.\n");
+            output::warning("No templates found in the system.");
+            output::dimmed("Cannot edit resource kinds.");
+            output::blank();
             return Ok(());
         }
 
@@ -439,13 +458,14 @@ impl InitCommand {
             .filter_map(|key| resource_kinds_map.get(key).cloned())
             .collect();
 
-        println!("✓ Resource kinds updated ({} selected).\n", collection.spec.resource_kinds.len());
+        output::success(&format!("Resource kinds updated ({} selected)", collection.spec.resource_kinds.len()));
+        output::blank();
         Ok(())
     }
 
     /// Edit environments with add/edit/remove options
     fn edit_environments(collection: &mut ProjectCollectionResource) -> Result<()> {
-        println!("\n--- Editing Environments ---");
+        output::subsection("Editing Environments");
 
         loop {
             let action = Select::new(
@@ -475,7 +495,8 @@ impl InitCommand {
             }
         }
 
-        println!("✓ Environments updated.\n");
+        output::success("Environments updated");
+        output::blank();
         Ok(())
     }
 
@@ -489,13 +510,13 @@ impl InitCommand {
 
             // Validate environment key
             if !ProjectCollectionResource::is_valid_environment_name(&key) {
-                println!("⚠ Invalid environment key. Must be lowercase alphanumeric and may contain hyphens.");
+                output::warning("Invalid environment key. Must be lowercase alphanumeric and may contain hyphens.");
                 continue;
             }
 
             // Check for duplicate
             if environments.contains_key(&key) {
-                println!("⚠ Environment '{}' already exists. Please use a different key.", key);
+                output::warning(&format!("Environment '{}' already exists. Please use a different key.", key));
                 continue;
             }
 
@@ -526,14 +547,16 @@ impl InitCommand {
             },
         );
 
-        println!("✓ Environment '{}' added.\n", env_key);
+        output::success(&format!("Environment '{}' added", env_key));
+        output::blank();
         Ok(())
     }
 
     /// Edit a single existing environment
     fn edit_single_environment(environments: &mut HashMap<String, Environment>) -> Result<()> {
         if environments.is_empty() {
-            println!("⚠ No environments to edit.\n");
+            output::warning("No environments to edit.");
+            output::blank();
             return Ok(());
         }
 
@@ -562,19 +585,22 @@ impl InitCommand {
             Some(new_desc)
         };
 
-        println!("✓ Environment '{}' updated.\n", env_key);
+        output::success(&format!("Environment '{}' updated", env_key));
+        output::blank();
         Ok(())
     }
 
     /// Remove an environment
     fn remove_environment(environments: &mut HashMap<String, Environment>) -> Result<()> {
         if environments.is_empty() {
-            println!("⚠ No environments to remove.\n");
+            output::warning("No environments to remove.");
+            output::blank();
             return Ok(());
         }
 
         if environments.len() == 1 {
-            println!("⚠ Cannot remove the last environment. At least one environment is required.\n");
+            output::warning("Cannot remove the last environment. At least one environment is required.");
+            output::blank();
             return Ok(());
         }
 
@@ -589,9 +615,11 @@ impl InitCommand {
 
         if confirm {
             environments.remove(&env_key);
-            println!("✓ Environment '{}' removed.\n", env_key);
+            output::success(&format!("Environment '{}' removed", env_key));
+            output::blank();
         } else {
-            println!("Removal cancelled.\n");
+            output::dimmed("Removal cancelled");
+            output::blank();
         }
 
         Ok(())

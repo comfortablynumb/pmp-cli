@@ -1,4 +1,5 @@
 use crate::collection::CollectionDiscovery;
+use crate::output;
 use crate::schema::SchemaValidator;
 use crate::template::{TemplateDiscovery, TemplateRenderer};
 use anyhow::{Context, Result};
@@ -14,9 +15,10 @@ impl CreateCommand {
         let (collection, collection_root) = CollectionDiscovery::find_collection()?
             .context("ProjectCollection is required. No .pmp.project-collection.yaml found in current directory or parent directories.\n\nPlease create a ProjectCollection first or navigate to an existing one.")?;
 
-        println!("Using ProjectCollection: {}", collection.metadata.name);
+        output::section("Project Collection");
+        output::key_value_highlight("Name", &collection.metadata.name);
         if let Some(desc) = &collection.metadata.description {
-            println!("Description: {}", desc);
+            output::key_value("Description", desc);
         }
 
         // Step 2: Get resource kinds from collection
@@ -64,7 +66,8 @@ impl CreateCommand {
             );
         }
 
-        println!("\nFound {} compatible template(s)", filtered_templates.len());
+        output::blank();
+        output::info(&format!("Found {} compatible template(s)", filtered_templates.len()));
 
         // Step 5: Select template
         let template_options: Vec<String> = filtered_templates
@@ -90,9 +93,10 @@ impl CreateCommand {
 
         let selected_template = filtered_templates[template_index];
 
-        println!("\nUsing template: {}", selected_template.resource.metadata.name);
+        output::subsection("Selected Template");
+        output::key_value_highlight("Template", &selected_template.resource.metadata.name);
         if let Some(desc) = &selected_template.resource.metadata.description {
-            println!("Description: {}", desc);
+            output::key_value("Description", desc);
         }
 
         // Step 6: Select environment from ProjectCollection
@@ -101,14 +105,15 @@ impl CreateCommand {
         } else if collection.spec.environments.len() == 1 {
             // Only one environment, use it automatically
             let (env_key, env) = collection.spec.environments.iter().next().unwrap();
-            println!("\nUsing environment: {}", env.name);
+            output::subsection("Environment");
+            output::environment_badge(&env.name);
             if let Some(desc) = &env.description {
-                println!("Description: {}", desc);
+                output::key_value("Description", desc);
             }
             env_key.clone()
         } else {
             // Multiple environments, let user choose
-            println!("\nSelect an environment:");
+            output::subsection("Select an environment");
             let env_options: Vec<String> = collection.spec.environments.values().map(|env| {
                     if let Some(desc) = &env.description {
                         format!("{} - {}", env.name, desc)
@@ -147,7 +152,7 @@ impl CreateCommand {
         let resource_kind_snake = Self::camel_to_snake_case(resource_kind);
 
         // Step 8: Prompt for project name
-        println!("\nPlease provide the project name:");
+        output::subsection("Project Configuration");
         let mut project_name = SchemaValidator::prompt_for_project_name()
             .context("Failed to get project name")?;
 
@@ -160,8 +165,9 @@ impl CreateCommand {
             };
 
             if check_path.exists() {
-                println!("\n⚠ Warning: A project with this name already exists at: {}", check_path.display());
-                println!("Please choose a different name:");
+                output::blank();
+                output::warning(&format!("A project with this name already exists at: {}", check_path.display()));
+                output::dimmed("Please choose a different name:");
                 project_name = SchemaValidator::prompt_for_project_name()
                     .context("Failed to get project name")?;
             } else {
@@ -170,7 +176,8 @@ impl CreateCommand {
         }
 
         // Step 9: Collect inputs based on template's input definitions
-        println!("\nPlease provide the following information:");
+        output::subsection("Template Inputs");
+        output::dimmed("Please provide the following information:");
 
         // Start with base inputs from $.spec.resource.inputs
         let mut merged_inputs = selected_template.resource.spec.resource.inputs.clone();
@@ -221,7 +228,8 @@ impl CreateCommand {
         }
 
         // Step 14: Render template into environment directory
-        println!("\nRendering template...");
+        output::subsection("Generating Project Files");
+        output::dimmed("Rendering template...");
         let renderer = TemplateRenderer::new();
         let template_src = selected_template.src_path();
 
@@ -237,7 +245,7 @@ impl CreateCommand {
             .context("Failed to render template")?;
 
         // Step 15: Auto-generate .pmp.project.yaml file (identifier only)
-        println!("  Generating .pmp.project.yaml...");
+        output::dimmed("  Generating .pmp.project.yaml...");
         Self::generate_project_identifier_yaml(
             &project_root,
             &project_name,
@@ -245,7 +253,7 @@ impl CreateCommand {
         ).context("Failed to generate .pmp.project.yaml file")?;
 
         // Step 16: Auto-generate .pmp.environment.yaml file (with spec)
-        println!("  Generating .pmp.environment.yaml...");
+        output::dimmed("  Generating .pmp.environment.yaml...");
         Self::generate_project_environment_yaml(
             &environment_path,
             &selected_environment,
@@ -254,18 +262,23 @@ impl CreateCommand {
             &inputs,
         ).context("Failed to generate .pmp.environment.yaml file")?;
 
-        println!("\n✓ Project created successfully!");
-        println!("\n✓ Project created in collection '{}'", collection.metadata.name);
-        println!("  Name: {}", &project_name);
-        println!("  Kind: {}", selected_template.resource.spec.resource.kind);
-        println!("  Environment: {}", &selected_environment);
-        println!("  Project root: {}", project_root.display());
-        println!("  Environment path: {}", environment_path.display());
+        output::blank();
+        output::success("Project created successfully!");
 
-        println!("\nNext steps:");
-        println!("  1. Review the generated files in {}", environment_path.display());
-        println!("  2. Run 'pmp preview' to see what will be created");
-        println!("  3. Run 'pmp apply' to apply the infrastructure");
+        output::subsection("Project Details");
+        output::key_value("Collection", &collection.metadata.name);
+        output::key_value_highlight("Name", &project_name);
+        output::key_value("Kind", &selected_template.resource.spec.resource.kind);
+        output::environment_badge(&selected_environment);
+        output::key_value("Project root", &project_root.display().to_string());
+        output::key_value("Environment path", &environment_path.display().to_string());
+
+        let next_steps_list = vec![
+            format!("Review the generated files in {}", environment_path.display()),
+            "Run 'pmp preview' to see what will be created".to_string(),
+            "Run 'pmp apply' to apply the infrastructure".to_string(),
+        ];
+        output::next_steps(&next_steps_list);
 
         Ok(())
     }
@@ -410,7 +423,7 @@ impl CreateCommand {
         std::fs::write(&pmp_yaml_path, yaml_content)
             .with_context(|| format!("Failed to write .pmp.project.yaml file: {:?}", pmp_yaml_path))?;
 
-        println!("  Created: {}", pmp_yaml_path.display());
+        output::dimmed(&format!("  Created: {}", pmp_yaml_path.display()));
 
         Ok(())
     }
@@ -460,7 +473,7 @@ impl CreateCommand {
         std::fs::write(&pmp_env_yaml_path, yaml_content)
             .with_context(|| format!("Failed to write .pmp.environment.yaml file: {:?}", pmp_env_yaml_path))?;
 
-        println!("  Created: {}", pmp_env_yaml_path.display());
+        output::dimmed(&format!("  Created: {}", pmp_env_yaml_path.display()));
 
         Ok(())
     }
