@@ -79,3 +79,17 @@ spec:
       enum_values: ["ClusterIP", "LoadBalancer", "NodePort"]
       default: "ClusterIP"
       description: Kubernetes service type for PostgreSQL
+
+  plugins:
+    allowed:
+      - template:
+          apiVersion: pmp.io/v1
+          kind: KubernetesWorkload
+        plugin: access
+        inputs:
+          database_name:
+            default: ""
+            description: Database to grant access to (inherits from parent if empty)
+          k8s_secret_namespace:
+            default: ""
+            description: Kubernetes namespace for credential secret (inherits from parent if empty)

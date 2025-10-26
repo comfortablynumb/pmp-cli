@@ -63,6 +63,78 @@ cargo run -- find --name foo   # Find projects
 
 **Note**: `.pmp.yaml` or `.pmp.yaml.hbs` files are auto-generated and must NOT be included in templates
 
+### Plugin Allowlist in Templates
+
+Templates can declare which plugins they allow to be used by other templates. This is configured in the template's `.pmp.template.yaml` file.
+
+**Configuration Location**: `spec.plugins.allowed` (array of allowed plugin configurations)
+
+**Allowed Plugin Structure**:
+```yaml
+spec:
+  plugins:
+    allowed:
+      - template:
+          apiVersion: pmp.io/v1  # API version of template providing the plugin
+          kind: KubernetesWorkload  # Kind of template providing the plugin
+        plugin: access  # Plugin name
+        inputs:  # Optional input constraints/defaults
+          database_name:
+            default: ""
+            description: Database to grant access to
+```
+
+**Example: PostgreSQL Access Plugin**
+
+The PostgreSQL template includes an "access" plugin for creating database credentials:
+
+```yaml
+# In .pmp/templates/postgres/templates/postgres/.pmp.template.yaml
+spec:
+  plugins:
+    allowed:
+      - template:
+          apiVersion: pmp.io/v1
+          kind: KubernetesWorkload
+        plugin: access
+        inputs:
+          database_name:
+            default: ""
+            description: Database to grant access to (inherits from parent if empty)
+          k8s_secret_namespace:
+            default: ""
+            description: Kubernetes namespace for credential secret
+```
+
+**Access Plugin Features**:
+- Creates PostgreSQL users/roles with configurable privileges
+- Supports granular permissions: SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER
+- Generates secure random passwords if not provided
+- Stores credentials in Kubernetes secrets
+- Configurable connection limits and password expiration
+- Schema-level permissions and role attributes (SUPERUSER, CREATEDB, CREATEROLE)
+
+**Plugin Inputs** (for access plugin):
+- `role_name` - Username to create (required)
+- `role_password` - Password (auto-generated if empty)
+- `database_name` - Database to grant access to
+- `privileges` - Array of privileges (default: ["SELECT"])
+- `grant_option` - Allow user to grant privileges to others (default: false)
+- `connection_limit` - Max concurrent connections (default: -1, unlimited)
+- `valid_until` - Password expiration date
+- `schema_name` - Schema for privileges (default: "public")
+- `create_schema` - Allow schema creation (default: false)
+- `superuser` - Grant superuser privileges (default: false)
+- `create_role` - Allow role creation (default: false)
+- `create_db` - Allow database creation (default: false)
+- `create_k8s_secret` - Store credentials in K8s secret (default: true)
+
+**Plugin Files**:
+- `.pmp.plugin.yaml` - Plugin metadata and input definitions
+- `plugin.tf.hbs` - Terraform/OpenTofu code for credential management
+- `variables.tf.hbs` - Variable definitions
+- `outputs.tf.hbs` - Output definitions (connection info, secrets, usage instructions)
+
 ### ProjectCollection System
 
 **Required**: Yes - cannot create projects without one

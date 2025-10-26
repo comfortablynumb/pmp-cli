@@ -91,6 +91,43 @@ pub struct TemplateSpec {
     /// Environment-specific overrides
     #[serde(default)]
     pub environments: HashMap<String, EnvironmentOverrides>,
+
+    /// Plugins configuration (allowed plugins from other templates)
+    #[serde(default)]
+    pub plugins: Option<PluginsConfig>,
+}
+
+/// Plugins configuration in template
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginsConfig {
+    /// List of allowed plugins from other templates
+    #[serde(default)]
+    pub allowed: Vec<AllowedPluginConfig>,
+}
+
+/// Configuration for an allowed plugin
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AllowedPluginConfig {
+    /// Template reference (apiVersion and kind)
+    pub template: PluginTemplateRef,
+
+    /// Plugin name to allow
+    pub plugin: String,
+
+    /// Optional input overrides/requirements for this plugin
+    #[serde(default)]
+    pub inputs: HashMap<String, InputSpec>,
+}
+
+/// Reference to a template that provides the plugin
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginTemplateRef {
+    /// API version of the template
+    #[serde(rename = "apiVersion")]
+    pub api_version: String,
+
+    /// Kind of the template
+    pub kind: String,
 }
 
 // ============================================================================
