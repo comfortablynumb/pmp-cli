@@ -86,14 +86,14 @@ impl InitCommand {
         for template in &templates {
             let key = format!(
                 "{}/{}",
-                template.resource.spec.project.api_version,
-                template.resource.spec.project.kind
+                template.resource.spec.api_version,
+                template.resource.spec.kind
             );
             resource_kinds_map.insert(
                 key,
                 ResourceKindFilter {
-                    api_version: template.resource.spec.project.api_version.clone(),
-                    kind: template.resource.spec.project.kind.clone(),
+                    api_version: template.resource.spec.api_version.clone(),
+                    kind: template.resource.spec.kind.clone(),
                 },
             );
         }
@@ -206,6 +206,7 @@ impl InitCommand {
                 resource_kinds,
                 environments,
                 hooks: None,
+                executor: None,
             },
         };
 
@@ -408,14 +409,14 @@ impl InitCommand {
         for template in &templates {
             let key = format!(
                 "{}/{}",
-                template.resource.spec.project.api_version,
-                template.resource.spec.project.kind
+                template.resource.spec.api_version,
+                template.resource.spec.kind
             );
             resource_kinds_map.insert(
                 key,
                 ResourceKindFilter {
-                    api_version: template.resource.spec.project.api_version.clone(),
-                    kind: template.resource.spec.project.kind.clone(),
+                    api_version: template.resource.spec.api_version.clone(),
+                    kind: template.resource.spec.kind.clone(),
                 },
             );
         }

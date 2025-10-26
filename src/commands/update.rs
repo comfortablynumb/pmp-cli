@@ -42,7 +42,7 @@ impl UpdateCommand {
         }
 
         // Load collection to ensure we're in a valid collection context
-        let (_collection, _collection_root) = CollectionDiscovery::find_collection()?
+        let (collection, _collection_root) = CollectionDiscovery::find_collection()?
             .context("ProjectCollection is required to run commands")?;
 
         // Discover templates
@@ -65,8 +65,8 @@ impl UpdateCommand {
         let matching_template = all_templates
             .iter()
             .find(|t| {
-                t.resource.spec.project.api_version == current_env_resource.api_version
-                    && t.resource.spec.project.kind == current_env_resource.kind
+                t.resource.spec.api_version == current_env_resource.api_version
+                    && t.resource.spec.kind == current_env_resource.kind
             })
             .context(format!(
                 "No template found for resource kind: {}/{}",
@@ -83,10 +83,10 @@ impl UpdateCommand {
         let current_inputs = &current_env_resource.spec.inputs;
 
         // Get template inputs, merging base inputs with environment-specific overrides
-        let mut merged_inputs = matching_template.resource.spec.project.inputs.clone();
+        let mut merged_inputs = matching_template.resource.spec.inputs.clone();
 
         // Override with environment-specific inputs if they exist
-        if let Some(env_overrides) = matching_template.resource.spec.project.environments.get(&env_name) {
+        if let Some(env_overrides) = matching_template.resource.spec.environments.get(&env_name) {
             for (input_name, input_spec) in &env_overrides.overrides.inputs {
                 merged_inputs.insert(input_name.clone(), input_spec.clone());
             }
@@ -109,11 +109,11 @@ impl UpdateCommand {
         );
         new_inputs.insert(
             "resource_api_version".to_string(),
-            serde_json::Value::String(matching_template.resource.spec.project.api_version.clone()),
+            serde_json::Value::String(matching_template.resource.spec.api_version.clone()),
         );
         new_inputs.insert(
             "resource_kind".to_string(),
-            serde_json::Value::String(matching_template.resource.spec.project.kind.clone()),
+            serde_json::Value::String(matching_template.resource.spec.kind.clone()),
         );
 
         // Confirm before regenerating
@@ -131,11 +131,11 @@ impl UpdateCommand {
         output::subsection("Regenerating Files");
         output::dimmed("Regenerating template files...");
         let renderer = TemplateRenderer::new();
-        let template_src = matching_template.src_path();
+        let template_src = &matching_template.path;
 
         if !template_src.exists() {
             anyhow::bail!(
-                "Template src directory not found: {}",
+                "Template directory not found: {}",
                 template_src.display()
             );
         }
@@ -143,6 +143,19 @@ impl UpdateCommand {
         renderer
             .render_template(&template_src, env_path.as_path(), &new_inputs)
             .context("Failed to render template")?;
+
+        // Generate _common.tf if executor config is present (OpenTofu only)
+        if matching_template.resource.spec.executor == "opentofu" {
+            if let Some(executor_config) = &collection.spec.executor {
+                if executor_config.name == "opentofu" && !executor_config.config.is_empty() {
+                    output::dimmed("  Updating _common.tf with backend configuration...");
+                    Self::generate_common_tf(
+                        &env_path,
+                        &executor_config.config,
+                    ).context("Failed to generate _common.tf file")?;
+                }
+            }
+        }
 
         // Regenerate .pmp.environment.yaml file
         output::dimmed("  Updating .pmp.environment.yaml...");
@@ -378,8 +391,8 @@ impl UpdateCommand {
 
         // Create DynamicProjectEnvironmentResource structure with apiVersion/kind from template
         let project_env = DynamicProjectEnvironmentResource {
-            api_version: template.spec.project.api_version.clone(),
-            kind: template.spec.project.kind.clone(),
+            api_version: template.spec.api_version.clone(),
+            kind: template.spec.kind.clone(),
             metadata: DynamicProjectEnvironmentMetadata {
                 name: project_name.to_string(),
                 environment_name: environment_name.to_string(),
@@ -389,14 +402,14 @@ impl UpdateCommand {
             },
             spec: ProjectSpec {
                 resource: ResourceDefinition {
-                    api_version: template.spec.project.api_version.clone(),
-                    kind: template.spec.project.kind.clone(),
+                    api_version: template.spec.api_version.clone(),
+                    kind: template.spec.kind.clone(),
                 },
                 executor: crate::template::metadata::ExecutorProjectConfig {
-                    name: template.spec.project.executor.clone(),
+                    name: template.spec.executor.clone(),
                 },
                 inputs: inputs.clone(),
-                custom: template.spec.custom.clone(),
+                custom: None,  // Templates no longer have custom field
             },
         };
 
@@ -410,6 +423,32 @@ impl UpdateCommand {
             .with_context(|| format!("Failed to write .pmp.environment.yaml file: {:?}", pmp_env_yaml_path))?;
 
         output::dimmed(&format!("  Updated: {}", pmp_env_yaml_path.display()));
+
+        Ok(())
+    }
+
+    /// Generate _common.tf file with backend configuration
+    fn generate_common_tf(
+        environment_path: &Path,
+        executor_config: &std::collections::HashMap<String, serde_json::Value>,
+    ) -> Result<()> {
+        use crate::executor::generate_backend_config;
+
+        // Generate backend HCL
+        let backend_hcl = generate_backend_config(executor_config)
+            .context("Failed to generate backend configuration")?;
+
+        if backend_hcl.is_empty() {
+            // No backend config to write
+            return Ok(());
+        }
+
+        // Write to _common.tf file
+        let common_tf_path = environment_path.join("_common.tf");
+        std::fs::write(&common_tf_path, backend_hcl)
+            .with_context(|| format!("Failed to write _common.tf file: {:?}", common_tf_path))?;
+
+        output::dimmed(&format!("  Updated: {}", common_tf_path.display()));
 
         Ok(())
     }

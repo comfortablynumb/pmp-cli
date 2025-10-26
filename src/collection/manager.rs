@@ -62,6 +62,7 @@ impl CollectionManager {
                 resource_kinds: vec![],
                 environments: std::collections::HashMap::new(),
                 hooks: None,
+                executor: None,
             },
         };
 

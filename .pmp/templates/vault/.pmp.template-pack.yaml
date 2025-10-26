@@ -1,0 +1,7 @@
+apiVersion: pmp.io/v1
+kind: TemplatePack
+metadata:
+  name: vault
+  description: Install HashiCorp Vault on Kubernetes using Helm
+
+spec: {}

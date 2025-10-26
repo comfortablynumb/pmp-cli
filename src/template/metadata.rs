@@ -3,6 +3,43 @@ use serde_json::Value;
 use std::collections::HashMap;
 
 // ============================================================================
+// TemplatePack Resource (Kubernetes-style)
+// ============================================================================
+
+/// Kubernetes-style TemplatePack resource
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TemplatePackResource {
+    /// API version (e.g., "pmp.io/v1")
+    #[serde(rename = "apiVersion")]
+    pub api_version: String,
+
+    /// Kind of resource (always "TemplatePack")
+    pub kind: String,
+
+    /// Metadata about the template pack
+    pub metadata: TemplatePackMetadata,
+
+    /// TemplatePack specification (empty)
+    #[serde(default)]
+    pub spec: TemplatePackSpec,
+}
+
+/// TemplatePack metadata (Kubernetes-style)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TemplatePackMetadata {
+    /// Name of the template pack
+    pub name: String,
+
+    /// Description of what this template pack contains
+    #[serde(default)]
+    pub description: Option<String>,
+}
+
+/// TemplatePack specification (empty struct)
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct TemplatePackSpec {}
+
+// ============================================================================
 // Template Resource (Kubernetes-style)
 // ============================================================================
 
@@ -37,19 +74,76 @@ pub struct TemplateMetadata {
 /// Template specification
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TemplateSpec {
-    /// Project resource definition that this template generates (REQUIRED)
-    pub project: ResourceSpec,
+    /// API version of the generated resource (e.g., "pmp.io/v1")
+    #[serde(rename = "apiVersion")]
+    pub api_version: String,
 
-    /// Optional: Path to template source directory (defaults to "src")
-    #[serde(default = "default_src_path")]
-    pub src_path: String,
+    /// Kind of the generated resource (e.g., "KubernetesWorkload", "Infrastructure")
+    pub kind: String,
 
-    /// Optional: Custom fields for template-specific configuration
+    /// Executor name (e.g., "opentofu", "terraform") (REQUIRED)
+    pub executor: String,
+
+    /// Inputs applied to all environments
     #[serde(default)]
-    pub custom: Option<HashMap<String, Value>>,
+    pub inputs: HashMap<String, InputSpec>,
+
+    /// Environment-specific overrides
+    #[serde(default)]
+    pub environments: HashMap<String, EnvironmentOverrides>,
 }
 
-/// Resource specification in template
+// ============================================================================
+// Plugin Resource (Kubernetes-style)
+// ============================================================================
+
+/// Kubernetes-style Plugin resource
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
+pub struct PluginResource {
+    /// API version (e.g., "pmp.io/v1")
+    #[serde(rename = "apiVersion")]
+    pub api_version: String,
+
+    /// Kind of resource (always "Plugin")
+    pub kind: String,
+
+    /// Metadata about the plugin
+    pub metadata: PluginMetadata,
+
+    /// Plugin specification
+    pub spec: PluginSpec,
+}
+
+/// Plugin metadata (Kubernetes-style)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
+pub struct PluginMetadata {
+    /// Name of the plugin
+    pub name: String,
+
+    /// Description of what this plugin provides
+    #[serde(default)]
+    pub description: Option<String>,
+}
+
+/// Plugin specification
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
+pub struct PluginSpec {
+    /// Role/purpose of this plugin (e.g., "network", "storage")
+    pub role: String,
+
+    /// Inputs for this plugin
+    #[serde(default)]
+    pub inputs: HashMap<String, InputSpec>,
+}
+
+// ============================================================================
+// Legacy/Deprecated Structures
+// ============================================================================
+
+/// Resource specification in template (DEPRECATED - used for migration only)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResourceSpec {
     /// API version of the generated resource (e.g., "pmp.io/v1")
@@ -114,10 +208,6 @@ pub struct OverridesSpec {
     pub inputs: HashMap<String, InputSpec>,
 }
 
-fn default_src_path() -> String {
-    "src".to_string()
-}
-
 // ============================================================================
 // Project Resource (Kubernetes-style)
 // ============================================================================
@@ -175,6 +265,7 @@ pub struct ProjectSpec {
 
 /// Kubernetes-style ProjectEnvironment resource
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct ProjectEnvironmentResource {
     /// API version (e.g., "pmp.io/v1")
     #[serde(rename = "apiVersion")]
@@ -192,6 +283,7 @@ pub struct ProjectEnvironmentResource {
 
 /// ProjectEnvironment metadata (Kubernetes-style)
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct ProjectEnvironmentMetadata {
     /// Name of the environment
     pub name: String,
@@ -289,6 +381,21 @@ pub struct ProjectCollectionSpec {
     /// Optional: Hooks configuration for all projects in this collection
     #[serde(default)]
     pub hooks: Option<HooksConfig>,
+
+    /// Optional: Executor configuration for all projects in this collection
+    #[serde(default)]
+    pub executor: Option<ExecutorCollectionConfig>,
+}
+
+/// Executor configuration at the collection level
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExecutorCollectionConfig {
+    /// Executor name (e.g., "opentofu", "terraform")
+    pub name: String,
+
+    /// Executor-specific configuration (e.g., backend configuration)
+    #[serde(default)]
+    pub config: HashMap<String, Value>,
 }
 
 /// Hooks configuration
@@ -329,9 +436,15 @@ impl ResourceKindFilter {
         self.api_version == resource.api_version && self.kind == resource.kind
     }
 
-    /// Check if this filter matches a resource spec
+    /// Check if this filter matches a resource spec (DEPRECATED)
+    #[allow(dead_code)]
     pub fn matches_spec(&self, resource: &ResourceSpec) -> bool {
         self.api_version == resource.api_version && self.kind == resource.kind
+    }
+
+    /// Check if this filter matches a template spec
+    pub fn matches_template(&self, template: &TemplateSpec) -> bool {
+        self.api_version == template.api_version && self.kind == template.kind
     }
 }
 
@@ -374,8 +487,29 @@ pub struct ProjectReference {
 // Implementation
 // ============================================================================
 
+impl TemplatePackResource {
+    /// Load template pack resource from a .pmp.template-pack.yaml file
+    pub fn from_file(path: &std::path::Path) -> anyhow::Result<Self> {
+        let content = std::fs::read_to_string(path)?;
+        let resource: TemplatePackResource = serde_yaml::from_str(&content)?;
+
+        // Validate kind
+        if resource.kind != "TemplatePack" {
+            anyhow::bail!("Expected kind 'TemplatePack', got '{}'", resource.kind);
+        }
+
+        Ok(resource)
+    }
+
+    /// Get the path to the templates directory
+    #[allow(dead_code)]
+    pub fn templates_dir(&self, base_path: &std::path::Path) -> std::path::PathBuf {
+        base_path.join("templates")
+    }
+}
+
 impl TemplateResource {
-    /// Load template resource from a .pmp.yaml file
+    /// Load template resource from a .pmp.template.yaml file
     pub fn from_file(path: &std::path::Path) -> anyhow::Result<Self> {
         let content = std::fs::read_to_string(path)?;
         let resource: TemplateResource = serde_yaml::from_str(&content)?;
@@ -386,7 +520,7 @@ impl TemplateResource {
         }
 
         // Validate resource kind contains only alphanumeric characters
-        let resource_kind = &resource.spec.project.kind;
+        let resource_kind = &resource.spec.kind;
         if !resource_kind.chars().all(|c| c.is_alphanumeric()) {
             anyhow::bail!(
                 "Resource kind '{}' must contain only alphanumeric characters",
@@ -396,10 +530,21 @@ impl TemplateResource {
 
         Ok(resource)
     }
+}
 
-    /// Get the full path to the src directory
-    pub fn src_path(&self, base_path: &std::path::Path) -> std::path::PathBuf {
-        base_path.join(&self.spec.src_path)
+impl PluginResource {
+    /// Load plugin resource from a .pmp.plugin.yaml file
+    #[allow(dead_code)]
+    pub fn from_file(path: &std::path::Path) -> anyhow::Result<Self> {
+        let content = std::fs::read_to_string(path)?;
+        let resource: PluginResource = serde_yaml::from_str(&content)?;
+
+        // Validate kind
+        if resource.kind != "Plugin" {
+            anyhow::bail!("Expected kind 'Plugin', got '{}'", resource.kind);
+        }
+
+        Ok(resource)
     }
 }
 
@@ -420,6 +565,7 @@ impl ProjectResource {
 
 impl ProjectEnvironmentResource {
     /// Load project environment resource from a .pmp.environment.yaml file
+    #[allow(dead_code)]
     pub fn from_file(path: &std::path::Path) -> anyhow::Result<Self> {
         let content = std::fs::read_to_string(path)?;
         let resource: ProjectEnvironmentResource = serde_yaml::from_str(&content)?;
@@ -433,6 +579,7 @@ impl ProjectEnvironmentResource {
     }
 
     /// Get the executor configuration
+    #[allow(dead_code)]
     pub fn get_executor_config(&self) -> &ExecutorProjectConfig {
         &self.spec.executor
     }

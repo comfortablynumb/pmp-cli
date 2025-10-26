@@ -1,0 +1,31 @@
+apiVersion: pmp.io/v1
+kind: Template
+metadata:
+  name: minikube-http-echo
+  description: Basic Kubernetes workload deployment
+
+spec:
+  apiVersion: pmp.io/v1
+  kind: KubernetesWorkload
+  executor: opentofu
+
+  inputs:
+    replicas:
+      default: 1
+      description: Number of pod replicas
+
+    port:
+      default: 8080
+      description: Container port for the http-echo service
+
+    text:
+      default: "Hello from minikube!"
+      description: Text message to be echoed by the service
+
+    service_type:
+      enum_values:
+        - ClusterIP
+        - NodePort
+        - LoadBalancer
+      default: NodePort
+      description: Kubernetes service type

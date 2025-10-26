@@ -1,7 +1,7 @@
 use crate::collection::CollectionDiscovery;
 use crate::output;
 use crate::schema::SchemaValidator;
-use crate::template::{TemplateDiscovery, TemplateRenderer};
+use crate::template::{TemplateDiscovery, TemplateRenderer, TemplatePackInfo, TemplateInfo};
 use anyhow::{Context, Result};
 use inquire::Select;
 
@@ -30,35 +30,48 @@ impl CreateCommand {
             );
         }
 
-        // Step 3: Discover templates
+        // Step 3: Discover template packs
         let custom_paths = if let Some(path) = templates_path {
             vec![path]
         } else {
             vec![]
         };
 
-        let all_templates = TemplateDiscovery::discover_templates_with_custom_paths(&custom_paths)
-            .context("Failed to discover templates")?;
+        let all_template_packs = TemplateDiscovery::discover_template_packs_with_custom_paths(&custom_paths)
+            .context("Failed to discover template packs")?;
 
-        if all_templates.is_empty() {
+        if all_template_packs.is_empty() {
             anyhow::bail!(
-                "No templates found. Please create templates in ~/.pmp/templates or .pmp/templates"
+                "No template packs found. Please create template packs in ~/.pmp/templates or .pmp/templates"
             );
         }
 
-        // Step 4: Filter templates by collection's allowed resource kinds
-        let filtered_templates: Vec<_> = all_templates
-            .iter()
-            .filter(|t| {
-                allowed_resource_kinds.iter().any(|filter| {
-                    filter.matches_spec(&t.resource.spec.project)
-                })
-            })
-            .collect();
+        // Step 4: Filter template packs by checking their templates against collection's allowed resource kinds
+        let mut filtered_packs_with_templates: Vec<(TemplatePackInfo, Vec<TemplateInfo>)> = Vec::new();
 
-        if filtered_templates.is_empty() {
+        for pack in all_template_packs {
+            let templates_in_pack = TemplateDiscovery::discover_templates_in_pack(&pack.path)
+                .context("Failed to discover templates in pack")?;
+
+            // Filter templates that match allowed resource kinds
+            let matching_templates: Vec<TemplateInfo> = templates_in_pack
+                .into_iter()
+                .filter(|t| {
+                    allowed_resource_kinds.iter().any(|filter| {
+                        filter.matches_template(&t.resource.spec)
+                    })
+                })
+                .collect();
+
+            // Only include packs that have at least one matching template
+            if !matching_templates.is_empty() {
+                filtered_packs_with_templates.push((pack, matching_templates));
+            }
+        }
+
+        if filtered_packs_with_templates.is_empty() {
             anyhow::bail!(
-                "No templates match the resource kinds allowed in this collection.\n\nAllowed resource kinds: {}",
+                "No template packs contain templates that match the resource kinds allowed in this collection.\n\nAllowed resource kinds: {}",
                 allowed_resource_kinds.iter()
                     .map(|r| format!("{}/{}", r.api_version, r.kind))
                     .collect::<Vec<_>>()
@@ -67,39 +80,98 @@ impl CreateCommand {
         }
 
         output::blank();
-        output::info(&format!("Found {} compatible template(s)", filtered_templates.len()));
+        output::info(&format!("Found {} compatible template pack(s)", filtered_packs_with_templates.len()));
 
-        // Step 5: Select template
-        let template_options: Vec<String> = filtered_templates
-            .iter()
-            .map(|t| {
-                let desc = t.resource.metadata.description.as_deref().unwrap_or("");
-                if desc.is_empty() {
-                    t.resource.metadata.name.clone()
-                } else {
-                    format!("{} - {}", t.resource.metadata.name, desc)
-                }
-            })
-            .collect();
+        // Step 5: Select template pack
+        let (_selected_pack, available_templates) = if filtered_packs_with_templates.len() == 1 {
+            // Only one pack, use it automatically
+            let (pack, templates) = filtered_packs_with_templates.into_iter().next().unwrap();
+            output::subsection("Template Pack");
+            output::key_value_highlight("Pack", &pack.resource.metadata.name);
+            if let Some(desc) = &pack.resource.metadata.description {
+                output::key_value("Description", desc);
+            }
+            (pack, templates)
+        } else {
+            // Multiple packs, let user choose
+            let pack_options: Vec<String> = filtered_packs_with_templates
+                .iter()
+                .map(|(pack, _)| {
+                    let desc = pack.resource.metadata.description.as_deref().unwrap_or("");
+                    if desc.is_empty() {
+                        pack.resource.metadata.name.clone()
+                    } else {
+                        format!("{} - {}", pack.resource.metadata.name, desc)
+                    }
+                })
+                .collect();
 
-        let selected_template_name = Select::new("Select a template:", template_options.clone())
-            .prompt()
-            .context("Failed to select template")?;
+            let selected_pack_display = Select::new("Select a template pack:", pack_options.clone())
+                .prompt()
+                .context("Failed to select template pack")?;
 
-        let template_index = template_options
-            .iter()
-            .position(|opt| opt.starts_with(&selected_template_name) || opt == &selected_template_name)
-            .context("Template not found")?;
+            let pack_index = pack_options
+                .iter()
+                .position(|opt| opt == &selected_pack_display)
+                .context("Template pack not found")?;
 
-        let selected_template = filtered_templates[template_index];
+            let (pack, templates) = filtered_packs_with_templates.into_iter().nth(pack_index).unwrap();
 
-        output::subsection("Selected Template");
-        output::key_value_highlight("Template", &selected_template.resource.metadata.name);
-        if let Some(desc) = &selected_template.resource.metadata.description {
-            output::key_value("Description", desc);
-        }
+            output::subsection("Selected Template Pack");
+            output::key_value_highlight("Pack", &pack.resource.metadata.name);
+            if let Some(desc) = &pack.resource.metadata.description {
+                output::key_value("Description", desc);
+            }
 
-        // Step 6: Select environment from ProjectCollection
+            (pack, templates)
+        };
+
+        // Step 6: Select template from pack (auto-select if only 1)
+        let selected_template = if available_templates.len() == 1 {
+            // Only one template, use it automatically
+            let template = available_templates.into_iter().next().unwrap();
+            output::subsection("Template");
+            output::key_value_highlight("Template", &template.resource.metadata.name);
+            if let Some(desc) = &template.resource.metadata.description {
+                output::key_value("Description", desc);
+            }
+            template
+        } else {
+            // Multiple templates, let user choose
+            output::subsection("Select a template");
+            let template_options: Vec<String> = available_templates
+                .iter()
+                .map(|t| {
+                    let desc = t.resource.metadata.description.as_deref().unwrap_or("");
+                    if desc.is_empty() {
+                        t.resource.metadata.name.clone()
+                    } else {
+                        format!("{} - {}", t.resource.metadata.name, desc)
+                    }
+                })
+                .collect();
+
+            let selected_template_display = Select::new("Template:", template_options.clone())
+                .prompt()
+                .context("Failed to select template")?;
+
+            let template_index = template_options
+                .iter()
+                .position(|opt| opt == &selected_template_display)
+                .context("Template not found")?;
+
+            let template = available_templates.into_iter().nth(template_index).unwrap();
+
+            output::subsection("Selected Template");
+            output::key_value_highlight("Template", &template.resource.metadata.name);
+            if let Some(desc) = &template.resource.metadata.description {
+                output::key_value("Description", desc);
+            }
+
+            template
+        };
+
+        // Step 7: Select environment from ProjectCollection
         let selected_environment = if collection.spec.environments.is_empty() {
             anyhow::bail!("ProjectCollection must define at least one environment");
         } else if collection.spec.environments.len() == 1 {
@@ -138,9 +210,9 @@ impl CreateCommand {
                 .clone()
         };
 
-        // Step 7: Validate resource kind
+        // Step 8: Validate resource kind
         // Validate resource kind contains only alphanumeric characters
-        let resource_kind = &selected_template.resource.spec.project.kind;
+        let resource_kind = &selected_template.resource.spec.kind;
         if !resource_kind.chars().all(|c| c.is_alphanumeric()) {
             anyhow::bail!(
                 "Resource kind '{}' must contain only alphanumeric characters (found invalid characters)",
@@ -151,7 +223,7 @@ impl CreateCommand {
         // Convert resource kind from CamelCase to snake_case for directory name
         let resource_kind_snake = Self::camel_to_snake_case(resource_kind);
 
-        // Step 8: Prompt for project name
+        // Step 9: Prompt for project name
         output::subsection("Project Configuration");
         let mut project_name = SchemaValidator::prompt_for_project_name()
             .context("Failed to get project name")?;
@@ -175,15 +247,15 @@ impl CreateCommand {
             }
         }
 
-        // Step 9: Collect inputs based on template's input definitions
+        // Step 10: Collect inputs based on template's input definitions
         output::subsection("Template Inputs");
         output::dimmed("Please provide the following information:");
 
-        // Start with base inputs from $.spec.project.inputs
-        let mut merged_inputs = selected_template.resource.spec.project.inputs.clone();
+        // Start with base inputs from template spec
+        let mut merged_inputs = selected_template.resource.spec.inputs.clone();
 
         // Override with environment-specific inputs if they exist
-        if let Some(env_overrides) = selected_template.resource.spec.project.environments.get(&selected_environment) {
+        if let Some(env_overrides) = selected_template.resource.spec.environments.get(&selected_environment) {
             for (input_name, input_spec) in &env_overrides.overrides.inputs {
                 merged_inputs.insert(input_name.clone(), input_spec.clone());
             }
@@ -193,31 +265,31 @@ impl CreateCommand {
         let mut inputs = Self::collect_template_inputs(&merged_inputs, &project_name)
             .context("Failed to collect inputs")?;
 
-        // Step 10: Add internal fields for template rendering
+        // Step 11: Add internal fields for template rendering
         inputs.insert(
             "environment".to_string(),
             serde_json::Value::String(selected_environment.clone()),
         );
         inputs.insert(
             "resource_api_version".to_string(),
-            serde_json::Value::String(selected_template.resource.spec.project.api_version.clone()),
+            serde_json::Value::String(selected_template.resource.spec.api_version.clone()),
         );
         inputs.insert(
             "resource_kind".to_string(),
-            serde_json::Value::String(selected_template.resource.spec.project.kind.clone()),
+            serde_json::Value::String(selected_template.resource.spec.kind.clone()),
         );
 
-        // Step 11: Determine project root path
+        // Step 12: Determine project root path
         let project_root = if let Some(path) = output_path {
             std::path::PathBuf::from(path)
         } else {
             collection_root.join("projects").join(&resource_kind_snake).join(&project_name)
         };
 
-        // Step 12: Determine environment path
+        // Step 13: Determine environment path
         let environment_path = project_root.join("environments").join(&selected_environment);
 
-        // Step 13: Create the directories
+        // Step 14: Create the directories
         if !project_root.exists() {
             std::fs::create_dir_all(&project_root)
                 .context(format!("Failed to create project root directory: {}", project_root.display()))?;
@@ -227,24 +299,37 @@ impl CreateCommand {
                 .context(format!("Failed to create environment directory: {}", environment_path.display()))?;
         }
 
-        // Step 14: Render template into environment directory
+        // Step 15: Render template into environment directory
         output::subsection("Generating Project Files");
         output::dimmed("Rendering template...");
         let renderer = TemplateRenderer::new();
-        let template_src = selected_template.src_path();
+        let template_src = &selected_template.path;
 
         if !template_src.exists() {
             anyhow::bail!(
-                "Template src directory not found: {}",
+                "Template directory not found: {}",
                 template_src.display()
             );
         }
 
         renderer
-            .render_template(&template_src, environment_path.as_path(), &inputs)
+            .render_template(template_src, environment_path.as_path(), &inputs)
             .context("Failed to render template")?;
 
-        // Step 15: Auto-generate .pmp.project.yaml file (identifier only)
+        // Step 15.5: Generate _common.tf if executor config is present (OpenTofu only)
+        if selected_template.resource.spec.executor == "opentofu" {
+            if let Some(executor_config) = &collection.spec.executor {
+                if executor_config.name == "opentofu" && !executor_config.config.is_empty() {
+                    output::dimmed("  Generating _common.tf with backend configuration...");
+                    Self::generate_common_tf(
+                        &environment_path,
+                        &executor_config.config,
+                    ).context("Failed to generate _common.tf file")?;
+                }
+            }
+        }
+
+        // Step 16: Auto-generate .pmp.project.yaml file (identifier only)
         output::dimmed("  Generating .pmp.project.yaml...");
         Self::generate_project_identifier_yaml(
             &project_root,
@@ -252,7 +337,7 @@ impl CreateCommand {
             inputs.get("description").and_then(|v| v.as_str()),
         ).context("Failed to generate .pmp.project.yaml file")?;
 
-        // Step 16: Auto-generate .pmp.environment.yaml file (with spec)
+        // Step 17: Auto-generate .pmp.environment.yaml file (with spec)
         output::dimmed("  Generating .pmp.environment.yaml...");
         Self::generate_project_environment_yaml(
             &environment_path,
@@ -268,7 +353,7 @@ impl CreateCommand {
         output::subsection("Project Details");
         output::key_value("Collection", &collection.metadata.name);
         output::key_value_highlight("Name", &project_name);
-        output::key_value("Kind", &selected_template.resource.spec.project.kind);
+        output::key_value("Kind", &selected_template.resource.spec.kind);
         output::environment_badge(&selected_environment);
         output::key_value("Project root", &project_root.display().to_string());
         output::key_value("Environment path", &environment_path.display().to_string());
@@ -442,8 +527,8 @@ impl CreateCommand {
 
         // Create DynamicProjectEnvironmentResource structure with apiVersion/kind from template
         let project_env = DynamicProjectEnvironmentResource {
-            api_version: template.spec.project.api_version.clone(),
-            kind: template.spec.project.kind.clone(),
+            api_version: template.spec.api_version.clone(),
+            kind: template.spec.kind.clone(),
             metadata: DynamicProjectEnvironmentMetadata {
                 name: project_name.to_string(),
                 environment_name: environment_name.to_string(),
@@ -453,14 +538,14 @@ impl CreateCommand {
             },
             spec: ProjectSpec {
                 resource: ResourceDefinition {
-                    api_version: template.spec.project.api_version.clone(),
-                    kind: template.spec.project.kind.clone(),
+                    api_version: template.spec.api_version.clone(),
+                    kind: template.spec.kind.clone(),
                 },
                 executor: crate::template::metadata::ExecutorProjectConfig {
-                    name: template.spec.project.executor.clone(),
+                    name: template.spec.executor.clone(),
                 },
                 inputs: inputs.clone(),
-                custom: template.spec.custom.clone(),
+                custom: None,  // Templates no longer have custom field
             },
         };
 
@@ -474,6 +559,32 @@ impl CreateCommand {
             .with_context(|| format!("Failed to write .pmp.environment.yaml file: {:?}", pmp_env_yaml_path))?;
 
         output::dimmed(&format!("  Created: {}", pmp_env_yaml_path.display()));
+
+        Ok(())
+    }
+
+    /// Generate _common.tf file with backend configuration
+    fn generate_common_tf(
+        environment_path: &std::path::Path,
+        executor_config: &std::collections::HashMap<String, serde_json::Value>,
+    ) -> Result<()> {
+        use crate::executor::generate_backend_config;
+
+        // Generate backend HCL
+        let backend_hcl = generate_backend_config(executor_config)
+            .context("Failed to generate backend configuration")?;
+
+        if backend_hcl.is_empty() {
+            // No backend config to write
+            return Ok(());
+        }
+
+        // Write to _common.tf file
+        let common_tf_path = environment_path.join("_common.tf");
+        std::fs::write(&common_tf_path, backend_hcl)
+            .with_context(|| format!("Failed to write _common.tf file: {:?}", common_tf_path))?;
+
+        output::dimmed(&format!("  Created: {}", common_tf_path.display()));
 
         Ok(())
     }
