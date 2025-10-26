@@ -91,7 +91,7 @@ impl TemplateDiscovery {
         let mut grouped: HashMap<String, Vec<&TemplateInfo>> = HashMap::new();
 
         for template in templates {
-            let key = format!("{}/{}", template.resource.spec.resource.api_version, template.resource.spec.resource.kind);
+            let key = format!("{}/{}", template.resource.spec.project.api_version, template.resource.spec.project.kind);
             grouped
                 .entry(key)
                 .or_default()

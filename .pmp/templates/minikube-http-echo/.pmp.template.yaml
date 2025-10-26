@@ -5,7 +5,7 @@ metadata:
   description: Kubernetes workload for local minikube using hashicorp/http-echo
 
 spec:
-  resource:
+  project:
     apiVersion: pmp.io/v1
     kind: KubernetesWorkload
     executor: opentofu

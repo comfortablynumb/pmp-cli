@@ -37,8 +37,8 @@ pub struct TemplateMetadata {
 /// Template specification
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TemplateSpec {
-    /// Resource definition that this template generates (REQUIRED)
-    pub resource: ResourceSpec,
+    /// Project resource definition that this template generates (REQUIRED)
+    pub project: ResourceSpec,
 
     /// Optional: Path to template source directory (defaults to "src")
     #[serde(default = "default_src_path")]
@@ -204,6 +204,38 @@ pub struct ProjectEnvironmentMetadata {
     pub description: Option<String>,
 }
 
+/// Dynamic project environment metadata (new format)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DynamicProjectEnvironmentMetadata {
+    /// Name of the project
+    pub name: String,
+
+    /// Name of the environment
+    pub environment_name: String,
+
+    /// Description of this environment
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+/// Dynamic project environment resource (new format with dynamic kind)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DynamicProjectEnvironmentResource {
+    /// API version from template (e.g., "pmp.io/v1")
+    #[serde(rename = "apiVersion")]
+    pub api_version: String,
+
+    /// Kind from template (e.g., "KubernetesWorkload")
+    pub kind: String,
+
+    /// Metadata about the project environment
+    pub metadata: DynamicProjectEnvironmentMetadata,
+
+    /// Project environment specification
+    pub spec: ProjectSpec,
+}
+
 /// Executor configuration in project spec
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecutorProjectConfig {
@@ -354,7 +386,7 @@ impl TemplateResource {
         }
 
         // Validate resource kind contains only alphanumeric characters
-        let resource_kind = &resource.spec.resource.kind;
+        let resource_kind = &resource.spec.project.kind;
         if !resource_kind.chars().all(|c| c.is_alphanumeric()) {
             anyhow::bail!(
                 "Resource kind '{}' must contain only alphanumeric characters",
@@ -397,6 +429,21 @@ impl ProjectEnvironmentResource {
             anyhow::bail!("Expected kind 'ProjectEnvironment', got '{}'", resource.kind);
         }
 
+        Ok(resource)
+    }
+
+    /// Get the executor configuration
+    pub fn get_executor_config(&self) -> &ExecutorProjectConfig {
+        &self.spec.executor
+    }
+}
+
+impl DynamicProjectEnvironmentResource {
+    /// Load dynamic project environment resource from a .pmp.environment.yaml file
+    /// This supports any apiVersion/kind combination (no validation)
+    pub fn from_file(path: &std::path::Path) -> anyhow::Result<Self> {
+        let content = std::fs::read_to_string(path)?;
+        let resource: DynamicProjectEnvironmentResource = serde_yaml::from_str(&content)?;
         Ok(resource)
     }
 

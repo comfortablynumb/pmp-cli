@@ -51,7 +51,7 @@ impl CreateCommand {
             .iter()
             .filter(|t| {
                 allowed_resource_kinds.iter().any(|filter| {
-                    filter.matches_spec(&t.resource.spec.resource)
+                    filter.matches_spec(&t.resource.spec.project)
                 })
             })
             .collect();
@@ -140,7 +140,7 @@ impl CreateCommand {
 
         // Step 7: Validate resource kind
         // Validate resource kind contains only alphanumeric characters
-        let resource_kind = &selected_template.resource.spec.resource.kind;
+        let resource_kind = &selected_template.resource.spec.project.kind;
         if !resource_kind.chars().all(|c| c.is_alphanumeric()) {
             anyhow::bail!(
                 "Resource kind '{}' must contain only alphanumeric characters (found invalid characters)",
@@ -179,11 +179,11 @@ impl CreateCommand {
         output::subsection("Template Inputs");
         output::dimmed("Please provide the following information:");
 
-        // Start with base inputs from $.spec.resource.inputs
-        let mut merged_inputs = selected_template.resource.spec.resource.inputs.clone();
+        // Start with base inputs from $.spec.project.inputs
+        let mut merged_inputs = selected_template.resource.spec.project.inputs.clone();
 
         // Override with environment-specific inputs if they exist
-        if let Some(env_overrides) = selected_template.resource.spec.resource.environments.get(&selected_environment) {
+        if let Some(env_overrides) = selected_template.resource.spec.project.environments.get(&selected_environment) {
             for (input_name, input_spec) in &env_overrides.overrides.inputs {
                 merged_inputs.insert(input_name.clone(), input_spec.clone());
             }
@@ -200,11 +200,11 @@ impl CreateCommand {
         );
         inputs.insert(
             "resource_api_version".to_string(),
-            serde_json::Value::String(selected_template.resource.spec.resource.api_version.clone()),
+            serde_json::Value::String(selected_template.resource.spec.project.api_version.clone()),
         );
         inputs.insert(
             "resource_kind".to_string(),
-            serde_json::Value::String(selected_template.resource.spec.resource.kind.clone()),
+            serde_json::Value::String(selected_template.resource.spec.project.kind.clone()),
         );
 
         // Step 11: Determine project root path
@@ -268,7 +268,7 @@ impl CreateCommand {
         output::subsection("Project Details");
         output::key_value("Collection", &collection.metadata.name);
         output::key_value_highlight("Name", &project_name);
-        output::key_value("Kind", &selected_template.resource.spec.resource.kind);
+        output::key_value("Kind", &selected_template.resource.spec.project.kind);
         output::environment_badge(&selected_environment);
         output::key_value("Project root", &project_root.display().to_string());
         output::key_value("Environment path", &environment_path.display().to_string());
@@ -437,27 +437,27 @@ impl CreateCommand {
         inputs: &std::collections::HashMap<String, serde_json::Value>,
     ) -> Result<()> {
         use crate::template::metadata::{
-            ProjectEnvironmentResource, ProjectEnvironmentMetadata, ProjectSpec, ResourceDefinition,
+            DynamicProjectEnvironmentResource, DynamicProjectEnvironmentMetadata, ProjectSpec, ResourceDefinition,
         };
 
-        // Create ProjectEnvironmentResource structure
-        let project_env = ProjectEnvironmentResource {
-            api_version: "pmp.io/v1".to_string(),
-            kind: "ProjectEnvironment".to_string(),
-            metadata: ProjectEnvironmentMetadata {
-                name: environment_name.to_string(),
-                project_name: project_name.to_string(),
+        // Create DynamicProjectEnvironmentResource structure with apiVersion/kind from template
+        let project_env = DynamicProjectEnvironmentResource {
+            api_version: template.spec.project.api_version.clone(),
+            kind: template.spec.project.kind.clone(),
+            metadata: DynamicProjectEnvironmentMetadata {
+                name: project_name.to_string(),
+                environment_name: environment_name.to_string(),
                 description: inputs.get("description")
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string()),
             },
             spec: ProjectSpec {
                 resource: ResourceDefinition {
-                    api_version: template.spec.resource.api_version.clone(),
-                    kind: template.spec.resource.kind.clone(),
+                    api_version: template.spec.project.api_version.clone(),
+                    kind: template.spec.project.kind.clone(),
                 },
                 executor: crate::template::metadata::ExecutorProjectConfig {
-                    name: template.spec.resource.executor.clone(),
+                    name: template.spec.project.executor.clone(),
                 },
                 inputs: inputs.clone(),
                 custom: template.spec.custom.clone(),

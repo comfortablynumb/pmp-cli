@@ -69,7 +69,7 @@ impl FindCommand {
     /// Display the search results
     fn display_results(manager: &CollectionManager, projects: &[&ProjectReference]) -> Result<()> {
         use crate::collection::CollectionDiscovery;
-        use crate::template::{ProjectResource, ProjectEnvironmentResource};
+        use crate::template::{ProjectResource, DynamicProjectEnvironmentResource};
 
         if projects.is_empty() {
             output::warning("No projects found.");
@@ -152,18 +152,18 @@ impl FindCommand {
             anyhow::bail!("Environment file not found: {:?}", env_file);
         }
 
-        let env_resource = ProjectEnvironmentResource::from_file(&env_file)
+        let env_resource = DynamicProjectEnvironmentResource::from_file(&env_file)
             .context("Failed to load environment resource")?;
 
         output::subsection("Environment Details");
-        output::environment_badge(&env_resource.metadata.name);
-        output::key_value("Project", &env_resource.metadata.project_name);
+        output::environment_badge(&env_resource.metadata.environment_name);
+        output::key_value("Project", &env_resource.metadata.name);
         if let Some(desc) = &env_resource.metadata.description {
             output::key_value("Description", desc);
         }
         output::key_value(
             "Resource",
-            &format!("{}/{}", env_resource.spec.resource.api_version, env_resource.spec.resource.kind)
+            &format!("{}/{}", env_resource.api_version, env_resource.kind)
         );
         output::key_value("Executor", &env_resource.spec.executor.name);
         output::key_value("Environment path", &env_path.display().to_string());

@@ -104,7 +104,7 @@ impl CollectionDiscovery {
 
     /// Get the resource kind from a project by reading the first environment
     fn get_project_kind(project_dir: &Path) -> Result<String> {
-        use crate::template::ProjectEnvironmentResource;
+        use crate::template::DynamicProjectEnvironmentResource;
 
         let environments_dir = project_dir.join("environments");
 
@@ -121,9 +121,9 @@ impl CollectionDiscovery {
             let path = entry.path();
 
             if path.is_file() && path.file_name() == Some(std::ffi::OsStr::new(".pmp.environment.yaml")) {
-                match ProjectEnvironmentResource::from_file(path) {
+                match DynamicProjectEnvironmentResource::from_file(path) {
                     Ok(resource) => {
-                        return Ok(resource.spec.resource.kind.clone());
+                        return Ok(resource.kind.clone());
                     }
                     Err(e) => {
                         eprintln!("Warning: Failed to load environment from {:?}: {}", path, e);

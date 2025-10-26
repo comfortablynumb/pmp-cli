@@ -5,7 +5,7 @@ metadata:
   description: Install Argo CD on Kubernetes using Helm
 
 spec:
-  resource:
+  project:
     apiVersion: pmp.io/v1
     kind: KubernetesWorkload
     executor: opentofu

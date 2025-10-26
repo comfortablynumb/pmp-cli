@@ -1,7 +1,7 @@
 use crate::collection::{CollectionDiscovery, CollectionManager};
 use crate::output;
 use crate::template::{
-    TemplateDiscovery, TemplateRenderer, ProjectResource, ProjectEnvironmentResource,
+    TemplateDiscovery, TemplateRenderer, ProjectResource, DynamicProjectEnvironmentResource,
 };
 use anyhow::{Context, Result};
 use inquire::Select;
@@ -29,13 +29,13 @@ impl UpdateCommand {
             anyhow::bail!("Environment file not found: {:?}", env_file);
         }
 
-        let current_env_resource = ProjectEnvironmentResource::from_file(&env_file)
+        let current_env_resource = DynamicProjectEnvironmentResource::from_file(&env_file)
             .context("Failed to load environment resource")?;
 
         output::section("Update Environment");
         output::key_value_highlight("Project", &project_name);
         output::environment_badge(&env_name);
-        output::key_value("Resource Kind", &current_env_resource.spec.resource.kind);
+        output::key_value("Resource Kind", &current_env_resource.kind);
 
         if let Some(desc) = &current_env_resource.metadata.description {
             output::key_value("Description", desc);
@@ -65,13 +65,13 @@ impl UpdateCommand {
         let matching_template = all_templates
             .iter()
             .find(|t| {
-                t.resource.spec.resource.api_version == current_env_resource.spec.resource.api_version
-                    && t.resource.spec.resource.kind == current_env_resource.spec.resource.kind
+                t.resource.spec.project.api_version == current_env_resource.api_version
+                    && t.resource.spec.project.kind == current_env_resource.kind
             })
             .context(format!(
                 "No template found for resource kind: {}/{}",
-                current_env_resource.spec.resource.api_version,
-                current_env_resource.spec.resource.kind
+                current_env_resource.api_version,
+                current_env_resource.kind
             ))?;
 
         output::key_value_highlight("Template", &matching_template.resource.metadata.name);
@@ -83,10 +83,10 @@ impl UpdateCommand {
         let current_inputs = &current_env_resource.spec.inputs;
 
         // Get template inputs, merging base inputs with environment-specific overrides
-        let mut merged_inputs = matching_template.resource.spec.resource.inputs.clone();
+        let mut merged_inputs = matching_template.resource.spec.project.inputs.clone();
 
         // Override with environment-specific inputs if they exist
-        if let Some(env_overrides) = matching_template.resource.spec.resource.environments.get(&env_name) {
+        if let Some(env_overrides) = matching_template.resource.spec.project.environments.get(&env_name) {
             for (input_name, input_spec) in &env_overrides.overrides.inputs {
                 merged_inputs.insert(input_name.clone(), input_spec.clone());
             }
@@ -109,11 +109,11 @@ impl UpdateCommand {
         );
         new_inputs.insert(
             "resource_api_version".to_string(),
-            serde_json::Value::String(matching_template.resource.spec.resource.api_version.clone()),
+            serde_json::Value::String(matching_template.resource.spec.project.api_version.clone()),
         );
         new_inputs.insert(
             "resource_kind".to_string(),
-            serde_json::Value::String(matching_template.resource.spec.resource.kind.clone()),
+            serde_json::Value::String(matching_template.resource.spec.project.kind.clone()),
         );
 
         // Confirm before regenerating
@@ -196,9 +196,9 @@ impl UpdateCommand {
         let env_file = dir.join(".pmp.environment.yaml");
 
         if env_file.exists() {
-            let resource = ProjectEnvironmentResource::from_file(&env_file)?;
-            let env_name = resource.metadata.name.clone();
-            let project_name = resource.metadata.project_name.clone();
+            let resource = DynamicProjectEnvironmentResource::from_file(&env_file)?;
+            let env_name = resource.metadata.environment_name.clone();
+            let project_name = resource.metadata.name.clone();
 
             return Ok(Some((dir.to_path_buf(), project_name, env_name)));
         }
@@ -373,27 +373,27 @@ impl UpdateCommand {
         inputs: &std::collections::HashMap<String, serde_json::Value>,
     ) -> Result<()> {
         use crate::template::metadata::{
-            ProjectEnvironmentResource, ProjectEnvironmentMetadata, ProjectSpec, ResourceDefinition,
+            DynamicProjectEnvironmentResource, DynamicProjectEnvironmentMetadata, ProjectSpec, ResourceDefinition,
         };
 
-        // Create ProjectEnvironmentResource structure
-        let project_env = ProjectEnvironmentResource {
-            api_version: "pmp.io/v1".to_string(),
-            kind: "ProjectEnvironment".to_string(),
-            metadata: ProjectEnvironmentMetadata {
-                name: environment_name.to_string(),
-                project_name: project_name.to_string(),
+        // Create DynamicProjectEnvironmentResource structure with apiVersion/kind from template
+        let project_env = DynamicProjectEnvironmentResource {
+            api_version: template.spec.project.api_version.clone(),
+            kind: template.spec.project.kind.clone(),
+            metadata: DynamicProjectEnvironmentMetadata {
+                name: project_name.to_string(),
+                environment_name: environment_name.to_string(),
                 description: inputs.get("description")
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string()),
             },
             spec: ProjectSpec {
                 resource: ResourceDefinition {
-                    api_version: template.spec.resource.api_version.clone(),
-                    kind: template.spec.resource.kind.clone(),
+                    api_version: template.spec.project.api_version.clone(),
+                    kind: template.spec.project.kind.clone(),
                 },
                 executor: crate::template::metadata::ExecutorProjectConfig {
-                    name: template.spec.resource.executor.clone(),
+                    name: template.spec.project.executor.clone(),
                 },
                 inputs: inputs.clone(),
                 custom: template.spec.custom.clone(),

@@ -2,7 +2,7 @@ use crate::collection::{CollectionDiscovery, CollectionManager};
 use crate::executor::{Executor, ExecutorConfig, OpenTofuExecutor};
 use crate::hooks::HooksRunner;
 use crate::output;
-use crate::template::{ProjectResource, ProjectEnvironmentResource};
+use crate::template::{ProjectResource, DynamicProjectEnvironmentResource};
 use anyhow::{Context, Result};
 use inquire::Select;
 use std::path::{Path, PathBuf};
@@ -29,7 +29,7 @@ impl PreviewCommand {
             anyhow::bail!("Environment file not found: {:?}", env_file);
         }
 
-        let resource = ProjectEnvironmentResource::from_file(&env_file)
+        let resource = DynamicProjectEnvironmentResource::from_file(&env_file)
             .context("Failed to load environment resource")?;
 
         output::section("Preview");
@@ -40,7 +40,7 @@ impl PreviewCommand {
             output::key_value("Description", desc);
         }
 
-        output::key_value("Kind", &resource.spec.resource.kind);
+        output::key_value("Kind", &resource.kind);
 
         // Get executor configuration
         let executor_config = resource.get_executor_config();
@@ -133,9 +133,9 @@ impl PreviewCommand {
         let env_file = dir.join(".pmp.environment.yaml");
 
         if env_file.exists() {
-            let resource = ProjectEnvironmentResource::from_file(&env_file)?;
-            let env_name = resource.metadata.name.clone();
-            let project_name = resource.metadata.project_name.clone();
+            let resource = DynamicProjectEnvironmentResource::from_file(&env_file)?;
+            let env_name = resource.metadata.environment_name.clone();
+            let project_name = resource.metadata.name.clone();
 
             return Ok(Some((dir.to_path_buf(), project_name, env_name)));
         }
