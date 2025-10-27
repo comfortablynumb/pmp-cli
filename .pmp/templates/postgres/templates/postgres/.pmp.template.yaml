@@ -6,7 +6,7 @@ metadata:
 
 spec:
   apiVersion: pmp.io/v1
-  kind: KubernetesWorkload
+  kind: Database
   executor: opentofu
 
   inputs:

@@ -58,6 +58,13 @@ resource "helm_release" "postgres" {
         }
       }
 
+      # FIX: Change "bitnami" to "bitnamilegacy" since they've frozen the
+      #      images there
+
+      image = {
+        repository = "bitnamilegacy/postgresql"
+      }
+
       architecture = var.architecture
 
       auth = {
@@ -145,6 +152,9 @@ resource "helm_release" "postgres" {
 
       volumePermissions = {
         enabled = true
+        image = {
+            repository = "bitnamilegacy/os-shell"
+        }
       }
 
       # PostgreSQL configuration
