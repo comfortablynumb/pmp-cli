@@ -1,0 +1,72 @@
+output "vault_service_name" {
+  description = "Name of the Vault service"
+  value       = helm_release.vault.name
+}
+
+output "vault_namespace" {
+  description = "Namespace where Vault is deployed"
+  value       = helm_release.vault.namespace
+}
+
+output "vault_service_url" {
+  description = "Internal Vault service URL"
+  value       = "http://${helm_release.vault.name}.${helm_release.vault.namespace}.svc:8200"
+}
+
+output "vault_status" {
+  description = "Status of the Vault Helm release"
+  value       = helm_release.vault.status
+}
+
+{{#if enable_ingress}}
+{{#if ingress_host}}
+output "vault_ingress_url" {
+  description = "External Vault URL via ingress"
+  value       = "${var.enable_tls ? "https" : "http"}://${var.ingress_host}"
+}
+{{/if}}
+{{/if}}
+
+output "vault_ui_enabled" {
+  description = "Whether Vault UI is enabled"
+  value       = var.ui_enabled
+}
+
+{{#if ha_enabled}}
+output "vault_ha_mode" {
+  description = "Vault HA mode status"
+  value       = "Enabled with ${var.server_replicas} replicas using Raft storage"
+}
+{{/if}}
+
+{{#if injector_enabled}}
+output "vault_injector_enabled" {
+  description = "Whether Vault Agent Injector is enabled"
+  value       = true
+}
+
+output "vault_injector_usage_note" {
+  description = "How to use Vault Agent Injector"
+  value       = "Add annotations to your pods: vault.hashicorp.com/agent-inject=true and vault.hashicorp.com/role=<your-role>. See README.md for detailed examples."
+}
+{{/if}}
+
+output "initialization_commands" {
+  description = "Commands to initialize and unseal Vault"
+  value = <<-EOT
+    # Port forward to access Vault
+    kubectl port-forward -n ${helm_release.vault.namespace} svc/${helm_release.vault.name} 8200:8200
+
+    # Initialize Vault (run once)
+    export VAULT_ADDR='http://localhost:8200'
+    vault operator init
+
+    # Unseal Vault (requires 3 of 5 unseal keys from init output)
+    vault operator unseal <unseal-key-1>
+    vault operator unseal <unseal-key-2>
+    vault operator unseal <unseal-key-3>
+
+    # Login with root token
+    vault login <root-token>
+  EOT
+}

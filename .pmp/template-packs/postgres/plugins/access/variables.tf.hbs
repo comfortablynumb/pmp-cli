@@ -1,0 +1,105 @@
+variable "role_name" {
+  description = "Database role/user name to create"
+  type        = string
+  # No default - this is a required input
+}
+
+variable "role_password" {
+  description = "Password for the role (auto-generated if not provided)"
+  type        = string
+  default     = "{{role_password}}"
+  sensitive   = true
+}
+
+variable "database_name" {
+  description = "Database to grant access to"
+  type        = string
+  default     = "{{database_name}}"
+}
+
+variable "privileges" {
+  description = "Array of privileges to grant (SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER, ALL)"
+  type        = list(string)
+  default     = {{#if privileges}}[{{#each privileges}}"{{this}}"{{#unless @last}}, {{/unless}}{{/each}}]{{else}}["SELECT"]{{/if}}
+
+  validation {
+    condition = alltrue([
+      for priv in var.privileges : contains([
+        "SELECT", "INSERT", "UPDATE", "DELETE",
+        "TRUNCATE", "REFERENCES", "TRIGGER", "ALL"
+      ], priv)
+    ])
+    error_message = "Privileges must be one of: SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER, ALL"
+  }
+}
+
+variable "grant_option" {
+  description = "Allow user to grant privileges to others"
+  type        = bool
+  default     = {{grant_option}}
+}
+
+variable "connection_limit" {
+  description = "Maximum concurrent connections (-1 for unlimited)"
+  type        = number
+  default     = {{connection_limit}}
+
+  validation {
+    condition     = var.connection_limit >= -1
+    error_message = "Connection limit must be -1 (unlimited) or a positive number."
+  }
+}
+
+variable "valid_until" {
+  description = "Password expiration timestamp (format: YYYY-MM-DD HH:MM:SS)"
+  type        = string
+  default     = "{{valid_until}}"
+}
+
+variable "schema_name" {
+  description = "Schema to grant privileges on"
+  type        = string
+  default     = "{{schema_name}}"
+}
+
+variable "create_schema" {
+  description = "Allow user to create schemas"
+  type        = bool
+  default     = {{create_schema}}
+}
+
+variable "superuser" {
+  description = "Grant superuser privileges (WARNING - use with caution)"
+  type        = bool
+  default     = {{superuser}}
+}
+
+variable "create_role" {
+  description = "Allow user to create other roles"
+  type        = bool
+  default     = {{create_role}}
+}
+
+variable "create_db" {
+  description = "Allow user to create databases"
+  type        = bool
+  default     = {{create_db}}
+}
+
+variable "create_k8s_secret" {
+  description = "Store credentials in Kubernetes secret"
+  type        = bool
+  default     = {{create_k8s_secret}}
+}
+
+variable "k8s_secret_name" {
+  description = "Name for the Kubernetes secret (auto-generated if empty)"
+  type        = string
+  default     = "{{k8s_secret_name}}"
+}
+
+variable "k8s_secret_namespace" {
+  description = "Namespace for the Kubernetes secret"
+  type        = string
+  default     = "{{k8s_secret_namespace}}"
+}

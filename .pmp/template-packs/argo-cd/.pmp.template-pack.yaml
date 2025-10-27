@@ -1,0 +1,7 @@
+apiVersion: pmp.io/v1
+kind: TemplatePack
+metadata:
+  name: argo-cd
+  description: Install Argo CD on Kubernetes using Helm
+
+spec: {}

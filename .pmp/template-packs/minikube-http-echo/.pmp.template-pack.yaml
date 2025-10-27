@@ -1,0 +1,7 @@
+apiVersion: pmp.io/v1
+kind: TemplatePack
+metadata:
+  name: minikube-http-echo
+  description: Kubernetes workload for local minikube using hashicorp/http-echo
+
+spec: {}
