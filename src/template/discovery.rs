@@ -10,8 +10,8 @@ pub struct TemplateDiscovery;
 impl TemplateDiscovery {
     /// Find all template packs in standard locations
     /// Checks:
-    /// 1. Current directory's .pmp/templates
-    /// 2. User's home directory ~/.pmp/templates
+    /// 1. Current directory's .pmp/template-packs
+    /// 2. User's home directory ~/.pmp/template-packs
     #[allow(dead_code)]
     pub fn discover_template_packs() -> Result<Vec<TemplatePackInfo>> {
         Self::discover_template_packs_with_custom_paths(&[])
@@ -19,22 +19,22 @@ impl TemplateDiscovery {
 
     /// Find all template packs in standard locations plus additional custom paths
     /// Checks:
-    /// 1. Current directory's .pmp/templates
-    /// 2. User's home directory ~/.pmp/templates
+    /// 1. Current directory's .pmp/template-packs
+    /// 2. User's home directory ~/.pmp/template-packs
     /// 3. Custom paths provided
     pub fn discover_template_packs_with_custom_paths(custom_paths: &[&str]) -> Result<Vec<TemplatePackInfo>> {
         let mut template_packs = Vec::new();
 
-        // Check current directory's .pmp/templates
-        let current_templates_path = std::env::current_dir()?.join(".pmp").join("templates");
+        // Check current directory's .pmp/template-packs
+        let current_templates_path = std::env::current_dir()?.join(".pmp").join("template-packs");
 
         if current_templates_path.exists() {
             template_packs.extend(Self::load_template_packs_from_dir(&current_templates_path)?);
         }
 
-        // Check ~/.pmp/templates
+        // Check ~/.pmp/template-packs
         if let Some(home_dir) = dirs::home_dir() {
-            let home_templates_path = home_dir.join(".pmp").join("templates");
+            let home_templates_path = home_dir.join(".pmp").join("template-packs");
 
             if home_templates_path.exists() {
                 template_packs.extend(Self::load_template_packs_from_dir(&home_templates_path)?);
@@ -126,14 +126,14 @@ impl TemplateDiscovery {
     #[allow(dead_code)]
     pub fn discover_plugins_in_pack(pack_path: &Path) -> Result<Vec<PluginInfo>> {
         let mut plugins = Vec::new();
-        let templates_dir = pack_path.join("templates");
+        let plugins_dir = pack_path.join("plugins");
 
-        if !templates_dir.exists() {
+        if !plugins_dir.exists() {
             return Ok(plugins);
         }
 
-        // Walk through template subdirectories looking for .pmp.plugin.yaml files
-        for entry in WalkDir::new(&templates_dir)
+        // Walk through plugin subdirectories looking for .pmp.plugin.yaml files
+        for entry in WalkDir::new(&plugins_dir)
             .min_depth(1)
             .max_depth(2)
             .into_iter()
@@ -162,8 +162,8 @@ impl TemplateDiscovery {
 
     /// Find all templates in standard locations (DEPRECATED - use discover_template_packs instead)
     /// Checks:
-    /// 1. Current directory's .pmp/templates
-    /// 2. User's home directory ~/.pmp/templates
+    /// 1. Current directory's .pmp/template-packs
+    /// 2. User's home directory ~/.pmp/template-packs
     #[allow(dead_code)]
     pub fn discover_templates() -> Result<Vec<TemplateInfo>> {
         Self::discover_templates_with_custom_paths(&[])
@@ -171,22 +171,22 @@ impl TemplateDiscovery {
 
     /// Find all templates in standard locations plus additional custom paths
     /// Checks:
-    /// 1. Current directory's .pmp/templates
-    /// 2. User's home directory ~/.pmp/templates
+    /// 1. Current directory's .pmp/template-packs
+    /// 2. User's home directory ~/.pmp/template-packs
     /// 3. Custom paths provided
     pub fn discover_templates_with_custom_paths(custom_paths: &[&str]) -> Result<Vec<TemplateInfo>> {
         let mut templates = Vec::new();
 
-        // Check current directory's .pmp/templates
-        let current_templates_path = std::env::current_dir()?.join(".pmp").join("templates");
+        // Check current directory's .pmp/template-packs
+        let current_templates_path = std::env::current_dir()?.join(".pmp").join("template-packs");
 
         if current_templates_path.exists() {
             templates.extend(Self::load_templates_from_dir(&current_templates_path)?);
         }
 
-        // Check ~/.pmp/templates
+        // Check ~/.pmp/template-packs
         if let Some(home_dir) = dirs::home_dir() {
-            let home_templates_path = home_dir.join(".pmp").join("templates");
+            let home_templates_path = home_dir.join(".pmp").join("template-packs");
 
             if home_templates_path.exists() {
                 templates.extend(Self::load_templates_from_dir(&home_templates_path)?);

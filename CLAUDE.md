@@ -32,7 +32,7 @@ cargo run -- find --name foo   # Find projects
 - Must have `apiVersion: pmp.io/v1` and `kind: TemplatePack`
 - Contains metadata (name, description)
 - Has an empty spec: `spec: {}`
-- Located in: `~/.pmp/templates/<pack-name>/`, `.pmp/templates/<pack-name>/`, or custom paths
+- Located in: `~/.pmp/template-packs/<pack-name>/`, `.pmp/template-packs/<pack-name>/`, or custom paths
 
 **Template File**: `.pmp.template.yaml` (inside `templates/` subdirectory)
 - Must have `apiVersion: pmp.io/v1` and `kind: Template`
@@ -41,21 +41,22 @@ cargo run -- find --name foo   # Find projects
 - Resource kind must be alphanumeric only
 - Located in: `<pack-dir>/templates/<template-name>/.pmp.template.yaml`
 
-**Plugin File**: `.pmp.plugin.yaml` (inside `templates/` subdirectory - OPTIONAL)
+**Plugin File**: `.pmp.plugin.yaml` (inside `plugins/` subdirectory - OPTIONAL)
 - Must have `apiVersion: pmp.io/v1` and `kind: Plugin`
 - Contains metadata (name, description) plus spec with `role` and `inputs`
 - Plugins are reusable components that can be referenced by templates
-- Located in: `<pack-dir>/templates/<plugin-name>/.pmp.plugin.yaml`
+- Located in: `<pack-dir>/plugins/<plugin-name>/.pmp.plugin.yaml`
 
 **Template Pack Structure**:
 ```
-~/.pmp/templates/<pack-name>/
+~/.pmp/template-packs/<pack-name>/
 ├── .pmp.template-pack.yaml (kind: TemplatePack)
-└── templates/
-    ├── <template-name>/
-    │   ├── .pmp.template.yaml (kind: Template)
-    │   ├── main.tf.hbs
-    │   └── ... (other template files)
+├── templates/
+│   └── <template-name>/
+│       ├── .pmp.template.yaml (kind: Template)
+│       ├── main.tf.hbs
+│       └── ... (other template files)
+└── plugins/
     └── <plugin-name>/
         ├── .pmp.plugin.yaml (kind: Plugin)
         └── ... (plugin files)
@@ -89,7 +90,7 @@ spec:
 The PostgreSQL template includes an "access" plugin for creating database credentials:
 
 ```yaml
-# In .pmp/templates/postgres/templates/postgres/.pmp.template.yaml
+# In .pmp/template-packs/postgres/templates/postgres/.pmp.template.yaml
 spec:
   plugins:
     allowed:

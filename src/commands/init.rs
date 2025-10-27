@@ -17,7 +17,7 @@ impl InitCommand {
     pub fn execute(
         name: Option<&str>,
         description: Option<&str>,
-        templates_path: Option<&str>,
+        template_packs_path: Option<&str>,
     ) -> Result<()> {
         let current_dir = std::env::current_dir()
             .context("Failed to get current directory")?;
@@ -26,9 +26,9 @@ impl InitCommand {
 
         // Check if collection already exists and route accordingly
         if collection_file.exists() {
-            Self::edit_existing_collection(&collection_file, templates_path)?;
+            Self::edit_existing_collection(&collection_file, template_packs_path)?;
         } else {
-            Self::create_new_collection(&current_dir, &collection_file, name, description, templates_path)?;
+            Self::create_new_collection(&current_dir, &collection_file, name, description, template_packs_path)?;
         }
 
         Ok(())
@@ -40,7 +40,7 @@ impl InitCommand {
         collection_file: &PathBuf,
         name: Option<&str>,
         description: Option<&str>,
-        templates_path: Option<&str>,
+        template_packs_path: Option<&str>,
     ) -> Result<()> {
         output::section("Initialize Project Collection");
         output::key_value("Directory", &current_dir.display().to_string());
@@ -72,7 +72,7 @@ impl InitCommand {
         };
 
         // Step 3: Discover templates to get available resource kinds
-        let custom_paths = if let Some(path) = templates_path {
+        let custom_paths = if let Some(path) = template_packs_path {
             vec![path]
         } else {
             vec![]
@@ -242,7 +242,7 @@ impl InitCommand {
     /// Edit an existing ProjectCollection
     fn edit_existing_collection(
         collection_file: &PathBuf,
-        templates_path: Option<&str>,
+        template_packs_path: Option<&str>,
     ) -> Result<()> {
         output::section("Edit Project Collection");
         output::key_value("File", &collection_file.display().to_string());
@@ -291,7 +291,7 @@ impl InitCommand {
                     }
                 }
                 opt if opt.starts_with("Resource kinds") => {
-                    Self::edit_resource_kinds(&mut collection, templates_path)?;
+                    Self::edit_resource_kinds(&mut collection, template_packs_path)?;
 
                     // Save after editing
                     collection.save(collection_file)
@@ -390,12 +390,12 @@ impl InitCommand {
     /// Edit resource kinds with pre-selection of current kinds
     fn edit_resource_kinds(
         collection: &mut ProjectCollectionResource,
-        templates_path: Option<&str>,
+        template_packs_path: Option<&str>,
     ) -> Result<()> {
         output::subsection("Editing Resource Kinds");
 
         // Discover templates
-        let custom_paths = if let Some(path) = templates_path {
+        let custom_paths = if let Some(path) = template_packs_path {
             vec![path]
         } else {
             vec![]

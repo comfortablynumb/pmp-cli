@@ -32,21 +32,21 @@ enum Commands {
         #[arg(short, long)]
         description: Option<String>,
 
-        /// Additional templates directory to search
+        /// Additional template packs directory to search
         #[arg(short, long)]
-        templates_path: Option<String>,
+        template_packs_path: Option<String>,
     },
 
     /// Create a new project from a template
-    #[command(long_about = "Create a new project from a template\n\nExamples:\n  pmp create\n  pmp create --output ./my-project\n  pmp create --templates-path /custom/templates")]
+    #[command(long_about = "Create a new project from a template\n\nExamples:\n  pmp create\n  pmp create --output ./my-project\n  pmp create --template-packs-path /custom/template-packs")]
     Create {
         /// Output directory for the new project (defaults to current directory)
         #[arg(short, long)]
         output: Option<String>,
 
-        /// Additional templates directory to search
+        /// Additional template packs directory to search
         #[arg(short, long)]
-        templates_path: Option<String>,
+        template_packs_path: Option<String>,
     },
 
     /// Preview changes (run IaC plan)
@@ -78,15 +78,15 @@ enum Commands {
     },
 
     /// Update an existing project environment by regenerating files from the original template
-    #[command(long_about = "Update an existing project environment by regenerating files from the original template\n\nExamples:\n  pmp update\n  pmp update --path ./my-project\n  pmp update --templates-path /custom/templates")]
+    #[command(long_about = "Update an existing project environment by regenerating files from the original template\n\nExamples:\n  pmp update\n  pmp update --path ./my-project\n  pmp update --template-packs-path /custom/template-packs")]
     Update {
         /// Path to the project directory (defaults to current directory)
         #[arg(short, long)]
         path: Option<String>,
 
-        /// Additional templates directory to search
+        /// Additional template packs directory to search
         #[arg(short, long)]
-        templates_path: Option<String>,
+        template_packs_path: Option<String>,
     },
 }
 
@@ -94,11 +94,11 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Init { name, description, templates_path } => {
-            InitCommand::execute(name.as_deref(), description.as_deref(), templates_path.as_deref())?;
+        Commands::Init { name, description, template_packs_path } => {
+            InitCommand::execute(name.as_deref(), description.as_deref(), template_packs_path.as_deref())?;
         }
-        Commands::Create { output, templates_path } => {
-            CreateCommand::execute(output.as_deref(), templates_path.as_deref())?;
+        Commands::Create { output, template_packs_path } => {
+            CreateCommand::execute(output.as_deref(), template_packs_path.as_deref())?;
         }
         Commands::Preview { path } => {
             PreviewCommand::execute(path.as_deref())?;
@@ -112,8 +112,8 @@ fn main() -> Result<()> {
                 kind.as_deref(),
             )?;
         }
-        Commands::Update { path, templates_path } => {
-            UpdateCommand::execute(path.as_deref(), templates_path.as_deref())?;
+        Commands::Update { path, template_packs_path } => {
+            UpdateCommand::execute(path.as_deref(), template_packs_path.as_deref())?;
         }
     }
 

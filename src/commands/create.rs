@@ -10,7 +10,7 @@ pub struct CreateCommand;
 
 impl CreateCommand {
     /// Execute the create command
-    pub fn execute(output_path: Option<&str>, templates_path: Option<&str>) -> Result<()> {
+    pub fn execute(output_path: Option<&str>, template_packs_path: Option<&str>) -> Result<()> {
         // Step 1: ProjectCollection is REQUIRED
         let (collection, collection_root) = CollectionDiscovery::find_collection()?
             .context("ProjectCollection is required. No .pmp.project-collection.yaml found in current directory or parent directories.\n\nPlease create a ProjectCollection first or navigate to an existing one.")?;
@@ -31,7 +31,7 @@ impl CreateCommand {
         }
 
         // Step 3: Discover template packs
-        let custom_paths = if let Some(path) = templates_path {
+        let custom_paths = if let Some(path) = template_packs_path {
             vec![path]
         } else {
             vec![]
@@ -42,7 +42,7 @@ impl CreateCommand {
 
         if all_template_packs.is_empty() {
             anyhow::bail!(
-                "No template packs found. Please create template packs in ~/.pmp/templates or .pmp/templates"
+                "No template packs found. Please create template packs in ~/.pmp/template-packs or .pmp/template-packs"
             );
         }
 

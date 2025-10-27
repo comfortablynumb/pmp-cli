@@ -35,7 +35,7 @@ struct CompatibleProject {
 
 impl UpdateCommand {
     /// Execute the update command
-    pub fn execute(project_path: Option<&str>, templates_path: Option<&str>) -> Result<()> {
+    pub fn execute(project_path: Option<&str>, template_packs_path: Option<&str>) -> Result<()> {
         // Determine working directory
         let work_dir = if let Some(path) = project_path {
             PathBuf::from(path)
@@ -71,7 +71,7 @@ impl UpdateCommand {
         // Discover plugins with compatible projects
         let plugins_with_projects = Self::discover_plugins_with_compatible_projects(
             &collection_root,
-            templates_path,
+            template_packs_path,
         )?;
 
         // If there are plugins with compatible projects, ask user what they want to do
@@ -88,7 +88,7 @@ impl UpdateCommand {
                     &collection_root,
                     &collection,
                     plugins_with_projects,
-                    templates_path,
+                    template_packs_path,
                 );
             }
         }
@@ -96,7 +96,7 @@ impl UpdateCommand {
         // Discover templates
         output::subsection("Template Discovery");
         output::dimmed("Discovering templates...");
-        let custom_paths = if let Some(path) = templates_path {
+        let custom_paths = if let Some(path) = template_packs_path {
             vec![path]
         } else {
             vec![]
@@ -106,7 +106,7 @@ impl UpdateCommand {
             .context("Failed to discover templates")?;
 
         if all_templates.is_empty() {
-            anyhow::bail!("No templates found. Please create templates in ~/.pmp/templates or .pmp/templates");
+            anyhow::bail!("No templates found. Please create templates in ~/.pmp/template-packs or .pmp/template-packs");
         }
 
         // Find the template matching the current resource kind
@@ -238,7 +238,7 @@ impl UpdateCommand {
     /// Returns a list of plugins with their compatible projects
     fn discover_plugins_with_compatible_projects(
         collection_root: &Path,
-        templates_path: Option<&str>,
+        template_packs_path: Option<&str>,
     ) -> Result<Vec<PluginWithProjects>> {
         let mut result = Vec::new();
 
@@ -246,7 +246,7 @@ impl UpdateCommand {
         let projects = CollectionDiscovery::discover_projects(collection_root)?;
 
         // Discover all template packs
-        let custom_paths = if let Some(path) = templates_path {
+        let custom_paths = if let Some(path) = template_packs_path {
             vec![path]
         } else {
             vec![]
@@ -326,7 +326,7 @@ impl UpdateCommand {
         _collection_root: &Path,
         _collection: &ProjectCollectionResource,
         plugins_with_projects: Vec<PluginWithProjects>,
-        _templates_path: Option<&str>,
+        _template_packs_path: Option<&str>,
     ) -> Result<()> {
         output::subsection("Plugin Execution");
 
