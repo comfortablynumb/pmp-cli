@@ -1,0 +1,112 @@
+variable "namespace" {
+  type        = string
+  description = "Kubernetes namespace for Linkerd control plane"
+  default     = "{{namespace}}"
+}
+
+variable "chart_version" {
+  type        = string
+  description = "Linkerd Helm chart version"
+  default     = "{{chart_version}}"
+}
+
+variable "install_crds" {
+  type        = bool
+  description = "Install Linkerd CRDs"
+  default     = {{install_crds}}
+}
+
+variable "ha_enabled" {
+  type        = bool
+  description = "Enable high availability mode"
+  default     = {{ha_enabled}}
+}
+
+variable "controller_replicas" {
+  type        = number
+  description = "Number of controller replicas (only used when HA is enabled)"
+  default     = {{controller_replicas}}
+
+  validation {
+    condition     = var.controller_replicas >= 1 && var.controller_replicas <= 5
+    error_message = "Controller replicas must be between 1 and 5"
+  }
+}
+
+variable "identity_trust_domain" {
+  type        = string
+  description = "Trust domain for mTLS identity"
+  default     = "{{identity_trust_domain}}"
+}
+
+variable "identity_trust_anchors_pem" {
+  type        = string
+  description = "Trust anchors PEM (leave empty to auto-generate)"
+  default     = "{{identity_trust_anchors_pem}}"
+  sensitive   = true
+}
+
+variable "identity_issuer_scheme" {
+  type        = string
+  description = "Certificate issuer scheme"
+  default     = "{{identity_issuer_scheme}}"
+
+  validation {
+    condition     = contains(["linkerd.io/tls", "kubernetes.io/tls"], var.identity_issuer_scheme)
+    error_message = "Identity issuer scheme must be either 'linkerd.io/tls' or 'kubernetes.io/tls'"
+  }
+}
+
+variable "proxy_cpu_request" {
+  type        = string
+  description = "Proxy sidecar CPU request"
+  default     = "{{proxy_cpu_request}}"
+}
+
+variable "proxy_cpu_limit" {
+  type        = string
+  description = "Proxy sidecar CPU limit"
+  default     = "{{proxy_cpu_limit}}"
+}
+
+variable "proxy_memory_request" {
+  type        = string
+  description = "Proxy sidecar memory request"
+  default     = "{{proxy_memory_request}}"
+}
+
+variable "proxy_memory_limit" {
+  type        = string
+  description = "Proxy sidecar memory limit"
+  default     = "{{proxy_memory_limit}}"
+}
+
+variable "cni_enabled" {
+  type        = bool
+  description = "Enable Linkerd CNI plugin"
+  default     = {{cni_enabled}}
+}
+
+variable "control_plane_tracing_enabled" {
+  type        = bool
+  description = "Enable distributed tracing for control plane"
+  default     = {{control_plane_tracing_enabled}}
+}
+
+variable "proxy_await_before_exit_seconds" {
+  type        = number
+  description = "Seconds proxy should wait before exiting"
+  default     = {{proxy_await_before_exit_seconds}}
+}
+
+variable "disable_heartbeat" {
+  type        = bool
+  description = "Disable heartbeat to Linkerd servers"
+  default     = {{disable_heartbeat}}
+}
+
+variable "enable_external_profiles" {
+  type        = bool
+  description = "Enable external service profiles"
+  default     = {{enable_external_profiles}}
+}

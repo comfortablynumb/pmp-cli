@@ -1,0 +1,133 @@
+apiVersion: pmp.io/v1
+kind: Template
+metadata:
+  name: k8s-monitoring
+  description: Deploy Grafana k8s-monitoring stack with auto-detection for Grafana Cloud or custom endpoints
+
+spec:
+  apiVersion: pmp.io/v1
+  kind: K8sMonitoring
+  executor: opentofu
+
+  inputs:
+    namespace:
+      default: "monitoring"
+      description: Kubernetes namespace for monitoring stack
+
+    chart_version:
+      default: "1.5.7"
+      description: k8s-monitoring Helm chart version
+
+    create_namespace:
+      default: true
+      description: Create the namespace if it doesn't exist
+
+    cluster_name:
+      description: Cluster name for identification in metrics/logs
+
+    grafana_cloud_url:
+      default: ""
+      description: Grafana Cloud URL (e.g., https://prometheus-prod-01-eu-west-0.grafana.net). If set, auto-configures for Grafana Cloud
+
+    grafana_cloud_token:
+      default: ""
+      description: Grafana Cloud API token (if using Grafana Cloud)
+
+    prometheus_url:
+      default: ""
+      description: Custom Prometheus remote write URL (used if grafana_cloud_url is empty)
+
+    prometheus_username:
+      default: ""
+      description: Prometheus authentication username
+
+    prometheus_password:
+      default: ""
+      description: Prometheus authentication password
+
+    loki_url:
+      default: ""
+      description: Custom Loki URL (used if grafana_cloud_url is empty)
+
+    loki_username:
+      default: ""
+      description: Loki authentication username
+
+    loki_password:
+      default: ""
+      description: Loki authentication password
+
+    tempo_url:
+      default: ""
+      description: Custom Tempo URL (used if grafana_cloud_url is empty)
+
+    tempo_username:
+      default: ""
+      description: Tempo authentication username
+
+    tempo_password:
+      default: ""
+      description: Tempo authentication password
+
+    metrics_enabled:
+      default: true
+      description: Enable metrics collection
+
+    logs_enabled:
+      default: true
+      description: Enable logs collection
+
+    traces_enabled:
+      default: false
+      description: Enable traces collection
+
+    log_level:
+      enum_values:
+        - "debug"
+        - "info"
+        - "warn"
+        - "error"
+      default: "info"
+      description: Log level for monitoring components
+
+    kube_state_metrics_enabled:
+      default: true
+      description: Enable kube-state-metrics for cluster state metrics
+
+    node_exporter_enabled:
+      default: true
+      description: Enable node-exporter for node metrics
+
+    opencost_enabled:
+      default: false
+      description: Enable OpenCost for cost monitoring
+
+    alloy_cpu_request:
+      default: "200m"
+      description: Grafana Alloy CPU request
+
+    alloy_cpu_limit:
+      default: "1000m"
+      description: Grafana Alloy CPU limit
+
+    alloy_memory_request:
+      default: "128Mi"
+      description: Grafana Alloy memory request
+
+    alloy_memory_limit:
+      default: "512Mi"
+      description: Grafana Alloy memory limit
+
+    prometheus_scrape_interval:
+      default: "60s"
+      description: Prometheus scrape interval
+
+    logs_pod_logs_enabled:
+      default: true
+      description: Collect pod logs
+
+    logs_cluster_events_enabled:
+      default: true
+      description: Collect cluster events
+
+  environments: {}

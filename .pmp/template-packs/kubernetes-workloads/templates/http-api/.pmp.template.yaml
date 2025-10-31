@@ -1,0 +1,84 @@
+apiVersion: pmp.io/v1
+kind: Template
+metadata:
+  name: http-api
+  description: Deploy an HTTP API service on Kubernetes with auto-scaling, health checks, and database plugin support
+
+spec:
+  apiVersion: pmp.io/v1
+  kind: KubernetesWorkload
+  executor: opentofu
+
+  plugins:
+    allowed:
+      - template_pack_name: postgres
+        plugin_name: access
+        inputs:
+          k8s_secret_namespace:
+            default: ""
+            description: Kubernetes namespace for credential secret (defaults to project namespace)
+
+  inputs:
+    docker_image:
+      description: Docker image name (e.g., nginx, myregistry.io/myapp)
+
+    version:
+      description: Docker image tag/version (e.g., latest, v1.2.3)
+
+    min_replicas:
+      default: 2
+      description: Minimum number of pod replicas for auto-scaling
+
+    max_replicas:
+      default: 10
+      description: Maximum number of pod replicas for auto-scaling
+
+    cpu_millicores:
+      enum_values:
+        - 20
+        - 50
+        - 100
+        - 250
+        - 500
+        - 1000
+        - 1500
+        - 2000
+        - 4000
+        - 6000
+        - 8000
+        - 16000
+        - 32000
+      default: 250
+      description: CPU limit in millicores (1000m = 1 CPU core)
+
+    memory_mb:
+      enum_values:
+        - 64
+        - 128
+        - 256
+        - 512
+        - 1024
+        - 2048
+        - 4096
+        - 8192
+        - 16384
+      default: 512
+      description: Memory limit in MB
+
+    http_port:
+      default: 8080
+      description: Container HTTP port to expose
+
+    healthcheck_uri:
+      default: "/_/health"
+      description: HTTP path for health check endpoint
+
+    service_type:
+      enum_values:
+        - ClusterIP
+        - NodePort
+        - LoadBalancer
+      default: ClusterIP
+      description: Kubernetes service type (ClusterIP for internal, NodePort for development, LoadBalancer for production)
+
+  environments: {}

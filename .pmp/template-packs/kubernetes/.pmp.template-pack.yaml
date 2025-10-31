@@ -1,0 +1,7 @@
+apiVersion: pmp.io/v1
+kind: TemplatePack
+metadata:
+  name: kubernetes
+  description: Core Kubernetes infrastructure components - service mesh, monitoring, and observability tools
+
+spec: {}

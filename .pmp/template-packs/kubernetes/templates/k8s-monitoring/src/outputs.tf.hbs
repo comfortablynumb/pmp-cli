@@ -1,0 +1,139 @@
+output "namespace" {
+  description = "Namespace where monitoring stack is deployed"
+  value       = var.namespace
+}
+
+output "release_name" {
+  description = "Helm release name for k8s-monitoring"
+  value       = helm_release.k8s_monitoring.name
+}
+
+output "chart_version" {
+  description = "k8s-monitoring chart version"
+  value       = helm_release.k8s_monitoring.version
+}
+
+output "cluster_name" {
+  description = "Cluster name used in metrics/logs"
+  value       = var.cluster_name
+}
+
+output "monitoring_type" {
+  description = "Monitoring backend type (grafana-cloud or custom)"
+  value       = local.using_grafana_cloud ? "grafana-cloud" : "custom"
+}
+
+output "metrics_enabled" {
+  description = "Whether metrics collection is enabled"
+  value       = var.metrics_enabled
+}
+
+output "logs_enabled" {
+  description = "Whether logs collection is enabled"
+  value       = var.logs_enabled
+}
+
+output "traces_enabled" {
+  description = "Whether traces collection is enabled"
+  value       = var.traces_enabled
+}
+
+{{#if metrics_enabled}}
+output "metrics_endpoint" {
+  description = "Prometheus endpoint URL"
+  value       = local.prometheus_url
+}
+{{/if}}
+
+{{#if logs_enabled}}
+output "logs_endpoint" {
+  description = "Loki endpoint URL"
+  value       = local.loki_url
+}
+{{/if}}
+
+{{#if traces_enabled}}
+output "traces_endpoint" {
+  description = "Tempo endpoint URL"
+  value       = local.tempo_url
+}
+{{/if}}
+
+output "access_instructions" {
+  description = "Instructions for accessing monitoring data"
+  value       = local.using_grafana_cloud ? <<-EOT
+    k8s-monitoring has been deployed to namespace '${var.namespace}' with Grafana Cloud integration.
+
+    Cluster: ${var.cluster_name}
+    Grafana Cloud URL: ${var.grafana_cloud_url}
+
+    Check deployment status:
+      kubectl get pods -n ${var.namespace}
+
+    View Grafana Alloy logs:
+      kubectl logs -n ${var.namespace} -l app.kubernetes.io/name=alloy -f
+
+    Access your metrics and logs:
+      1. Log in to your Grafana Cloud account
+      2. Navigate to Explore
+      3. Select Prometheus or Loki data source
+      4. Filter by cluster="${var.cluster_name}"
+
+    Verify data collection:
+      # Check metrics
+      kubectl logs -n ${var.namespace} -l app.kubernetes.io/name=alloy | grep "prometheus"
+
+      # Check logs
+      kubectl logs -n ${var.namespace} -l app.kubernetes.io/name=alloy | grep "loki"
+  EOT : <<-EOT
+    k8s-monitoring has been deployed to namespace '${var.namespace}' with custom endpoints.
+
+    Cluster: ${var.cluster_name}
+    ${var.metrics_enabled ? "Metrics → ${local.prometheus_url}" : ""}
+    ${var.logs_enabled ? "Logs → ${local.loki_url}" : ""}
+    ${var.traces_enabled ? "Traces → ${local.tempo_url}" : ""}
+
+    Check deployment status:
+      kubectl get pods -n ${var.namespace}
+
+    View Grafana Alloy logs:
+      kubectl logs -n ${var.namespace} -l app.kubernetes.io/name=alloy -f
+
+    Verify data collection:
+      # Check Alloy status
+      kubectl exec -n ${var.namespace} -it deploy/k8s-monitoring-alloy -- /bin/alloy run --help
+
+      # View configuration
+      kubectl get configmap -n ${var.namespace} k8s-monitoring-alloy -o yaml
+  EOT
+}
+
+output "kubectl_commands" {
+  description = "Useful kubectl commands for managing monitoring stack"
+  value = <<-EOT
+    # Check all monitoring pods
+    kubectl get pods -n ${var.namespace}
+
+    # View Grafana Alloy logs
+    kubectl logs -n ${var.namespace} -l app.kubernetes.io/name=alloy --tail=100 -f
+
+    {{#if kube_state_metrics_enabled}}
+    # Check kube-state-metrics
+    kubectl get pods -n ${var.namespace} -l app.kubernetes.io/name=kube-state-metrics
+    {{/if}}
+
+    {{#if node_exporter_enabled}}
+    # Check node-exporter DaemonSet
+    kubectl get daemonset -n ${var.namespace} -l app.kubernetes.io/name=prometheus-node-exporter
+    {{/if}}
+
+    # View monitoring configuration
+    kubectl get configmap -n ${var.namespace} -l app.kubernetes.io/name=k8s-monitoring
+
+    # Restart Grafana Alloy
+    kubectl rollout restart deployment -n ${var.namespace} -l app.kubernetes.io/name=alloy
+
+    # Scale Alloy deployment
+    kubectl scale deployment -n ${var.namespace} -l app.kubernetes.io/name=alloy --replicas=2
+  EOT
+}

@@ -1,0 +1,187 @@
+terraform {
+  required_version = ">= 1.0"
+
+  required_providers {
+    kubernetes = {
+      source  = "hashicorp/kubernetes"
+      version = "~> 2.23"
+    }
+    helm = {
+      source  = "hashicorp/helm"
+      version = "~> 2.11"
+    }
+  }
+}
+
+provider "kubernetes" {
+  config_path = "~/.kube/config"
+}
+
+provider "helm" {
+  kubernetes {
+    config_path = "~/.kube/config"
+  }
+}
+
+# Create namespace for monitoring stack
+{{#if create_namespace}}
+resource "kubernetes_namespace" "monitoring" {
+  metadata {
+    name = var.namespace
+    labels = {
+      name    = var.namespace
+      managed = "opentofu"
+      project = "{{name}}"
+    }
+  }
+}
+{{/if}}
+
+# Local values for endpoint detection
+locals {
+  # Auto-detect if using Grafana Cloud or custom endpoints
+  using_grafana_cloud = var.grafana_cloud_url != ""
+
+  # Prometheus configuration
+  prometheus_url      = local.using_grafana_cloud ? var.grafana_cloud_url : var.prometheus_url
+  prometheus_username = local.using_grafana_cloud ? "" : var.prometheus_username
+  prometheus_password = local.using_grafana_cloud ? var.grafana_cloud_token : var.prometheus_password
+
+  # Loki configuration
+  loki_url      = local.using_grafana_cloud ? var.grafana_cloud_url : var.loki_url
+  loki_username = local.using_grafana_cloud ? "" : var.loki_username
+  loki_password = local.using_grafana_cloud ? var.grafana_cloud_token : var.loki_password
+
+  # Tempo configuration
+  tempo_url      = local.using_grafana_cloud ? var.grafana_cloud_url : var.tempo_url
+  tempo_username = local.using_grafana_cloud ? "" : var.tempo_username
+  tempo_password = local.using_grafana_cloud ? var.grafana_cloud_token : var.tempo_password
+}
+
+# Install k8s-monitoring stack
+resource "helm_release" "k8s_monitoring" {
+  name       = "k8s-monitoring"
+  repository = "https://grafana.github.io/helm-charts"
+  chart      = "k8s-monitoring"
+  version    = var.chart_version
+  namespace  = var.namespace
+
+  {{#if create_namespace}}
+  depends_on = [kubernetes_namespace.monitoring]
+  {{/if}}
+
+  values = [
+    yamlencode({
+      cluster = {
+        name = var.cluster_name
+      }
+
+      # External services configuration (auto-detected)
+      externalServices = {
+        {{#if metrics_enabled}}
+        prometheus = local.prometheus_url != "" ? {
+          host = local.prometheus_url
+          basicAuth = local.prometheus_username != "" ? {
+            username = local.prometheus_username
+            password = local.prometheus_password
+          } : null
+          {{#if grafana_cloud_url}}
+          tenantId = local.prometheus_username != "" ? local.prometheus_username : null
+          {{/if}}
+        } : null
+        {{/if}}
+
+        {{#if logs_enabled}}
+        loki = local.loki_url != "" ? {
+          host = local.loki_url
+          basicAuth = local.loki_username != "" ? {
+            username = local.loki_username
+            password = local.loki_password
+          } : null
+          {{#if grafana_cloud_url}}
+          tenantId = local.loki_username != "" ? local.loki_username : null
+          {{/if}}
+        } : null
+        {{/if}}
+
+        {{#if traces_enabled}}
+        tempo = local.tempo_url != "" ? {
+          host = local.tempo_url
+          basicAuth = local.tempo_username != "" ? {
+            username = local.tempo_username
+            password = local.tempo_password
+          } : null
+          {{#if grafana_cloud_url}}
+          tenantId = local.tempo_username != "" ? local.tempo_username : null
+          {{/if}}
+        } : null
+        {{/if}}
+      }
+
+      # Metrics configuration
+      metrics = {
+        enabled = var.metrics_enabled
+        {{#if kube_state_metrics_enabled}}
+        kubeStateMetrics = {
+          enabled = true
+        }
+        {{/if}}
+        {{#if node_exporter_enabled}}
+        nodeExporter = {
+          enabled = true
+        }
+        {{/if}}
+        {{#if opencost_enabled}}
+        cost = {
+          enabled = true
+        }
+        {{/if}}
+        scrapeInterval = var.prometheus_scrape_interval
+      }
+
+      # Logs configuration
+      logs = {
+        enabled = var.logs_enabled
+        {{#if logs_pod_logs_enabled}}
+        pod_logs = {
+          enabled = true
+        }
+        {{/if}}
+        {{#if logs_cluster_events_enabled}}
+        cluster_events = {
+          enabled = true
+        }
+        {{/if}}
+      }
+
+      # Traces configuration
+      traces = {
+        enabled = var.traces_enabled
+      }
+
+      # Grafana Alloy configuration
+      alloy = {
+        logging = {
+          level = var.log_level
+        }
+        resources = {
+          requests = {
+            cpu    = var.alloy_cpu_request
+            memory = var.alloy_memory_request
+          }
+          limits = {
+            cpu    = var.alloy_cpu_limit
+            memory = var.alloy_memory_limit
+          }
+        }
+      }
+    })
+  ]
+
+  wait    = true
+  timeout = 600
+
+  lifecycle {
+    ignore_changes = [values]
+  }
+}

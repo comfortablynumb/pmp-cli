@@ -1,0 +1,152 @@
+terraform {
+  required_version = ">= 1.0"
+
+  required_providers {
+    kubernetes = {
+      source  = "hashicorp/kubernetes"
+      version = "~> 2.23"
+    }
+    helm = {
+      source  = "hashicorp/helm"
+      version = "~> 2.11"
+    }
+  }
+}
+
+provider "kubernetes" {
+  config_path = "~/.kube/config"
+}
+
+provider "helm" {
+  kubernetes {
+    config_path = "~/.kube/config"
+  }
+}
+
+# Create namespace for Linkerd
+{{#if create_namespace}}
+resource "kubernetes_namespace" "linkerd" {
+  metadata {
+    name = var.namespace
+    labels = {
+      "linkerd.io/is-control-plane" = "true"
+      "config.linkerd.io/admission-webhooks" = "disabled"
+      "linkerd.io/control-plane-ns" = var.namespace
+      "app.kubernetes.io/managed-by" = "pmp"
+    }
+    annotations = {
+      "linkerd.io/inject" = "disabled"
+    }
+  }
+}
+{{/if}}
+
+{{#if install_crds}}
+# Install Linkerd CRDs
+resource "helm_release" "linkerd_crds" {
+  name       = "linkerd-crds"
+  repository = "https://helm.linkerd.io/stable"
+  chart      = "linkerd-crds"
+  version    = var.chart_version
+  namespace  = var.namespace
+
+  {{#if create_namespace}}
+  depends_on = [kubernetes_namespace.linkerd]
+  {{/if}}
+
+  wait    = true
+  timeout = 300
+}
+{{/if}}
+
+# Install Linkerd control plane
+resource "helm_release" "linkerd_control_plane" {
+  name       = "linkerd-control-plane"
+  repository = "https://helm.linkerd.io/stable"
+  chart      = "linkerd-control-plane"
+  version    = var.chart_version
+  namespace  = var.namespace
+
+  depends_on = [
+    {{#if create_namespace}}
+    kubernetes_namespace.linkerd,
+    {{/if}}
+    {{#if install_crds}}
+    helm_release.linkerd_crds,
+    {{/if}}
+  ]
+
+  values = [
+    yamlencode({
+      # Identity configuration
+      identity = {
+        issuer = {
+          scheme = var.identity_issuer_scheme
+          {{#if (eq identity_issuer_scheme "linkerd.io/tls")}}
+          crtExpiry = var.identity_trust_anchors_pem != "" ? null : "8760h"
+          {{/if}}
+        }
+      }
+
+      identityTrustDomain = var.identity_trust_domain
+      {{#if identity_trust_anchors_pem}}
+      identityTrustAnchorsPEM = var.identity_trust_anchors_pem
+      {{/if}}
+
+      # Controller configuration
+      {{#if ha_enabled}}
+      enablePodAntiAffinity = true
+
+      controllerReplicas = var.controller_replicas
+
+      destinationReplicas = var.controller_replicas
+
+      proxyInjectorReplicas = var.controller_replicas
+      {{/if}}
+
+      # Proxy configuration
+      proxy = {
+        resources = {
+          cpu = {
+            request = var.proxy_cpu_request
+            limit   = var.proxy_cpu_limit
+          }
+          memory = {
+            request = var.proxy_memory_request
+            limit   = var.proxy_memory_limit
+          }
+        }
+        {{#if proxy_await_before_exit_seconds}}
+        awaitBeforeExitSeconds = var.proxy_await_before_exit_seconds
+        {{/if}}
+      }
+
+      # CNI configuration
+      {{#if cni_enabled}}
+      cniEnabled = true
+      {{/if}}
+
+      # Control plane tracing
+      {{#if control_plane_tracing_enabled}}
+      controlPlaneTracing = true
+      {{/if}}
+
+      # Heartbeat configuration
+      {{#if disable_heartbeat}}
+      disableHeartBeat = true
+      {{/if}}
+
+      # External profiles
+      {{#if enable_external_profiles}}
+      enableExternalProfiles = true
+      {{/if}}
+    })
+  ]
+
+  wait    = true
+  timeout = 600
+
+  lifecycle {
+    ignore_changes = [values]
+  }
+}

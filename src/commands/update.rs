@@ -323,32 +323,6 @@ impl UpdateCommand {
 
             // For each plugin in this pack
             for plugin_info in plugins {
-                // First, check if the target project's template allows this plugin
-                let mut target_template_allows_plugin = false;
-
-                for template_info in &templates {
-                    // Check if this is the target project's template
-                    if template_info.resource.spec.api_version == target_env_resource.api_version
-                        && template_info.resource.spec.kind == target_env_resource.kind
-                    {
-                        // Check if this template allows the plugin (both pack name and plugin name must match)
-                        if let Some(plugins_config) = &template_info.resource.spec.plugins {
-                            if plugins_config.allowed.iter().any(|a| {
-                                a.plugin_name == plugin_info.resource.metadata.name
-                                    && a.template_pack_name == pack_info.resource.metadata.name
-                            }) {
-                                target_template_allows_plugin = true;
-                                break;
-                            }
-                        }
-                    }
-                }
-
-                // Skip this plugin if target template doesn't allow it
-                if !target_template_allows_plugin {
-                    continue;
-                }
-
                 // Now find compatible reference projects based on plugin's requirements
                 let mut compatible_projects = Vec::new();
 

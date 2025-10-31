@@ -1,0 +1,176 @@
+variable "namespace" {
+  type        = string
+  description = "Kubernetes namespace for monitoring stack"
+  default     = "{{namespace}}"
+}
+
+variable "chart_version" {
+  type        = string
+  description = "k8s-monitoring Helm chart version"
+  default     = "{{chart_version}}"
+}
+
+variable "cluster_name" {
+  type        = string
+  description = "Cluster name for identification in metrics/logs"
+  default     = "{{cluster_name}}"
+}
+
+variable "grafana_cloud_url" {
+  type        = string
+  description = "Grafana Cloud URL (if using Grafana Cloud)"
+  default     = "{{grafana_cloud_url}}"
+}
+
+variable "grafana_cloud_token" {
+  type        = string
+  description = "Grafana Cloud API token"
+  default     = "{{grafana_cloud_token}}"
+  sensitive   = true
+}
+
+variable "prometheus_url" {
+  type        = string
+  description = "Custom Prometheus remote write URL"
+  default     = "{{prometheus_url}}"
+}
+
+variable "prometheus_username" {
+  type        = string
+  description = "Prometheus authentication username"
+  default     = "{{prometheus_username}}"
+}
+
+variable "prometheus_password" {
+  type        = string
+  description = "Prometheus authentication password"
+  default     = "{{prometheus_password}}"
+  sensitive   = true
+}
+
+variable "loki_url" {
+  type        = string
+  description = "Custom Loki URL"
+  default     = "{{loki_url}}"
+}
+
+variable "loki_username" {
+  type        = string
+  description = "Loki authentication username"
+  default     = "{{loki_username}}"
+}
+
+variable "loki_password" {
+  type        = string
+  description = "Loki authentication password"
+  default     = "{{loki_password}}"
+  sensitive   = true
+}
+
+variable "tempo_url" {
+  type        = string
+  description = "Custom Tempo URL"
+  default     = "{{tempo_url}}"
+}
+
+variable "tempo_username" {
+  type        = string
+  description = "Tempo authentication username"
+  default     = "{{tempo_username}}"
+}
+
+variable "tempo_password" {
+  type        = string
+  description = "Tempo authentication password"
+  default     = "{{tempo_password}}"
+  sensitive   = true
+}
+
+variable "metrics_enabled" {
+  type        = bool
+  description = "Enable metrics collection"
+  default     = {{metrics_enabled}}
+}
+
+variable "logs_enabled" {
+  type        = bool
+  description = "Enable logs collection"
+  default     = {{logs_enabled}}
+}
+
+variable "traces_enabled" {
+  type        = bool
+  description = "Enable traces collection"
+  default     = {{traces_enabled}}
+}
+
+variable "log_level" {
+  type        = string
+  description = "Log level for monitoring components"
+  default     = "{{log_level}}"
+
+  validation {
+    condition     = contains(["debug", "info", "warn", "error"], var.log_level)
+    error_message = "Log level must be debug, info, warn, or error"
+  }
+}
+
+variable "kube_state_metrics_enabled" {
+  type        = bool
+  description = "Enable kube-state-metrics for cluster state metrics"
+  default     = {{kube_state_metrics_enabled}}
+}
+
+variable "node_exporter_enabled" {
+  type        = bool
+  description = "Enable node-exporter for node metrics"
+  default     = {{node_exporter_enabled}}
+}
+
+variable "opencost_enabled" {
+  type        = bool
+  description = "Enable OpenCost for cost monitoring"
+  default     = {{opencost_enabled}}
+}
+
+variable "alloy_cpu_request" {
+  type        = string
+  description = "Grafana Alloy CPU request"
+  default     = "{{alloy_cpu_request}}"
+}
+
+variable "alloy_cpu_limit" {
+  type        = string
+  description = "Grafana Alloy CPU limit"
+  default     = "{{alloy_cpu_limit}}"
+}
+
+variable "alloy_memory_request" {
+  type        = string
+  description = "Grafana Alloy memory request"
+  default     = "{{alloy_memory_request}}"
+}
+
+variable "alloy_memory_limit" {
+  type        = string
+  description = "Grafana Alloy memory limit"
+  default     = "{{alloy_memory_limit}}"
+}
+
+variable "prometheus_scrape_interval" {
+  type        = string
+  description = "Prometheus scrape interval"
+  default     = "{{prometheus_scrape_interval}}"
+}
+
+variable "logs_pod_logs_enabled" {
+  type        = bool
+  description = "Collect pod logs"
+  default     = {{logs_pod_logs_enabled}}
+}
+
+variable "logs_cluster_events_enabled" {
+  type        = bool
+  description = "Collect cluster events"
+  default     = {{logs_cluster_events_enabled}}
+}

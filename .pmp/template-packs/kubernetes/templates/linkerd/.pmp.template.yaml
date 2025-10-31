@@ -1,0 +1,88 @@
+apiVersion: pmp.io/v1
+kind: Template
+metadata:
+  name: linkerd
+  description: Deploy Linkerd service mesh for Kubernetes with advanced configuration options
+
+spec:
+  apiVersion: pmp.io/v1
+  kind: Linkerd
+  executor: opentofu
+
+  inputs:
+    namespace:
+      default: "linkerd"
+      description: Kubernetes namespace for Linkerd control plane
+
+    chart_version:
+      default: "1.16.11"
+      description: Linkerd Helm chart version
+
+    create_namespace:
+      default: true
+      description: Create the namespace if it doesn't exist
+
+    install_crds:
+      default: true
+      description: Install Linkerd CRDs (set to false if CRDs are already installed)
+
+    ha_enabled:
+      default: false
+      description: Enable high availability mode (multiple replicas for control plane components)
+
+    controller_replicas:
+      default: 1
+      description: Number of controller replicas (only used when HA is enabled)
+
+    identity_trust_domain:
+      default: "cluster.local"
+      description: Trust domain for mTLS identity
+
+    identity_trust_anchors_pem:
+      default: ""
+      description: Trust anchors PEM (leave empty to auto-generate)
+
+    identity_issuer_scheme:
+      enum_values:
+        - "linkerd.io/tls"
+        - "kubernetes.io/tls"
+      default: "linkerd.io/tls"
+      description: Certificate issuer scheme
+
+    proxy_cpu_request:
+      default: "100m"
+      description: Proxy sidecar CPU request
+
+    proxy_cpu_limit:
+      default: "1000m"
+      description: Proxy sidecar CPU limit
+
+    proxy_memory_request:
+      default: "20Mi"
+      description: Proxy sidecar memory request
+
+    proxy_memory_limit:
+      default: "250Mi"
+      description: Proxy sidecar memory limit
+
+    cni_enabled:
+      default: false
+      description: Enable Linkerd CNI plugin (requires CNI to be pre-installed)
+
+    control_plane_tracing_enabled:
+      default: false
+      description: Enable distributed tracing for control plane
+
+    proxy_await_before_exit_seconds:
+      default: 0
+      description: Seconds proxy should wait before exiting (for graceful shutdown)
+
+    disable_heartbeat:
+      default: false
+      description: Disable heartbeat to Linkerd servers
+
+    enable_external_profiles:
+      default: false
+      description: Enable external service profiles
+
+  environments: {}
