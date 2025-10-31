@@ -2,7 +2,11 @@
 pub mod executor;
 pub mod opentofu;
 pub mod backend;
+pub mod registry;
 
-pub use executor::{Executor, ExecutorConfig};
+pub use executor::{Executor, ExecutorConfig, ProjectMetadata};
 pub use opentofu::OpenTofuExecutor;
-pub use backend::generate_backend_config;
+
+// Registry types available for future use (Phase 3: dependency injection)
+#[allow(unused_imports)]
+pub use registry::{ExecutorRegistry, DefaultExecutorRegistry};

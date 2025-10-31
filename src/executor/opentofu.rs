@@ -1,5 +1,7 @@
-use super::executor::{Executor, ExecutorConfig};
+use super::executor::{Executor, ExecutorConfig, ProjectMetadata};
 use anyhow::{Context, Result};
+use std::collections::HashMap;
+use std::path::Path;
 use std::process::{Command, Output, Stdio, Child};
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -153,6 +155,94 @@ impl Executor for OpenTofuExecutor {
 
     fn default_apply_command(&self) -> &str {
         "tofu apply"
+    }
+
+    fn generate_common_file(
+        &self,
+        environment_path: &Path,
+        executor_config: &HashMap<String, serde_json::Value>,
+        project_metadata: &ProjectMetadata,
+        plugins: Option<&[crate::template::metadata::AddedPlugin]>,
+    ) -> Result<()> {
+        use super::backend::{generate_backend_config, generate_module_blocks};
+
+        // Generate backend HCL with project metadata for table name generation
+        let backend_hcl = generate_backend_config(
+            executor_config,
+            Some(project_metadata.api_version),
+            Some(project_metadata.kind),
+            Some(project_metadata.environment),
+            Some(project_metadata.project_name),
+        )
+        .context("Failed to generate backend configuration")?;
+
+        // Generate module blocks for plugins
+        let modules_hcl = if let Some(plugin_list) = plugins {
+            generate_module_blocks(plugin_list)
+        } else {
+            String::new()
+        };
+
+        // Combine backend and modules
+        let mut combined_hcl = backend_hcl;
+        if !modules_hcl.is_empty() {
+            combined_hcl.push_str(&modules_hcl);
+        }
+
+        if combined_hcl.is_empty() {
+            // No backend config or modules to write
+            return Ok(());
+        }
+
+        // Write to _common.tf file
+        let common_tf_path = environment_path.join("_common.tf");
+        std::fs::write(&common_tf_path, combined_hcl)
+            .with_context(|| format!("Failed to write _common.tf file: {:?}", common_tf_path))?;
+
+        crate::output::dimmed(&format!("  Created: {}", common_tf_path.display()));
+
+        Ok(())
+    }
+
+    fn generate_plugin_common_file(
+        &self,
+        plugin_path: &Path,
+        executor_config: &HashMap<String, serde_json::Value>,
+        reference_project_metadata: &ProjectMetadata,
+    ) -> Result<()> {
+        use super::backend::generate_backend_config;
+
+        // Generate backend HCL using reference project's metadata for table name
+        let backend_hcl = generate_backend_config(
+            executor_config,
+            Some(reference_project_metadata.api_version),
+            Some(reference_project_metadata.kind),
+            Some(reference_project_metadata.environment),
+            Some(reference_project_metadata.project_name),
+        )
+        .context("Failed to generate backend configuration for plugin")?;
+
+        if backend_hcl.is_empty() {
+            // No backend config to write
+            return Ok(());
+        }
+
+        // Write to _common.tf file in plugin module
+        let common_tf_path = plugin_path.join("_common.tf");
+        std::fs::write(&common_tf_path, backend_hcl)
+            .with_context(|| format!("Failed to write plugin _common.tf file: {:?}", common_tf_path))?;
+
+        crate::output::dimmed(&format!("  Generated plugin backend: {}", common_tf_path.display()));
+
+        Ok(())
+    }
+
+    fn file_extension(&self) -> &str {
+        ".tf"
+    }
+
+    fn supports_backend(&self) -> bool {
+        true
     }
 }
 

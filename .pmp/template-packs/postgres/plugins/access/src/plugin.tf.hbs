@@ -8,10 +8,6 @@ terraform {
       source  = "hashicorp/random"
       version = "~> 3.6"
     }
-    kubernetes = {
-      source  = "hashicorp/kubernetes"
-      version = "~> 2.23"
-    }
   }
 }
 
@@ -24,10 +20,6 @@ provider "postgresql" {
 }
 
 provider "random" {}
-
-provider "kubernetes" {
-  config_path = "~/.kube/config"
-}
 
 # Generate secure random password if not provided
 resource "random_password" "role_password" {
@@ -158,36 +150,36 @@ resource "postgresql_default_privileges" "sequences" {
 }
 
 {{#if create_k8s_secret}}
-# Create Kubernetes secret with database credentials
+# Kubernetes provider for secret creation
+terraform {
+  required_providers {
+    kubernetes = {
+      source  = "hashicorp/kubernetes"
+      version = "~> 2.23"
+    }
+  }
+}
+
+provider "kubernetes" {
+  config_path = "~/.kube/config"
+  config_context = "minikube"
+}
+
+# Store credentials in Kubernetes secret
 resource "kubernetes_secret" "db_credentials" {
   metadata {
     name      = local.actual_secret_name
     namespace = local.actual_namespace
-
-    labels = {
-      "app.kubernetes.io/name"       = "postgresql"
-      "app.kubernetes.io/component"  = "database-credentials"
-      "app.kubernetes.io/managed-by" = "opentofu"
-      "pmp.io/role"                  = var.role_name
-    }
-
-    annotations = {
-      "pmp.io/database"    = local.actual_database
-      "pmp.io/schema"      = var.schema_name
-      "pmp.io/privileges"  = join(",", local.privileges_list)
-      "pmp.io/created-at"  = timestamp()
-    }
   }
 
   data = {
-    username          = var.role_name
-    password          = local.actual_password
-    database          = local.actual_database
     host              = "{{name}}-postgresql.{{namespace}}.svc.cluster.local"
     port              = "5432"
+    database          = local.actual_database
+    username          = postgresql_role.user.name
+    password          = local.actual_password
     schema            = var.schema_name
-    connection-string = "postgresql://${var.role_name}:${local.actual_password}@{{name}}-postgresql.{{namespace}}.svc.cluster.local:5432/${local.actual_database}"
-    jdbc-url          = "jdbc:postgresql://{{name}}-postgresql.{{namespace}}.svc.cluster.local:5432/${local.actual_database}"
+    connection-string = "postgresql://${postgresql_role.user.name}:${local.actual_password}@{{name}}-postgresql.{{namespace}}.svc.cluster.local:5432/${local.actual_database}"
   }
 
   type = "Opaque"

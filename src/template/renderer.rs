@@ -2,9 +2,7 @@ use anyhow::{Context, Result};
 use handlebars::{Handlebars, Helper, HelperResult, Output, RenderContext};
 use serde_json::Value;
 use std::collections::HashMap;
-use std::fs;
 use std::path::Path;
-use walkdir::WalkDir;
 
 /// Renders templates using Handlebars
 pub struct TemplateRenderer {
@@ -24,39 +22,63 @@ impl TemplateRenderer {
     }
 
     /// Render all template files from src directory to output directory
+    ///
+    /// # Arguments
+    /// * `ctx` - Application context with filesystem and output traits
+    /// * `template_src_dir` - Base directory of the template (e.g., `.pmp/template-packs/postgres/templates/postgres/`)
+    /// * `output_dir` - Output directory for rendered files
+    /// * `variables` - Variables to use in template rendering
+    /// * `plugin_context` - Optional tuple of (template_pack_name, plugin_name) for plugin rendering
+    ///
+    /// # Returns
+    /// List of relative paths of generated files
     pub fn render_template(
         &self,
+        ctx: &crate::context::Context,
         template_src_dir: &Path,
         output_dir: &Path,
         variables: &HashMap<String, Value>,
-    ) -> Result<()> {
+        _plugin_context: Option<(&str, &str)>,
+    ) -> Result<Vec<String>> {
         // Create output directory if it doesn't exist
-        fs::create_dir_all(output_dir)
+        ctx.fs.create_dir_all(output_dir)
             .context("Failed to create output directory")?;
 
-        // Walk through all files in the template src directory
-        for entry in WalkDir::new(template_src_dir)
-            .into_iter()
-            .filter_map(|e| e.ok())
-        {
-            let path = entry.path();
+        let mut generated_files = Vec::new();
 
-            if path.is_file() {
-                self.render_file(path, template_src_dir, output_dir, variables)?;
+        // Walk through all files in the template/plugin src directory
+        let src_dir = template_src_dir.join("src");
+
+        if !ctx.fs.exists(&src_dir) {
+            anyhow::bail!(
+                "Source directory not found: {}. Templates and plugins must have a 'src/' subdirectory.",
+                src_dir.display()
+            );
+        }
+
+        let entries = ctx.fs.walk_dir(&src_dir, 100)?;
+
+        for path in entries {
+            if ctx.fs.is_file(&path) {
+                if let Some(relative_path) = self.render_file(ctx, &path, &src_dir, output_dir, variables)? {
+                    generated_files.push(relative_path);
+                }
             }
         }
 
-        Ok(())
+        Ok(generated_files)
     }
 
     /// Render a single file
+    /// Returns the relative path of the generated file, or None if the file was skipped
     fn render_file(
         &self,
+        ctx: &crate::context::Context,
         file_path: &Path,
         template_base_dir: &Path,
         output_base_dir: &Path,
         variables: &HashMap<String, Value>,
-    ) -> Result<()> {
+    ) -> Result<Option<String>> {
         // Calculate relative path
         let relative_path = file_path
             .strip_prefix(template_base_dir)
@@ -66,33 +88,37 @@ impl TemplateRenderer {
         let output_path = if let Some(file_name) = relative_path.file_name() {
             let file_name_str = file_name.to_string_lossy();
 
-            // Skip .pmp.* files - these are auto-generated
+            // Skip .pmp.* files - these are auto-generated or metadata
             if file_name_str == ".pmp.yaml.hbs" || file_name_str == ".pmp.yaml"
                 || file_name_str == ".pmp.project.yaml.hbs" || file_name_str == ".pmp.project.yaml"
-                || file_name_str == ".pmp.environment.yaml.hbs" || file_name_str == ".pmp.environment.yaml" {
-                println!("  Skipped: {} (auto-generated)", file_name_str);
-                return Ok(());
+                || file_name_str == ".pmp.environment.yaml.hbs" || file_name_str == ".pmp.environment.yaml"
+                || file_name_str == ".pmp.template.yaml" || file_name_str == ".pmp.plugin.yaml" {
+                ctx.output.info(&format!("  Skipped: {} (metadata/auto-generated)", file_name_str));
+                return Ok(None);
             }
 
-            if file_name_str.ends_with(".hbs") {
-                let new_name = file_name_str.trim_end_matches(".hbs");
-                let parent = relative_path.parent().unwrap_or_else(|| Path::new(""));
-                output_base_dir.join(parent).join(new_name)
+            // Process filename
+            let final_name = if file_name_str.ends_with(".hbs") {
+                file_name_str.trim_end_matches(".hbs").to_string()
             } else {
-                output_base_dir.join(relative_path)
-            }
+                file_name_str.to_string()
+            };
+
+            // Plugin files no longer need SHA1 prefix since they're in separate module directories
+            let parent = relative_path.parent().unwrap_or_else(|| Path::new(""));
+            output_base_dir.join(parent).join(final_name)
         } else {
             output_base_dir.join(relative_path)
         };
 
         // Create parent directories if needed
         if let Some(parent) = output_path.parent() {
-            fs::create_dir_all(parent)
+            ctx.fs.create_dir_all(parent)
                 .context("Failed to create parent directories")?;
         }
 
         // Read template content
-        let template_content = fs::read_to_string(file_path)
+        let template_content = ctx.fs.read_to_string(file_path)
             .with_context(|| format!("Failed to read template file: {:?}", file_path))?;
 
         // Render template
@@ -102,12 +128,19 @@ impl TemplateRenderer {
             .with_context(|| format!("Failed to render template: {:?}", file_path))?;
 
         // Write rendered content
-        fs::write(&output_path, rendered)
+        ctx.fs.write(&output_path, &rendered)
             .with_context(|| format!("Failed to write output file: {:?}", output_path))?;
 
-        println!("  Created: {}", output_path.display());
+        ctx.output.info(&format!("  Created: {}", output_path.display()));
 
-        Ok(())
+        // Return relative path from output_base_dir
+        let relative_output = output_path
+            .strip_prefix(output_base_dir)
+            .context("Failed to calculate relative output path")?
+            .to_string_lossy()
+            .to_string();
+
+        Ok(Some(relative_output))
     }
 }
 

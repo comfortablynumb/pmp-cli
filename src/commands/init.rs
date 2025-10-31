@@ -15,6 +15,7 @@ pub struct InitCommand;
 impl InitCommand {
     /// Execute the init command
     pub fn execute(
+        ctx: &crate::context::Context,
         name: Option<&str>,
         description: Option<&str>,
         template_packs_path: Option<&str>,
@@ -26,9 +27,9 @@ impl InitCommand {
 
         // Check if collection already exists and route accordingly
         if collection_file.exists() {
-            Self::edit_existing_collection(&collection_file, template_packs_path)?;
+            Self::edit_existing_collection(ctx, &collection_file, template_packs_path)?;
         } else {
-            Self::create_new_collection(&current_dir, &collection_file, name, description, template_packs_path)?;
+            Self::create_new_collection(ctx, &current_dir, &collection_file, name, description, template_packs_path)?;
         }
 
         Ok(())
@@ -36,6 +37,7 @@ impl InitCommand {
 
     /// Create a new ProjectCollection
     fn create_new_collection(
+        ctx: &crate::context::Context,
         current_dir: &PathBuf,
         collection_file: &PathBuf,
         name: Option<&str>,
@@ -78,7 +80,7 @@ impl InitCommand {
             vec![]
         };
 
-        let templates = TemplateDiscovery::discover_templates_with_custom_paths(&custom_paths)
+        let templates = TemplateDiscovery::discover_templates_with_custom_paths(&*ctx.fs, &*ctx.output, &custom_paths)
             .context("Failed to discover templates")?;
 
         // Step 4: Extract unique resource kinds from templates
@@ -132,13 +134,13 @@ impl InitCommand {
         loop {
             // Prompt for environment key
             let env_key = loop {
-                let key = Text::new("Environment key (lowercase, alphanumeric, hyphens):")
+                let key = Text::new("Environment key (lowercase, alphanumeric, underscores; cannot start with number):")
                     .prompt()
                     .context("Failed to get environment key")?;
 
                 // Validate environment key
                 if !ProjectCollectionResource::is_valid_environment_name(&key) {
-                    output::warning("Invalid environment key. Must be lowercase alphanumeric and may contain hyphens.");
+                    output::warning("Invalid environment key. Must be lowercase alphanumeric with underscores, and cannot start with a number.");
                     continue;
                 }
 
@@ -211,7 +213,7 @@ impl InitCommand {
         };
 
         // Step 8: Save the collection file
-        collection.save(&collection_file)
+        collection.save(&*ctx.fs, &collection_file)
             .context("Failed to save .pmp.project-collection.yaml")?;
 
         // Step 9: Create the projects directory
@@ -241,6 +243,7 @@ impl InitCommand {
 
     /// Edit an existing ProjectCollection
     fn edit_existing_collection(
+        ctx: &crate::context::Context,
         collection_file: &PathBuf,
         template_packs_path: Option<&str>,
     ) -> Result<()> {
@@ -249,7 +252,7 @@ impl InitCommand {
         output::blank();
 
         // Load existing collection
-        let mut collection = ProjectCollectionResource::from_file(collection_file)
+        let mut collection = ProjectCollectionResource::from_file(&*ctx.fs, collection_file)
             .context("Failed to load existing collection")?;
 
         // Iterative editing loop
@@ -275,7 +278,7 @@ impl InitCommand {
                     Self::edit_metadata(&mut collection)?;
 
                     // Save after editing
-                    collection.save(collection_file)
+                    collection.save(&*ctx.fs, collection_file)
                         .context("Failed to save collection")?;
                     output::success(&format!("Changes saved to {}", collection_file.display()));
                     output::blank();
@@ -291,10 +294,10 @@ impl InitCommand {
                     }
                 }
                 opt if opt.starts_with("Resource kinds") => {
-                    Self::edit_resource_kinds(&mut collection, template_packs_path)?;
+                    Self::edit_resource_kinds(ctx, &mut collection, template_packs_path)?;
 
                     // Save after editing
-                    collection.save(collection_file)
+                    collection.save(&*ctx.fs, collection_file)
                         .context("Failed to save collection")?;
                     output::success(&format!("Changes saved to {}", collection_file.display()));
                     output::blank();
@@ -313,7 +316,7 @@ impl InitCommand {
                     Self::edit_environments(&mut collection)?;
 
                     // Save after editing
-                    collection.save(collection_file)
+                    collection.save(&*ctx.fs, collection_file)
                         .context("Failed to save collection")?;
                     output::success(&format!("Changes saved to {}", collection_file.display()));
                     output::blank();
@@ -389,6 +392,7 @@ impl InitCommand {
 
     /// Edit resource kinds with pre-selection of current kinds
     fn edit_resource_kinds(
+        ctx: &crate::context::Context,
         collection: &mut ProjectCollectionResource,
         template_packs_path: Option<&str>,
     ) -> Result<()> {
@@ -401,7 +405,7 @@ impl InitCommand {
             vec![]
         };
 
-        let templates = TemplateDiscovery::discover_templates_with_custom_paths(&custom_paths)
+        let templates = TemplateDiscovery::discover_templates_with_custom_paths(&*ctx.fs, &*ctx.output, &custom_paths)
             .context("Failed to discover templates")?;
 
         // Extract unique resource kinds from templates
@@ -505,13 +509,13 @@ impl InitCommand {
     fn add_environment(environments: &mut HashMap<String, Environment>) -> Result<()> {
         // Prompt for environment key
         let env_key = loop {
-            let key = Text::new("Environment key (lowercase, alphanumeric, hyphens):")
+            let key = Text::new("Environment key (lowercase, alphanumeric, underscores; cannot start with number):")
                 .prompt()
                 .context("Failed to get environment key")?;
 
             // Validate environment key
             if !ProjectCollectionResource::is_valid_environment_name(&key) {
-                output::warning("Invalid environment key. Must be lowercase alphanumeric and may contain hyphens.");
+                output::warning("Invalid environment key. Must be lowercase alphanumeric with underscores, and cannot start with a number.");
                 continue;
             }
 

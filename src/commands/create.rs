@@ -3,22 +3,21 @@ use crate::output;
 use crate::schema::SchemaValidator;
 use crate::template::{TemplateDiscovery, TemplateRenderer, TemplatePackInfo, TemplateInfo};
 use anyhow::{Context, Result};
-use inquire::Select;
 
 /// Handles the 'create' command - creates projects from templates
 pub struct CreateCommand;
 
 impl CreateCommand {
     /// Execute the create command
-    pub fn execute(output_path: Option<&str>, template_packs_path: Option<&str>) -> Result<()> {
+    pub fn execute(ctx: &crate::context::Context, output_path: Option<&str>, template_packs_path: Option<&str>) -> Result<()> {
         // Step 1: ProjectCollection is REQUIRED
-        let (collection, collection_root) = CollectionDiscovery::find_collection()?
+        let (collection, collection_root) = CollectionDiscovery::find_collection(&*ctx.fs)?
             .context("ProjectCollection is required. No .pmp.project-collection.yaml found in current directory or parent directories.\n\nPlease create a ProjectCollection first or navigate to an existing one.")?;
 
-        output::section("Project Collection");
-        output::key_value_highlight("Name", &collection.metadata.name);
+        ctx.output.section("Project Collection");
+        ctx.output.key_value_highlight("Name", &collection.metadata.name);
         if let Some(desc) = &collection.metadata.description {
-            output::key_value("Description", desc);
+            ctx.output.key_value("Description", desc);
         }
 
         // Step 2: Get resource kinds from collection
@@ -37,7 +36,7 @@ impl CreateCommand {
             vec![]
         };
 
-        let all_template_packs = TemplateDiscovery::discover_template_packs_with_custom_paths(&custom_paths)
+        let all_template_packs = TemplateDiscovery::discover_template_packs_with_custom_paths(&*ctx.fs, &*ctx.output, &custom_paths)
             .context("Failed to discover template packs")?;
 
         if all_template_packs.is_empty() {
@@ -50,7 +49,7 @@ impl CreateCommand {
         let mut filtered_packs_with_templates: Vec<(TemplatePackInfo, Vec<TemplateInfo>)> = Vec::new();
 
         for pack in all_template_packs {
-            let templates_in_pack = TemplateDiscovery::discover_templates_in_pack(&pack.path)
+            let templates_in_pack = TemplateDiscovery::discover_templates_in_pack(&*ctx.fs, &*ctx.output, &pack.path)
                 .context("Failed to discover templates in pack")?;
 
             // Filter templates that match allowed resource kinds
@@ -79,17 +78,17 @@ impl CreateCommand {
             );
         }
 
-        output::blank();
-        output::info(&format!("Found {} compatible template pack(s)", filtered_packs_with_templates.len()));
+        ctx.output.blank();
+        ctx.output.info(&format!("Found {} compatible template pack(s)", filtered_packs_with_templates.len()));
 
         // Step 5: Select template pack
         let (_selected_pack, available_templates) = if filtered_packs_with_templates.len() == 1 {
             // Only one pack, use it automatically
             let (pack, templates) = filtered_packs_with_templates.into_iter().next().unwrap();
-            output::subsection("Template Pack");
-            output::key_value_highlight("Pack", &pack.resource.metadata.name);
+            ctx.output.subsection("Template Pack");
+            ctx.output.key_value_highlight("Pack", &pack.resource.metadata.name);
             if let Some(desc) = &pack.resource.metadata.description {
-                output::key_value("Description", desc);
+                ctx.output.key_value("Description", desc);
             }
             (pack, templates)
         } else {
@@ -106,8 +105,7 @@ impl CreateCommand {
                 })
                 .collect();
 
-            let selected_pack_display = Select::new("Select a template pack:", pack_options.clone())
-                .prompt()
+            let selected_pack_display = ctx.input.select("Select a template pack:", pack_options.clone())
                 .context("Failed to select template pack")?;
 
             let pack_index = pack_options
@@ -117,10 +115,10 @@ impl CreateCommand {
 
             let (pack, templates) = filtered_packs_with_templates.into_iter().nth(pack_index).unwrap();
 
-            output::subsection("Selected Template Pack");
-            output::key_value_highlight("Pack", &pack.resource.metadata.name);
+            ctx.output.subsection("Selected Template Pack");
+            ctx.output.key_value_highlight("Pack", &pack.resource.metadata.name);
             if let Some(desc) = &pack.resource.metadata.description {
-                output::key_value("Description", desc);
+                ctx.output.key_value("Description", desc);
             }
 
             (pack, templates)
@@ -130,15 +128,15 @@ impl CreateCommand {
         let selected_template = if available_templates.len() == 1 {
             // Only one template, use it automatically
             let template = available_templates.into_iter().next().unwrap();
-            output::subsection("Template");
-            output::key_value_highlight("Template", &template.resource.metadata.name);
+            ctx.output.subsection("Template");
+            ctx.output.key_value_highlight("Template", &template.resource.metadata.name);
             if let Some(desc) = &template.resource.metadata.description {
-                output::key_value("Description", desc);
+                ctx.output.key_value("Description", desc);
             }
             template
         } else {
             // Multiple templates, let user choose
-            output::subsection("Select a template");
+            ctx.output.subsection("Select a template");
             let template_options: Vec<String> = available_templates
                 .iter()
                 .map(|t| {
@@ -151,8 +149,7 @@ impl CreateCommand {
                 })
                 .collect();
 
-            let selected_template_display = Select::new("Template:", template_options.clone())
-                .prompt()
+            let selected_template_display = ctx.input.select("Template:", template_options.clone())
                 .context("Failed to select template")?;
 
             let template_index = template_options
@@ -162,10 +159,10 @@ impl CreateCommand {
 
             let template = available_templates.into_iter().nth(template_index).unwrap();
 
-            output::subsection("Selected Template");
-            output::key_value_highlight("Template", &template.resource.metadata.name);
+            ctx.output.subsection("Selected Template");
+            ctx.output.key_value_highlight("Template", &template.resource.metadata.name);
             if let Some(desc) = &template.resource.metadata.description {
-                output::key_value("Description", desc);
+                ctx.output.key_value("Description", desc);
             }
 
             template
@@ -177,15 +174,15 @@ impl CreateCommand {
         } else if collection.spec.environments.len() == 1 {
             // Only one environment, use it automatically
             let (env_key, env) = collection.spec.environments.iter().next().unwrap();
-            output::subsection("Environment");
-            output::environment_badge(&env.name);
+            ctx.output.subsection("Environment");
+            ctx.output.environment_badge(&env.name);
             if let Some(desc) = &env.description {
-                output::key_value("Description", desc);
+                ctx.output.key_value("Description", desc);
             }
             env_key.clone()
         } else {
             // Multiple environments, let user choose
-            output::subsection("Select an environment");
+            ctx.output.subsection("Select an environment");
             let env_options: Vec<String> = collection.spec.environments.values().map(|env| {
                     if let Some(desc) = &env.description {
                         format!("{} - {}", env.name, desc)
@@ -195,8 +192,7 @@ impl CreateCommand {
                 })
                 .collect();
 
-            let selected_env_display = Select::new("Environment:", env_options.clone())
-                .prompt()
+            let selected_env_display = ctx.input.select("Environment:", env_options.clone())
                 .context("Failed to select environment")?;
 
             // Find the key for the selected environment
@@ -220,27 +216,36 @@ impl CreateCommand {
             );
         }
 
-        // Convert resource kind from CamelCase to snake_case for directory name
-        let resource_kind_snake = Self::camel_to_snake_case(resource_kind);
-
         // Step 9: Prompt for project name
-        output::subsection("Project Configuration");
-        let mut project_name = SchemaValidator::prompt_for_project_name()
+        ctx.output.subsection("Project Configuration");
+        let mut project_name = SchemaValidator::prompt_for_project_name(ctx)
             .context("Failed to get project name")?;
 
-        // Validate the project name doesn't already exist
+        // Validate the project name doesn't already exist anywhere in the collection
         loop {
             let check_path = if let Some(path) = output_path {
                 std::path::PathBuf::from(path)
             } else {
-                collection_root.join("projects").join(&resource_kind_snake).join(&project_name)
+                collection_root.join("projects").join(&project_name)
             };
 
-            if check_path.exists() {
-                output::blank();
-                output::warning(&format!("A project with this name already exists at: {}", check_path.display()));
-                output::dimmed("Please choose a different name:");
-                project_name = SchemaValidator::prompt_for_project_name()
+            // Check if path exists OR if project name already exists in collection
+            let name_exists = if check_path.exists() {
+                true
+            } else {
+                // Check if any existing project has this name
+                match CollectionDiscovery::discover_projects(&*ctx.fs, &*ctx.output, &collection_root) {
+                    Ok(projects) => projects.iter().any(|p| p.name == project_name),
+                    Err(_) => false, // If discovery fails, just check path existence
+                }
+            };
+
+            if name_exists {
+                ctx.output.blank();
+                ctx.output.warning(&format!("A project named '{}' already exists in this collection.", project_name));
+                ctx.output.dimmed("Project names must be unique across the entire collection.");
+                ctx.output.dimmed("Please choose a different name:");
+                project_name = SchemaValidator::prompt_for_project_name(ctx)
                     .context("Failed to get project name")?;
             } else {
                 break;
@@ -248,8 +253,8 @@ impl CreateCommand {
         }
 
         // Step 10: Collect inputs based on template's input definitions
-        output::subsection("Template Inputs");
-        output::dimmed("Please provide the following information:");
+        ctx.output.subsection("Template Inputs");
+        ctx.output.dimmed("Please provide the following information:");
 
         // Start with base inputs from template spec
         let mut merged_inputs = selected_template.resource.spec.inputs.clone();
@@ -262,7 +267,7 @@ impl CreateCommand {
         }
 
         // Collect inputs from user
-        let mut inputs = Self::collect_template_inputs(&merged_inputs, &project_name)
+        let mut inputs = Self::collect_template_inputs(ctx, &merged_inputs, &project_name)
             .context("Failed to collect inputs")?;
 
         // Step 11: Add internal fields for template rendering
@@ -283,7 +288,7 @@ impl CreateCommand {
         let project_root = if let Some(path) = output_path {
             std::path::PathBuf::from(path)
         } else {
-            collection_root.join("projects").join(&resource_kind_snake).join(&project_name)
+            collection_root.join("projects").join(&project_name)
         };
 
         // Step 13: Determine environment path
@@ -300,8 +305,8 @@ impl CreateCommand {
         }
 
         // Step 15: Render template into environment directory
-        output::subsection("Generating Project Files");
-        output::dimmed("Rendering template...");
+        ctx.output.subsection("Generating Project Files");
+        ctx.output.dimmed("Rendering template...");
         let renderer = TemplateRenderer::new();
         let template_src = &selected_template.path;
 
@@ -312,34 +317,50 @@ impl CreateCommand {
             );
         }
 
-        renderer
-            .render_template(template_src, environment_path.as_path(), &inputs)
+        let _generated_files = renderer
+            .render_template(ctx, template_src, environment_path.as_path(), &inputs, None)
             .context("Failed to render template")?;
 
-        // Step 15.5: Generate _common.tf if executor config is present (OpenTofu only)
-        if selected_template.resource.spec.executor == "opentofu" {
-            if let Some(executor_config) = &collection.spec.executor {
-                if executor_config.name == "opentofu" && !executor_config.config.is_empty() {
-                    output::dimmed("  Generating _common.tf with backend configuration...");
-                    Self::generate_common_tf(
+        // Step 15.5: Generate common file (e.g., _common.tf) if executor config is present
+        if let Some(executor_config) = &collection.spec.executor {
+            if !executor_config.config.is_empty() {
+                // Create executor instance (for now, create directly; will use registry in Phase 3)
+                let executor: Box<dyn crate::executor::Executor> = match executor_config.name.as_str() {
+                    "opentofu" => Box::new(crate::executor::OpenTofuExecutor::new()),
+                    _ => anyhow::bail!("Unknown executor: {}", executor_config.name),
+                };
+
+                if executor.supports_backend() {
+                    ctx.output.dimmed(&format!("  Generating common file with backend configuration..."));
+                    let metadata = crate::executor::ProjectMetadata {
+                        api_version: &selected_template.resource.spec.api_version,
+                        kind: &selected_template.resource.spec.kind,
+                        environment: &selected_environment,
+                        project_name: &project_name,
+                    };
+                    executor.generate_common_file(
                         &environment_path,
                         &executor_config.config,
-                    ).context("Failed to generate _common.tf file")?;
+                        &metadata,
+                        None, // No plugins on initial project creation
+                    ).context("Failed to generate common file")?;
                 }
             }
         }
 
         // Step 16: Auto-generate .pmp.project.yaml file (identifier only)
-        output::dimmed("  Generating .pmp.project.yaml...");
+        ctx.output.dimmed("  Generating .pmp.project.yaml...");
         Self::generate_project_identifier_yaml(
+            ctx,
             &project_root,
             &project_name,
             inputs.get("description").and_then(|v| v.as_str()),
         ).context("Failed to generate .pmp.project.yaml file")?;
 
         // Step 17: Auto-generate .pmp.environment.yaml file (with spec)
-        output::dimmed("  Generating .pmp.environment.yaml...");
+        ctx.output.dimmed("  Generating .pmp.environment.yaml...");
         Self::generate_project_environment_yaml(
+            ctx,
             &environment_path,
             &selected_environment,
             &project_name,
@@ -347,16 +368,16 @@ impl CreateCommand {
             &inputs,
         ).context("Failed to generate .pmp.environment.yaml file")?;
 
-        output::blank();
-        output::success("Project created successfully!");
+        ctx.output.blank();
+        ctx.output.success("Project created successfully!");
 
-        output::subsection("Project Details");
-        output::key_value("Collection", &collection.metadata.name);
-        output::key_value_highlight("Name", &project_name);
-        output::key_value("Kind", &selected_template.resource.spec.kind);
-        output::environment_badge(&selected_environment);
-        output::key_value("Project root", &project_root.display().to_string());
-        output::key_value("Environment path", &environment_path.display().to_string());
+        ctx.output.subsection("Project Details");
+        ctx.output.key_value("Collection", &collection.metadata.name);
+        ctx.output.key_value_highlight("Name", &project_name);
+        ctx.output.key_value("Kind", &selected_template.resource.spec.kind);
+        ctx.output.environment_badge(&selected_environment);
+        ctx.output.key_value("Project root", &project_root.display().to_string());
+        ctx.output.key_value("Environment path", &environment_path.display().to_string());
 
         let next_steps_list = vec![
             format!("Review the generated files in {}", environment_path.display()),
@@ -370,11 +391,10 @@ impl CreateCommand {
 
     /// Collect inputs from user based on template input specifications
     fn collect_template_inputs(
+        ctx: &crate::context::Context,
         inputs_spec: &std::collections::HashMap<String, crate::template::metadata::InputSpec>,
         project_name: &str,
     ) -> Result<std::collections::HashMap<String, serde_json::Value>> {
-        use inquire::{Select, Text, Confirm};
-
         let mut inputs = std::collections::HashMap::new();
 
         // Always add name
@@ -392,13 +412,15 @@ impl CreateCommand {
                     .or_else(|| enum_values.first().map(|s| s.as_str()));
 
                 let selected = if let Some(default) = default_str {
-                    Select::new(description, enum_values.clone())
-                        .with_starting_cursor(enum_values.iter().position(|v| v == default).unwrap_or(0))
-                        .prompt()
+                    // Find the starting cursor position
+                    let starting_cursor = enum_values.iter().position(|v| v == default).unwrap_or(0);
+                    // For now, we'll just select without starting cursor support
+                    // TODO: Enhance UserInput trait to support starting_cursor
+                    let _ = starting_cursor; // Suppress unused warning
+                    ctx.input.select(description, enum_values.clone())
                         .context("Failed to get input")?
                 } else {
-                    Select::new(description, enum_values.clone())
-                        .prompt()
+                    ctx.input.select(description, enum_values.clone())
                         .context("Failed to get input")?
                 };
 
@@ -407,17 +429,13 @@ impl CreateCommand {
                 // Determine type from default value
                 match default {
                     serde_json::Value::Bool(b) => {
-                        let answer = Confirm::new(description)
-                            .with_default(*b)
-                            .prompt()
+                        let answer = ctx.input.confirm(description, *b)
                             .context("Failed to get input")?;
                         serde_json::Value::Bool(answer)
                     }
                     serde_json::Value::Number(n) => {
                         let prompt_text = format!("{} (default: {})", description, n);
-                        let answer = Text::new(&prompt_text)
-                            .with_default(&n.to_string())
-                            .prompt()
+                        let answer = ctx.input.text(&prompt_text, Some(&n.to_string()))
                             .context("Failed to get input")?;
 
                         // Try to parse as number
@@ -431,24 +449,20 @@ impl CreateCommand {
                     }
                     serde_json::Value::String(s) => {
                         let prompt_text = format!("{} (default: {})", description, s);
-                        let answer = Text::new(&prompt_text)
-                            .with_default(s)
-                            .prompt()
+                        let answer = ctx.input.text(&prompt_text, Some(s))
                             .context("Failed to get input")?;
                         serde_json::Value::String(answer)
                     }
                     _ => {
                         // Fallback to string input
-                        let answer = Text::new(description)
-                            .prompt()
+                        let answer = ctx.input.text(description, None)
                             .context("Failed to get input")?;
                         serde_json::Value::String(answer)
                     }
                 }
             } else {
                 // No default, prompt for string
-                let answer = Text::new(description)
-                    .prompt()
+                let answer = ctx.input.text(description, None)
                     .context("Failed to get input")?;
                 serde_json::Value::String(answer)
             };
@@ -459,29 +473,9 @@ impl CreateCommand {
         Ok(inputs)
     }
 
-    /// Convert CamelCase to snake_case
-    fn camel_to_snake_case(s: &str) -> String {
-        let mut result = String::new();
-        let mut prev_is_upper = false;
-
-        for (i, ch) in s.chars().enumerate() {
-            if ch.is_uppercase() {
-                if i > 0 && !prev_is_upper {
-                    result.push('_');
-                }
-                result.push(ch.to_ascii_lowercase());
-                prev_is_upper = true;
-            } else {
-                result.push(ch);
-                prev_is_upper = false;
-            }
-        }
-
-        result
-    }
-
     /// Generate the .pmp.project.yaml file for the project (identifier only, no spec)
     fn generate_project_identifier_yaml(
+        ctx: &crate::context::Context,
         project_root: &std::path::Path,
         project_name: &str,
         description: Option<&str>,
@@ -508,13 +502,14 @@ impl CreateCommand {
         std::fs::write(&pmp_yaml_path, yaml_content)
             .with_context(|| format!("Failed to write .pmp.project.yaml file: {:?}", pmp_yaml_path))?;
 
-        output::dimmed(&format!("  Created: {}", pmp_yaml_path.display()));
+        ctx.output.dimmed(&format!("  Created: {}", pmp_yaml_path.display()));
 
         Ok(())
     }
 
     /// Generate the .pmp.environment.yaml file for the project environment (with spec)
     fn generate_project_environment_yaml(
+        ctx: &crate::context::Context,
         environment_path: &std::path::Path,
         environment_name: &str,
         project_name: &str,
@@ -546,6 +541,7 @@ impl CreateCommand {
                 },
                 inputs: inputs.clone(),
                 custom: None,  // Templates no longer have custom field
+                plugins: None,  // No plugins added yet
             },
         };
 
@@ -558,34 +554,9 @@ impl CreateCommand {
         std::fs::write(&pmp_env_yaml_path, yaml_content)
             .with_context(|| format!("Failed to write .pmp.environment.yaml file: {:?}", pmp_env_yaml_path))?;
 
-        output::dimmed(&format!("  Created: {}", pmp_env_yaml_path.display()));
+        ctx.output.dimmed(&format!("  Created: {}", pmp_env_yaml_path.display()));
 
         Ok(())
     }
 
-    /// Generate _common.tf file with backend configuration
-    fn generate_common_tf(
-        environment_path: &std::path::Path,
-        executor_config: &std::collections::HashMap<String, serde_json::Value>,
-    ) -> Result<()> {
-        use crate::executor::generate_backend_config;
-
-        // Generate backend HCL
-        let backend_hcl = generate_backend_config(executor_config)
-            .context("Failed to generate backend configuration")?;
-
-        if backend_hcl.is_empty() {
-            // No backend config to write
-            return Ok(());
-        }
-
-        // Write to _common.tf file
-        let common_tf_path = environment_path.join("_common.tf");
-        std::fs::write(&common_tf_path, backend_hcl)
-            .with_context(|| format!("Failed to write _common.tf file: {:?}", common_tf_path))?;
-
-        output::dimmed(&format!("  Created: {}", common_tf_path.display()));
-
-        Ok(())
-    }
 }

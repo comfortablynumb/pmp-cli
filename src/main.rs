@@ -1,10 +1,12 @@
 mod collection;
 mod commands;
+mod context;
 mod executor;
 mod hooks;
 mod output;
 mod schema;
 mod template;
+mod traits;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -92,28 +94,30 @@ enum Commands {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
+    let ctx = context::Context::new();
 
     match cli.command {
         Commands::Init { name, description, template_packs_path } => {
-            InitCommand::execute(name.as_deref(), description.as_deref(), template_packs_path.as_deref())?;
+            InitCommand::execute(&ctx, name.as_deref(), description.as_deref(), template_packs_path.as_deref())?;
         }
         Commands::Create { output, template_packs_path } => {
-            CreateCommand::execute(output.as_deref(), template_packs_path.as_deref())?;
+            CreateCommand::execute(&ctx, output.as_deref(), template_packs_path.as_deref())?;
         }
         Commands::Preview { path } => {
-            PreviewCommand::execute(path.as_deref())?;
+            PreviewCommand::execute(&ctx, path.as_deref())?;
         }
         Commands::Apply { path } => {
-            ApplyCommand::execute(path.as_deref())?;
+            ApplyCommand::execute(&ctx, path.as_deref())?;
         }
         Commands::Find { name, kind } => {
             FindCommand::execute(
+                &ctx,
                 name.as_deref(),
                 kind.as_deref(),
             )?;
         }
         Commands::Update { path, template_packs_path } => {
-            UpdateCommand::execute(path.as_deref(), template_packs_path.as_deref())?;
+            UpdateCommand::execute(&ctx, path.as_deref(), template_packs_path.as_deref())?;
         }
     }
 

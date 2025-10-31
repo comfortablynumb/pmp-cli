@@ -9,6 +9,15 @@ spec:
   kind: KubernetesWorkload
   executor: opentofu
 
+  plugins:
+    allowed:
+      - template_pack_name: postgres
+        plugin_name: access
+        inputs:
+          k8s_secret_namespace:
+            default: ""
+            description: Kubernetes namespace for credential secret
+
   inputs:
     replicas:
       default: 1

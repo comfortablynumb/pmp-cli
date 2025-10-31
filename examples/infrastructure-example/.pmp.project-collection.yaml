@@ -1,0 +1,32 @@
+apiVersion: pmp.io/v1
+kind: ProjectCollection
+metadata:
+  name: Infrastructure Example with PostgreSQL Backend
+  description: Example project collection demonstrating PostgreSQL remote state backend configuration
+spec:
+  resource_kinds:
+    - apiVersion: pmp.io/v1
+      kind: KubernetesWorkload
+    - apiVersion: pmp.io/v1
+      kind: Postgres
+  environments:
+    development:
+      name: Development
+      description: Development environment for testing and iteration
+    staging:
+      name: Staging
+      description: Pre-production environment for final validation
+    production:
+      name: Production
+      description: Production environment with high availability
+  executor:
+    name: opentofu
+    config:
+      backend:
+        type: pg
+        conn_str: postgres://terraform:terraform@localhost:5432/terraform_backend?sslmode=disable
+        schema_name: terraform_remote_state
+        # Note: table_name is auto-generated per project using SHA1 hash
+        # Format: tf_{sha1(apiVersion_kind__environment__projectName)}
+        # This ensures each project has isolated state storage
+  hooks: null

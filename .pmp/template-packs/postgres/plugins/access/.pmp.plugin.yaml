@@ -7,6 +7,11 @@ metadata:
 spec:
   role: credential-management
 
+  # This plugin requires a reference to a PostgreSQL project
+  requires_project_with_template:
+    apiVersion: pmp.io/v1
+    kind: Postgres
+
   inputs:
     role_name:
       description: Database role/user name to create

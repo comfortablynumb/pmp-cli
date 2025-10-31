@@ -1,9 +1,41 @@
 use anyhow::Result;
 use serde_json::Value;
 use std::collections::HashMap;
+use sha1::{Sha1, Digest};
+use crate::template::metadata::AddedPlugin;
+
+/// Calculate a unique table name for PostgreSQL backend based on project metadata
+/// Format: tf_{sha1_hex_lowercase}
+/// Input string: {apiVersion}_{kind}__{environment}__{project_name}
+fn calculate_table_name(
+    api_version: &str,
+    kind: &str,
+    environment: &str,
+    project_name: &str,
+) -> String {
+    // Create the input string for hashing
+    let input = format!("{}_{}__{}__{}", api_version, kind, environment, project_name);
+
+    // Calculate SHA1 hash
+    let mut hasher = Sha1::new();
+    hasher.update(input.as_bytes());
+    let result = hasher.finalize();
+
+    // Convert to lowercase hex string and prepend "tf_"
+    format!("tf_{:x}", result)
+}
 
 /// Generate _common.tf content with backend configuration
-pub fn generate_backend_config(executor_config: &HashMap<String, Value>) -> Result<String> {
+///
+/// For PostgreSQL backends, if project metadata is provided, a unique table_name
+/// will be automatically generated based on apiVersion, kind, environment, and project name.
+pub fn generate_backend_config(
+    executor_config: &HashMap<String, Value>,
+    api_version: Option<&str>,
+    kind: Option<&str>,
+    environment: Option<&str>,
+    project_name: Option<&str>,
+) -> Result<String> {
     // Check if backend configuration exists
     let backend_config = match executor_config.get("backend") {
         Some(Value::Object(map)) => map,
@@ -28,13 +60,24 @@ pub fn generate_backend_config(executor_config: &HashMap<String, Value>) -> Resu
     hcl.push_str("terraform {\n");
     hcl.push_str(&format!("  backend \"{}\" {{\n", backend_type));
 
-    // Add all backend parameters except 'type'
-    let mut params: Vec<_> = backend_config
+    // Collect backend parameters
+    let mut params_map: HashMap<String, Value> = backend_config
         .iter()
         .filter(|(key, _)| *key != "type")
+        .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
 
+    // For PostgreSQL backend, auto-inject table_name if project metadata is provided
+    if backend_type == "pg" {
+        if let (Some(api_ver), Some(knd), Some(env), Some(proj)) =
+            (api_version, kind, environment, project_name) {
+            let table_name = calculate_table_name(api_ver, knd, env, proj);
+            params_map.insert("table_name".to_string(), Value::String(table_name));
+        }
+    }
+
     // Sort parameters for consistent output
+    let mut params: Vec<_> = params_map.iter().collect();
     params.sort_by_key(|(key, _)| *key);
 
     for (key, value) in params {
@@ -138,6 +181,37 @@ fn escape_hcl_string(s: &str) -> String {
         .replace('\t', "\\t")
 }
 
+/// Generate module blocks for added plugins
+///
+/// Creates Terraform module blocks that reference plugin modules in the modules/ directory.
+/// Module source paths are relative to the environment directory.
+///
+/// # Arguments
+/// * `plugins` - Slice of AddedPlugin structs containing plugin metadata
+///
+/// # Returns
+/// HCL string containing module blocks, or empty string if no plugins
+pub fn generate_module_blocks(plugins: &[AddedPlugin]) -> String {
+    if plugins.is_empty() {
+        return String::new();
+    }
+
+    let mut hcl = String::new();
+    hcl.push_str("\n# Plugin modules\n");
+
+    for plugin in plugins {
+        // Include reference project name for uniqueness
+        let module_name = format!("{}_{}_{}", plugin.template_pack_name, plugin.name, plugin.project.name);
+        let source_path = format!("./modules/{}/{}/{}", plugin.template_pack_name, plugin.name, plugin.project.name);
+
+        hcl.push_str(&format!("module \"{}\" {{\n", module_name));
+        hcl.push_str(&format!("  source = \"{}\"\n", source_path));
+        hcl.push_str("}\n\n");
+    }
+
+    hcl
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -162,7 +236,7 @@ mod tests {
             config.insert(k.clone(), v.clone());
         }
 
-        let result = generate_backend_config(&config).unwrap();
+        let result = generate_backend_config(&config, None, None, None, None).unwrap();
 
         assert!(result.contains("terraform {"));
         assert!(result.contains("backend \"s3\" {"));
@@ -190,7 +264,7 @@ mod tests {
             config.insert(k.clone(), v.clone());
         }
 
-        let result = generate_backend_config(&config).unwrap();
+        let result = generate_backend_config(&config, None, None, None, None).unwrap();
 
         assert!(result.contains("backend \"azurerm\" {"));
         assert!(result.contains("storage_account_name = \"mystorageaccount\""));
@@ -200,7 +274,7 @@ mod tests {
     #[test]
     fn test_no_backend_config() {
         let config = HashMap::new();
-        let result = generate_backend_config(&config).unwrap();
+        let result = generate_backend_config(&config, None, None, None, None).unwrap();
         assert_eq!(result, "");
     }
 
@@ -218,8 +292,61 @@ mod tests {
             config.insert(k.clone(), v.clone());
         }
 
-        let result = generate_backend_config(&config);
+        let result = generate_backend_config(&config, None, None, None, None);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_pg_backend_with_table_name() {
+        let config_json = json!({
+            "backend": {
+                "type": "pg",
+                "conn_str": "postgres://user:pass@localhost/db",
+                "schema_name": "terraform_remote_state"
+            }
+        });
+
+        // Convert serde_json::Map to HashMap
+        let mut config = HashMap::new();
+        for (k, v) in config_json.as_object().unwrap() {
+            config.insert(k.clone(), v.clone());
+        }
+
+        let result = generate_backend_config(
+            &config,
+            Some("pmp.io/v1"),
+            Some("Database"),
+            Some("development"),
+            Some("my-db")
+        ).unwrap();
+
+        assert!(result.contains("backend \"pg\" {"));
+        assert!(result.contains("conn_str = \"postgres://user:pass@localhost/db\""));
+        assert!(result.contains("schema_name = \"terraform_remote_state\""));
+        // Should contain auto-generated table_name
+        assert!(result.contains("table_name = \"tf_"));
+    }
+
+    #[test]
+    fn test_calculate_table_name() {
+        let table_name = calculate_table_name("pmp.io/v1", "Database", "development", "my-db");
+
+        // Should start with "tf_"
+        assert!(table_name.starts_with("tf_"));
+
+        // Should be 43 characters (tf_ + 40 char SHA1 hex)
+        assert_eq!(table_name.len(), 43);
+
+        // Should be lowercase
+        assert_eq!(table_name, table_name.to_lowercase());
+
+        // Should be deterministic
+        let table_name2 = calculate_table_name("pmp.io/v1", "Database", "development", "my-db");
+        assert_eq!(table_name, table_name2);
+
+        // Different inputs should produce different table names
+        let table_name3 = calculate_table_name("pmp.io/v1", "Database", "production", "my-db");
+        assert_ne!(table_name, table_name3);
     }
 
     #[test]

@@ -4,7 +4,6 @@ use crate::template::metadata::{
 };
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
-use std::fs;
 
 /// Manager for ProjectCollection operations
 pub struct CollectionManager {
@@ -15,12 +14,12 @@ pub struct CollectionManager {
 
 impl CollectionManager {
     /// Load the collection from the current directory or parent directories
-    pub fn load() -> Result<Self> {
-        let (collection, root_path) = CollectionDiscovery::find_collection()?
+    pub fn load(ctx: &crate::context::Context) -> Result<Self> {
+        let (collection, root_path) = CollectionDiscovery::find_collection(&*ctx.fs)?
             .context("No ProjectCollection found in current directory or parent directories")?;
 
         // Discover projects in the "projects" folder
-        let projects = CollectionDiscovery::discover_projects(&root_path)?;
+        let projects = CollectionDiscovery::discover_projects(&*ctx.fs, &*ctx.output, &root_path)?;
 
         Ok(Self {
             collection,
@@ -31,12 +30,12 @@ impl CollectionManager {
 
     /// Load the collection from a specific path
     #[allow(dead_code)]
-    pub fn load_from_path(path: &Path) -> Result<Self> {
-        let (collection, root_path) = CollectionDiscovery::find_collection_in_path(path)?
+    pub fn load_from_path(ctx: &crate::context::Context, path: &Path) -> Result<Self> {
+        let (collection, root_path) = CollectionDiscovery::find_collection_in_path(&*ctx.fs, path)?
             .context("No ProjectCollection found at the specified path")?;
 
         // Discover projects in the "projects" folder
-        let projects = CollectionDiscovery::discover_projects(&root_path)?;
+        let projects = CollectionDiscovery::discover_projects(&*ctx.fs, &*ctx.output, &root_path)?;
 
         Ok(Self {
             collection,
@@ -47,10 +46,10 @@ impl CollectionManager {
 
     /// Create a new ProjectCollection at the specified path
     #[allow(dead_code)]
-    pub fn create(path: &Path, name: String, description: Option<String>) -> Result<Self> {
+    pub fn create(ctx: &crate::context::Context, path: &Path, name: String, description: Option<String>) -> Result<Self> {
         let pmp_file = path.join(".pmp.project-collection.yaml");
 
-        if pmp_file.exists() {
+        if ctx.fs.exists(&pmp_file) {
             anyhow::bail!("A .pmp.project-collection.yaml file already exists at this location");
         }
 
@@ -66,11 +65,11 @@ impl CollectionManager {
             },
         };
 
-        collection.save(&pmp_file)?;
+        collection.save(&*ctx.fs, &pmp_file)?;
 
         // Create the projects directory
         let projects_dir = path.join("projects");
-        fs::create_dir_all(&projects_dir)?;
+        ctx.fs.create_dir_all(&projects_dir)?;
 
         Ok(Self {
             collection,
@@ -81,8 +80,8 @@ impl CollectionManager {
 
     /// Refresh the list of discovered projects
     #[allow(dead_code)]
-    pub fn refresh_projects(&mut self) -> Result<()> {
-        self.projects = CollectionDiscovery::discover_projects(&self.root_path)?;
+    pub fn refresh_projects(&mut self, ctx: &crate::context::Context) -> Result<()> {
+        self.projects = CollectionDiscovery::discover_projects(&*ctx.fs, &*ctx.output, &self.root_path)?;
         Ok(())
     }
 

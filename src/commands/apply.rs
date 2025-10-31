@@ -1,10 +1,8 @@
 use crate::collection::{CollectionDiscovery, CollectionManager};
 use crate::executor::{Executor, ExecutorConfig, OpenTofuExecutor};
 use crate::hooks::HooksRunner;
-use crate::output;
 use crate::template::{ProjectResource, DynamicProjectEnvironmentResource};
 use anyhow::{Context, Result};
-use inquire::Select;
 use std::path::{Path, PathBuf};
 
 /// Handles the 'apply' command - runs executor apply with hooks
@@ -12,7 +10,7 @@ pub struct ApplyCommand;
 
 impl ApplyCommand {
     /// Execute the apply command
-    pub fn execute(project_path: Option<&str>) -> Result<()> {
+    pub fn execute(ctx: &crate::context::Context, project_path: Option<&str>) -> Result<()> {
         // Determine working directory
         let work_dir = if let Some(path) = project_path {
             PathBuf::from(path)
@@ -21,32 +19,32 @@ impl ApplyCommand {
         };
 
         // Detect context and get environment path
-        let (env_path, project_name, env_name) = Self::detect_and_select_environment(&work_dir)?;
+        let (env_path, project_name, env_name) = Self::detect_and_select_environment(ctx, &work_dir)?;
 
         // Load environment resource
         let env_file = env_path.join(".pmp.environment.yaml");
-        if !env_file.exists() {
+        if !ctx.fs.exists(&env_file) {
             anyhow::bail!("Environment file not found: {:?}", env_file);
         }
 
-        let resource = DynamicProjectEnvironmentResource::from_file(&env_file)
+        let resource = DynamicProjectEnvironmentResource::from_file(&*ctx.fs, &env_file)
             .context("Failed to load environment resource")?;
 
-        output::section("Apply");
-        output::key_value_highlight("Project", &project_name);
-        output::environment_badge(&env_name);
+        ctx.output.section("Apply");
+        ctx.output.key_value_highlight("Project", &project_name);
+        ctx.output.environment_badge(&env_name);
 
         if let Some(desc) = &resource.metadata.description {
-            output::key_value("Description", desc);
+            ctx.output.key_value("Description", desc);
         }
 
-        output::key_value("Kind", &resource.kind);
+        ctx.output.key_value("Kind", &resource.kind);
 
         // Get executor configuration
         let executor_config = resource.get_executor_config();
 
         // Load collection to get hooks
-        let (collection, _collection_root) = CollectionDiscovery::find_collection()?
+        let (collection, _collection_root) = CollectionDiscovery::find_collection(&*ctx.fs)?
             .context("ProjectCollection is required to run commands")?;
 
         let hooks = collection.get_hooks();
@@ -55,8 +53,8 @@ impl ApplyCommand {
         let executor = Self::get_executor(&executor_config.name)?;
 
         // Check if executor is installed
-        output::subsection("Prerequisites");
-        output::dimmed(&format!("Checking if {} is installed...", executor.get_name()));
+        ctx.output.subsection("Prerequisites");
+        ctx.output.dimmed(&format!("Checking if {} is installed...", executor.get_name()));
 
         if !executor.check_installed()? {
             anyhow::bail!(
@@ -65,7 +63,7 @@ impl ApplyCommand {
             );
         }
 
-        output::status_check(executor.get_name(), true);
+        ctx.output.status_check(executor.get_name(), true);
 
         // Convert env_path to string for executor
         let env_dir_str = env_path.to_str()
@@ -77,15 +75,15 @@ impl ApplyCommand {
         }
 
         // Initialize executor
-        output::subsection("Initialization");
-        output::dimmed(&format!("Initializing {}...", executor.get_name()));
+        ctx.output.subsection("Initialization");
+        ctx.output.dimmed(&format!("Initializing {}...", executor.get_name()));
         let init_output = executor.init(env_dir_str)?;
 
         if !init_output.status.success() {
             anyhow::bail!("Initialization failed");
         }
 
-        output::success("Initialization completed");
+        ctx.output.success("Initialization completed");
 
         // Build executor config
         let execution_config = ExecutorConfig {
@@ -94,8 +92,8 @@ impl ApplyCommand {
         };
 
         // Run apply
-        output::subsection("Running Apply");
-        output::dimmed(&format!("Executing {} apply...", executor.get_name()));
+        ctx.output.subsection("Running Apply");
+        ctx.output.dimmed(&format!("Executing {} apply...", executor.get_name()));
         executor.apply(&execution_config, env_dir_str)?;
 
         // Run post-apply hooks
@@ -103,37 +101,37 @@ impl ApplyCommand {
             HooksRunner::run_hooks(&hooks.post_apply, env_dir_str, "post-apply")?;
         }
 
-        output::blank();
-        output::success("Apply completed successfully");
+        ctx.output.blank();
+        ctx.output.success("Apply completed successfully");
 
         Ok(())
     }
 
     /// Detect context and select project/environment
     /// Returns: (environment_path, project_name, environment_name)
-    fn detect_and_select_environment(work_dir: &Path) -> Result<(PathBuf, String, String)> {
+    fn detect_and_select_environment(ctx: &crate::context::Context, work_dir: &Path) -> Result<(PathBuf, String, String)> {
         // Check if we're in an environment directory
-        if let Some(env_info) = Self::check_in_environment(work_dir)? {
+        if let Some(env_info) = Self::check_in_environment(ctx, work_dir)? {
             return Ok(env_info);
         }
 
         // Check if we're in a project directory
-        if let Some((project_path, project_name)) = Self::check_in_project(work_dir)? {
-            let env_name = Self::select_environment(&project_path)?;
+        if let Some((project_path, project_name)) = Self::check_in_project(ctx, work_dir)? {
+            let env_name = Self::select_environment(ctx, &project_path)?;
             let env_path = project_path.join("environments").join(&env_name);
             return Ok((env_path, project_name, env_name));
         }
 
         // We're in the collection or elsewhere - use find/search UI
-        Self::select_project_and_environment()
+        Self::select_project_and_environment(ctx)
     }
 
     /// Check if we're inside an environment directory
-    fn check_in_environment(dir: &Path) -> Result<Option<(PathBuf, String, String)>> {
+    fn check_in_environment(ctx: &crate::context::Context, dir: &Path) -> Result<Option<(PathBuf, String, String)>> {
         let env_file = dir.join(".pmp.environment.yaml");
 
-        if env_file.exists() {
-            let resource = DynamicProjectEnvironmentResource::from_file(&env_file)?;
+        if ctx.fs.exists(&env_file) {
+            let resource = DynamicProjectEnvironmentResource::from_file(&*ctx.fs, &env_file)?;
             let env_name = resource.metadata.environment_name.clone();
             let project_name = resource.metadata.name.clone();
 
@@ -144,11 +142,11 @@ impl ApplyCommand {
     }
 
     /// Check if we're inside a project directory (but not in an environment)
-    fn check_in_project(dir: &Path) -> Result<Option<(PathBuf, String)>> {
+    fn check_in_project(ctx: &crate::context::Context, dir: &Path) -> Result<Option<(PathBuf, String)>> {
         let project_file = dir.join(".pmp.project.yaml");
 
-        if project_file.exists() {
-            let resource = ProjectResource::from_file(&project_file)?;
+        if ctx.fs.exists(&project_file) {
+            let resource = ProjectResource::from_file(&*ctx.fs, &project_file)?;
             return Ok(Some((dir.to_path_buf(), resource.metadata.name.clone())));
         }
 
@@ -156,8 +154,8 @@ impl ApplyCommand {
     }
 
     /// Select an environment from a project
-    fn select_environment(project_path: &Path) -> Result<String> {
-        let environments = CollectionDiscovery::discover_environments(project_path)
+    fn select_environment(ctx: &crate::context::Context, project_path: &Path) -> Result<String> {
+        let environments = CollectionDiscovery::discover_environments(&*ctx.fs, project_path)
             .context("Failed to discover environments")?;
 
         if environments.is_empty() {
@@ -165,20 +163,19 @@ impl ApplyCommand {
         }
 
         if environments.len() == 1 {
-            output::environment_badge(&environments[0]);
+            ctx.output.environment_badge(&environments[0]);
             return Ok(environments[0].clone());
         }
 
-        let selected = Select::new("Select an environment:", environments.clone())
-            .prompt()
+        let selected = ctx.input.select("Select an environment:", environments)
             .context("Failed to select environment")?;
 
         Ok(selected)
     }
 
     /// Select project and environment using find/search UI
-    fn select_project_and_environment() -> Result<(PathBuf, String, String)> {
-        let manager = CollectionManager::load()
+    fn select_project_and_environment(ctx: &crate::context::Context) -> Result<(PathBuf, String, String)> {
+        let manager = CollectionManager::load(ctx)
             .context("Failed to load collection")?;
 
         let all_projects = manager.get_all_projects();
@@ -193,8 +190,7 @@ impl ApplyCommand {
             .map(|p| format!("{} ({})", p.name, p.kind))
             .collect();
 
-        let selected_project_display = Select::new("Select a project:", project_options.clone())
-            .prompt()
+        let selected_project_display = ctx.input.select("Select a project:", project_options.clone())
             .context("Failed to select project")?;
 
         let project_index = project_options.iter().position(|opt| opt == &selected_project_display)
@@ -204,7 +200,7 @@ impl ApplyCommand {
         let project_path = manager.get_project_path(selected_project);
 
         // Select environment
-        let env_name = Self::select_environment(&project_path)?;
+        let env_name = Self::select_environment(ctx, &project_path)?;
         let env_path = project_path.join("environments").join(&env_name);
 
         Ok((env_path, selected_project.name.clone(), env_name))

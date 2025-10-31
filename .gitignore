@@ -32,3 +32,6 @@ target
 # Claude stuff
 
 /.claude
+
+# Example project collections
+/examples/infrastructure-example/projects

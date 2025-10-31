@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: pmp-postgres-backend
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: terraform
+      POSTGRES_PASSWORD: terraform
+      POSTGRES_DB: terraform_backend
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U terraform -d terraform_backend"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    volumes:
+      - ./docker/postgres-init:/docker-entrypoint-initdb.d:ro
+    networks:
+      - pmp-network
+
+networks:
+  pmp-network:
+    driver: bridge

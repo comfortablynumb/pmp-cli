@@ -1,4 +1,6 @@
 use anyhow::Result;
+use std::collections::HashMap;
+use std::path::Path;
 use std::process::Output;
 
 /// Configuration for executor execution, typically loaded from .pmp.yaml
@@ -10,8 +12,17 @@ pub struct ExecutorConfig {
     pub apply_command: Option<String>,
 }
 
+/// Project metadata for backend table name generation
+#[derive(Debug, Clone)]
+pub struct ProjectMetadata<'a> {
+    pub api_version: &'a str,
+    pub kind: &'a str,
+    pub environment: &'a str,
+    pub project_name: &'a str,
+}
+
 /// Trait for Infrastructure as Code executors (OpenTofu, Terraform, etc.)
-pub trait Executor {
+pub trait Executor: Send + Sync {
     /// Check if the executor is installed and available
     /// Typically runs a help or version command to verify
     fn check_installed(&self) -> Result<bool>;
@@ -38,4 +49,40 @@ pub trait Executor {
 
     /// Get the default apply command for this executor
     fn default_apply_command(&self) -> &str;
+
+    /// Generate common infrastructure file (e.g., _common.tf) with backend and module configuration
+    /// Default implementation does nothing (for executors that don't support backends)
+    fn generate_common_file(
+        &self,
+        _environment_path: &Path,
+        _executor_config: &HashMap<String, serde_json::Value>,
+        _project_metadata: &ProjectMetadata,
+        _plugins: Option<&[crate::template::metadata::AddedPlugin]>,
+    ) -> Result<()> {
+        Ok(())
+    }
+
+    /// Generate common infrastructure file for plugin module with backend configuration
+    /// Default implementation does nothing (for executors that don't support backends)
+    fn generate_plugin_common_file(
+        &self,
+        _plugin_path: &Path,
+        _executor_config: &HashMap<String, serde_json::Value>,
+        _reference_project_metadata: &ProjectMetadata,
+    ) -> Result<()> {
+        Ok(())
+    }
+
+    /// Get the file extension used by this executor (e.g., ".tf" for OpenTofu/Terraform)
+    /// Default implementation returns empty string
+    #[allow(dead_code)]
+    fn file_extension(&self) -> &str {
+        ""
+    }
+
+    /// Check if this executor supports remote backends
+    /// Default implementation returns false
+    fn supports_backend(&self) -> bool {
+        false
+    }
 }

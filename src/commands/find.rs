@@ -9,15 +9,16 @@ pub struct FindCommand;
 impl FindCommand {
     /// Execute the find command
     pub fn execute(
+        ctx: &crate::context::Context,
         name: Option<&str>,
         kind: Option<&str>,
     ) -> Result<()> {
         // Load the collection
-        let manager = CollectionManager::load()?;
+        let manager = CollectionManager::load(ctx)?;
 
         // If no search criteria provided via CLI, ask interactively
         let projects = if name.is_none() && kind.is_none() {
-            Self::interactive_search(&manager)?
+            Self::interactive_search(ctx, &manager)?
         } else {
             // Find projects based on CLI criteria
             if let Some(name) = name {
@@ -31,13 +32,13 @@ impl FindCommand {
         };
 
         // Display results
-        Self::display_results(&manager, &projects)?;
+        Self::display_results(ctx, &manager, &projects)?;
 
         Ok(())
     }
 
     /// Interactive search - ask user for search type and criteria
-    fn interactive_search(manager: &CollectionManager) -> Result<Vec<&ProjectReference>> {
+    fn interactive_search<'a>(_ctx: &crate::context::Context, manager: &'a CollectionManager) -> Result<Vec<&'a ProjectReference>> {
         // Ask user what type of search they want to perform
         let search_type_options = vec![
             "Search by name",
@@ -67,7 +68,7 @@ impl FindCommand {
     }
 
     /// Display the search results
-    fn display_results(manager: &CollectionManager, projects: &[&ProjectReference]) -> Result<()> {
+    fn display_results(ctx: &crate::context::Context, manager: &CollectionManager, projects: &[&ProjectReference]) -> Result<()> {
         use crate::collection::CollectionDiscovery;
         use crate::template::{ProjectResource, DynamicProjectEnvironmentResource};
 
@@ -113,7 +114,7 @@ impl FindCommand {
             anyhow::bail!("Project file not found: {:?}", project_file);
         }
 
-        let project_resource = ProjectResource::from_file(&project_file)
+        let project_resource = ProjectResource::from_file(&*ctx.fs, &project_file)
             .context("Failed to load project resource")?;
 
         if let Some(desc) = &project_resource.metadata.description {
@@ -121,7 +122,7 @@ impl FindCommand {
         }
 
         // Discover environments
-        let environments = CollectionDiscovery::discover_environments(&full_path)
+        let environments = CollectionDiscovery::discover_environments(&*ctx.fs, &full_path)
             .context("Failed to discover environments")?;
 
         if environments.is_empty() {
@@ -152,7 +153,7 @@ impl FindCommand {
             anyhow::bail!("Environment file not found: {:?}", env_file);
         }
 
-        let env_resource = DynamicProjectEnvironmentResource::from_file(&env_file)
+        let env_resource = DynamicProjectEnvironmentResource::from_file(&*ctx.fs, &env_file)
             .context("Failed to load environment resource")?;
 
         output::subsection("Environment Details");
