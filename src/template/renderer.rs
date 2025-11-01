@@ -17,6 +17,8 @@ impl TemplateRenderer {
         // Register custom helpers
         handlebars.register_helper("eq", Box::new(eq_helper));
         handlebars.register_helper("contains", Box::new(contains_helper));
+        handlebars.register_helper("k8s_name", Box::new(k8s_name_helper));
+        handlebars.register_helper("bool", Box::new(bool_helper));
 
         Self { handlebars }
     }
@@ -191,4 +193,180 @@ fn contains_helper(
     }
 
     Ok(())
+}
+
+/// Helper function to convert strings to Kubernetes-compatible DNS subdomain names (RFC 1123)
+/// Rules: lowercase alphanumeric, '-', '.'; must start/end with alphanumeric; max 253 chars
+fn k8s_name_helper(
+    h: &Helper,
+    _: &Handlebars,
+    _: &handlebars::Context,
+    _: &mut RenderContext,
+    out: &mut dyn Output,
+) -> HelperResult {
+    let value = h
+        .param(0)
+        .and_then(|v| v.value().as_str())
+        .ok_or_else(|| {
+            handlebars::RenderError::from(handlebars::RenderErrorReason::Other(
+                "k8s_name requires a string parameter".to_string(),
+            ))
+        })?;
+
+    // Sanitize: keep only lowercase alphanumeric, '-', and '.'
+    // Replace underscores with hyphens, convert to lowercase, remove invalid chars
+    let mut sanitized = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            'a'..='z' | '0'..='9' | '-' | '.' => sanitized.push(ch),
+            'A'..='Z' => sanitized.push(ch.to_ascii_lowercase()),
+            '_' => sanitized.push('-'),
+            _ => {} // Skip invalid characters
+        }
+    }
+
+    // Trim non-alphanumeric from start and end
+    let trimmed = sanitized.trim_matches(|c: char| !c.is_alphanumeric());
+
+    // Truncate to 253 characters (Kubernetes DNS subdomain limit)
+    let result = if trimmed.len() > 253 {
+        &trimmed[..253].trim_end_matches(|c: char| !c.is_alphanumeric())
+    } else {
+        trimmed
+    };
+
+    out.write(result)?;
+    Ok(())
+}
+
+/// Helper function to explicitly render boolean values as "true" or "false" strings
+/// This prevents Handlebars from treating booleans as conditional expressions
+fn bool_helper(
+    h: &Helper,
+    _: &Handlebars,
+    _: &handlebars::Context,
+    _: &mut RenderContext,
+    out: &mut dyn Output,
+) -> HelperResult {
+    let value = h
+        .param(0)
+        .ok_or_else(|| {
+            handlebars::RenderError::from(handlebars::RenderErrorReason::Other(
+                "bool helper requires a parameter".to_string(),
+            ))
+        })?
+        .value();
+
+    match value {
+        Value::Bool(true) => out.write("true")?,
+        Value::Bool(false) => out.write("false")?,
+        _ => {
+            // For non-boolean values, convert to string representation
+            out.write(&value.to_string())?;
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_k8s_name_underscore_conversion() {
+        let renderer = TemplateRenderer::new();
+        assert_eq!(
+            renderer
+                .handlebars
+                .render_template("{{k8s_name name}}", &json!({"name": "my_api"}))
+                .unwrap(),
+            "my-api"
+        );
+    }
+
+    #[test]
+    fn test_k8s_name_already_valid() {
+        let renderer = TemplateRenderer::new();
+        assert_eq!(
+            renderer
+                .handlebars
+                .render_template("{{k8s_name name}}", &json!({"name": "my-api"}))
+                .unwrap(),
+            "my-api"
+        );
+    }
+
+    #[test]
+    fn test_k8s_name_uppercase_conversion() {
+        let renderer = TemplateRenderer::new();
+        assert_eq!(
+            renderer
+                .handlebars
+                .render_template("{{k8s_name name}}", &json!({"name": "MyApp"}))
+                .unwrap(),
+            "myapp"
+        );
+    }
+
+    #[test]
+    fn test_k8s_name_sanitization() {
+        let renderer = TemplateRenderer::new();
+        assert_eq!(
+            renderer
+                .handlebars
+                .render_template("{{k8s_name name}}", &json!({"name": "my@app#123"}))
+                .unwrap(),
+            "myapp123"
+        );
+    }
+
+    #[test]
+    fn test_k8s_name_truncation() {
+        let renderer = TemplateRenderer::new();
+        let long_name = "a".repeat(300);
+        let result = renderer
+            .handlebars
+            .render_template("{{k8s_name name}}", &json!({"name": long_name}))
+            .unwrap();
+        assert_eq!(result.len(), 253);
+        assert!(result.chars().last().unwrap().is_alphanumeric());
+    }
+
+    #[test]
+    fn test_k8s_name_trim_non_alphanumeric() {
+        let renderer = TemplateRenderer::new();
+        assert_eq!(
+            renderer
+                .handlebars
+                .render_template("{{k8s_name name}}", &json!({"name": "-my-app-"}))
+                .unwrap(),
+            "my-app"
+        );
+    }
+
+    #[test]
+    fn test_k8s_name_multiple_underscores() {
+        let renderer = TemplateRenderer::new();
+        assert_eq!(
+            renderer
+                .handlebars
+                .render_template("{{k8s_name name}}", &json!({"name": "my_test_api_service"}))
+                .unwrap(),
+            "my-test-api-service"
+        );
+    }
+
+    #[test]
+    fn test_k8s_name_dots_preserved() {
+        let renderer = TemplateRenderer::new();
+        assert_eq!(
+            renderer
+                .handlebars
+                .render_template("{{k8s_name name}}", &json!({"name": "api.example.com"}))
+                .unwrap(),
+            "api.example.com"
+        );
+    }
 }

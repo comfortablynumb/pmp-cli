@@ -1,0 +1,107 @@
+variable "namespace" {
+  description = "Kubernetes namespace for Vault"
+  type        = string
+  default     = "{{namespace}}"
+}
+
+variable "chart_version" {
+  description = "Vault Helm chart version"
+  type        = string
+  default     = "{{chart_version}}"
+}
+
+variable "create_namespace" {
+  description = "Whether to create the namespace if it doesn't exist"
+  type        = bool
+  default     = {{bool create_namespace}}
+}
+
+variable "server_replicas" {
+  description = "Number of Vault server replicas"
+  type        = number
+  default     = {{server_replicas}}
+}
+
+variable "ha_enabled" {
+  description = "Enable high availability mode with Raft storage"
+  type        = bool
+  default     = {{bool ha_enabled}}
+}
+
+variable "ui_enabled" {
+  description = "Enable Vault UI"
+  type        = bool
+  default     = {{bool ui_enabled}}
+}
+
+variable "ui_service_type" {
+  description = "Service type for Vault UI (ClusterIP, LoadBalancer, NodePort)"
+  type        = string
+  default     = "{{ui_service_type}}"
+}
+
+variable "enable_ingress" {
+  description = "Enable ingress for Vault UI"
+  type        = bool
+  default     = {{bool enable_ingress}}
+}
+
+variable "ingress_host" {
+  description = "Hostname for Vault ingress (optional)"
+  type        = string
+  default     = "{{ingress_host}}"
+}
+
+variable "ingress_class" {
+  description = "Ingress class name"
+  type        = string
+  default     = "{{ingress_class}}"
+}
+
+variable "enable_tls" {
+  description = "Enable TLS for Vault"
+  type        = bool
+  default     = {{bool enable_tls}}
+}
+
+variable "storage_size" {
+  description = "Storage size for Vault data (when using HA mode)"
+  type        = string
+  default     = "{{storage_size}}"
+}
+
+variable "injector_enabled" {
+  description = "Enable Vault agent injector for sidecar injection"
+  type        = bool
+  default     = {{bool injector_enabled}}
+}
+
+variable "injector_replicas" {
+  description = "Number of Vault agent injector replicas"
+  type        = number
+  default     = {{injector_replicas}}
+}
+
+variable "resources_requests_cpu" {
+  description = "CPU resource request for Vault server"
+  type        = string
+  default     = "{{resources_requests_cpu}}"
+}
+
+variable "resources_requests_memory" {
+  description = "Memory resource request for Vault server"
+  type        = string
+  default     = "{{resources_requests_memory}}"
+}
+
+variable "resources_limits_cpu" {
+  description = "CPU resource limit for Vault server"
+  type        = string
+  default     = "{{resources_limits_cpu}}"
+}
+
+variable "resources_limits_memory" {
+  description = "Memory resource limit for Vault server"
+  type        = string
+  default     = "{{resources_limits_memory}}"
+}

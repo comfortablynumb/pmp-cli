@@ -1,0 +1,86 @@
+apiVersion: pmp.io/v1
+kind: Template
+metadata:
+  name: postgres
+  description: PostgreSQL database deployment with Bitnami Helm chart
+
+spec:
+  apiVersion: pmp.io/v1
+  kind: Postgres
+  executor: opentofu
+
+  inputs:
+    namespace:
+      default: "postgres"
+      description: Kubernetes namespace for PostgreSQL
+
+    chart_version:
+      default: "15.5.38"
+      description: Bitnami PostgreSQL Helm chart version
+
+    create_namespace:
+      default: true
+      description: Whether to create the namespace if it doesn't exist
+
+    database_name:
+      default: "mydb"
+      description: Name of the PostgreSQL database to create
+
+    postgres_username:
+      default: "postgres"
+      description: PostgreSQL superuser username
+
+    postgres_password:
+      default: "changeme123"
+      description: PostgreSQL superuser password (CHANGE IN PRODUCTION!)
+
+    storage_size:
+      default: "8Gi"
+      description: Size of the persistent volume for database data
+
+    storage_class:
+      default: ""
+      description: Storage class name for persistence (empty for default)
+
+    persistence_enabled:
+      default: true
+      description: Enable persistent storage for database data
+
+    architecture:
+      enum_values: ["standalone", "replication"]
+      default: "standalone"
+      description: PostgreSQL architecture (standalone or replication)
+
+    replica_count:
+      default: 1
+      description: Number of read replicas (only for replication mode)
+
+    resources_requests_cpu:
+      default: "250m"
+      description: CPU resource request for PostgreSQL
+
+    resources_requests_memory:
+      default: "256Mi"
+      description: Memory resource request for PostgreSQL
+
+    resources_limits_cpu:
+      default: "500m"
+      description: CPU resource limit for PostgreSQL
+
+    resources_limits_memory:
+      default: "512Mi"
+      description: Memory resource limit for PostgreSQL
+
+    metrics_enabled:
+      default: false
+      description: Enable Prometheus metrics exporter
+
+    service_type:
+      enum_values: ["ClusterIP", "LoadBalancer", "NodePort"]
+      default: "ClusterIP"
+      description: Kubernetes service type for PostgreSQL
+
+    sslmode:
+      enum_values: ["disable", "prefer", "require"]
+      default: "prefer"
+      description: PostgreSQL SSL mode for client connections

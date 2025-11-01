@@ -1,0 +1,120 @@
+variable "namespace" {
+  description = "Kubernetes namespace for PostgreSQL"
+  type        = string
+  default     = "{{namespace}}"
+}
+
+variable "chart_version" {
+  description = "Bitnami PostgreSQL Helm chart version"
+  type        = string
+  default     = "{{chart_version}}"
+}
+
+variable "create_namespace" {
+  description = "Whether to create the namespace if it doesn't exist"
+  type        = bool
+  default     = {{create_namespace}}
+}
+
+variable "database_name" {
+  description = "Name of the PostgreSQL database to create"
+  type        = string
+  default     = "{{database_name}}"
+}
+
+variable "postgres_username" {
+  description = "PostgreSQL superuser username"
+  type        = string
+  default     = "{{postgres_username}}"
+}
+
+variable "postgres_password" {
+  description = "PostgreSQL superuser password"
+  type        = string
+  default     = "{{postgres_password}}"
+  sensitive   = true
+}
+
+variable "storage_size" {
+  description = "Size of the persistent volume for database data"
+  type        = string
+  default     = "{{storage_size}}"
+}
+
+variable "storage_class" {
+  description = "Storage class name for persistence (empty for default)"
+  type        = string
+  default     = "{{storage_class}}"
+}
+
+variable "persistence_enabled" {
+  description = "Enable persistent storage for database data"
+  type        = bool
+  default     = {{persistence_enabled}}
+}
+
+variable "architecture" {
+  description = "PostgreSQL architecture (standalone or replication)"
+  type        = string
+  default     = "{{architecture}}"
+  validation {
+    condition     = contains(["standalone", "replication"], var.architecture)
+    error_message = "Architecture must be either 'standalone' or 'replication'."
+  }
+}
+
+variable "replica_count" {
+  description = "Number of read replicas (only for replication mode)"
+  type        = number
+  default     = {{replica_count}}
+}
+
+variable "resources_requests_cpu" {
+  description = "CPU resource request for PostgreSQL"
+  type        = string
+  default     = "{{resources_requests_cpu}}"
+}
+
+variable "resources_requests_memory" {
+  description = "Memory resource request for PostgreSQL"
+  type        = string
+  default     = "{{resources_requests_memory}}"
+}
+
+variable "resources_limits_cpu" {
+  description = "CPU resource limit for PostgreSQL"
+  type        = string
+  default     = "{{resources_limits_cpu}}"
+}
+
+variable "resources_limits_memory" {
+  description = "Memory resource limit for PostgreSQL"
+  type        = string
+  default     = "{{resources_limits_memory}}"
+}
+
+variable "metrics_enabled" {
+  description = "Enable Prometheus metrics exporter"
+  type        = bool
+  default     = {{metrics_enabled}}
+}
+
+variable "service_type" {
+  description = "Kubernetes service type for PostgreSQL"
+  type        = string
+  default     = "{{service_type}}"
+  validation {
+    condition     = contains(["ClusterIP", "LoadBalancer", "NodePort"], var.service_type)
+    error_message = "Service type must be one of: ClusterIP, LoadBalancer, NodePort."
+  }
+}
+
+variable "sslmode" {
+  description = "PostgreSQL SSL mode for client connections"
+  type        = string
+  default     = "{{sslmode}}"
+  validation {
+    condition     = contains(["disable", "prefer", "require"], var.sslmode)
+    error_message = "SSL mode must be one of: disable, prefer, require."
+  }
+}

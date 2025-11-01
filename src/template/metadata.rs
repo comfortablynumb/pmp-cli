@@ -313,6 +313,12 @@ pub struct AddedPlugin {
     /// Reference to the project where this plugin is added
     pub project: PluginProjectReference,
 
+    /// Reference to the project that this plugin connects to (for plugins with requires_project_with_template)
+    /// This is used to generate terraform_remote_state data sources in the main project's _common.tf
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reference_project: Option<PluginProjectReference>,
+
     /// Inputs used when adding the plugin
     pub inputs: HashMap<String, Value>,
 
@@ -326,6 +332,23 @@ pub struct ProjectPlugins {
     /// Plugins that have been added to this environment
     #[serde(default)]
     pub added: Vec<AddedPlugin>,
+}
+
+/// Reference to the template used to generate this project
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TemplateReference {
+    /// Name of the template pack
+    pub template_pack_name: String,
+
+    /// Name of the template within the pack
+    pub name: String,
+}
+
+/// Reference to the environment for this project
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EnvironmentReference {
+    /// Name of the environment
+    pub name: String,
 }
 
 /// Project specification
@@ -348,6 +371,16 @@ pub struct ProjectSpec {
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub plugins: Option<ProjectPlugins>,
+
+    /// Reference to the template used to generate this project
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub template: Option<TemplateReference>,
+
+    /// Reference to the environment for this project
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub environment: Option<EnvironmentReference>,
 }
 
 // ============================================================================

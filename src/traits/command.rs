@@ -102,6 +102,7 @@ impl MockCommandExecutor {
         }
     }
 
+    #[allow(dead_code)]
     pub fn add_output(&self, output: MockCommandResult) {
         let mut outputs = self.outputs.lock().unwrap();
         outputs.push(output);

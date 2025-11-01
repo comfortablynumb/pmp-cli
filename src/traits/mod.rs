@@ -11,8 +11,8 @@ pub use command::{CommandExecutor, RealCommandExecutor};
 #[cfg(test)]
 pub use filesystem::MockFileSystem;
 #[cfg(test)]
-pub use user_input::{MockUserInput, MockResponse};
+pub use user_input::MockUserInput;
 #[cfg(test)]
-pub use output::{MockOutput, OutputMessage};
+pub use output::MockOutput;
 #[cfg(test)]
 pub use command::MockCommandExecutor;

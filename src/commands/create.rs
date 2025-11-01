@@ -9,7 +9,7 @@ pub struct CreateCommand;
 
 impl CreateCommand {
     /// Execute the create command
-    pub fn execute(ctx: &crate::context::Context, output_path: Option<&str>, template_packs_path: Option<&str>) -> Result<()> {
+    pub fn execute(ctx: &crate::context::Context, output_path: Option<&str>, template_packs_paths: Option<&str>) -> Result<()> {
         // Step 1: ProjectCollection is REQUIRED
         let (collection, collection_root) = CollectionDiscovery::find_collection(&*ctx.fs)?
             .context("ProjectCollection is required. No .pmp.project-collection.yaml found in current directory or parent directories.\n\nPlease create a ProjectCollection first or navigate to an existing one.")?;
@@ -30,11 +30,25 @@ impl CreateCommand {
         }
 
         // Step 3: Discover template packs
-        let custom_paths = if let Some(path) = template_packs_path {
-            vec![path]
+        // Parse flag paths (colon-separated)
+        let flag_paths: Vec<String> = if let Some(paths) = template_packs_paths {
+            crate::template::discovery::parse_colon_separated_paths(paths)
         } else {
             vec![]
         };
+
+        // Parse environment variable paths (colon-separated)
+        let env_paths: Vec<String> = std::env::var("PMP_TEMPLATE_PACKS_PATHS")
+            .ok()
+            .map(|p| crate::template::discovery::parse_colon_separated_paths(&p))
+            .unwrap_or_default();
+
+        // Combine paths: flag paths have priority over env paths
+        let mut all_paths = flag_paths;
+        all_paths.extend(env_paths);
+
+        // Convert to Vec<&str> for the discovery function
+        let custom_paths: Vec<&str> = all_paths.iter().map(|s| s.as_str()).collect();
 
         let all_template_packs = TemplateDiscovery::discover_template_packs_with_custom_paths(&*ctx.fs, &*ctx.output, &custom_paths)
             .context("Failed to discover template packs")?;
@@ -82,7 +96,7 @@ impl CreateCommand {
         ctx.output.info(&format!("Found {} compatible template pack(s)", filtered_packs_with_templates.len()));
 
         // Step 5: Select template pack
-        let (_selected_pack, available_templates) = if filtered_packs_with_templates.len() == 1 {
+        let (selected_pack, available_templates) = if filtered_packs_with_templates.len() == 1 {
             // Only one pack, use it automatically
             let (pack, templates) = filtered_packs_with_templates.into_iter().next().unwrap();
             ctx.output.subsection("Template Pack");
@@ -366,6 +380,8 @@ impl CreateCommand {
             &project_name,
             &selected_template.resource,
             &inputs,
+            &selected_pack.resource.metadata.name,
+            &selected_template.resource.metadata.name,
         ).context("Failed to generate .pmp.environment.yaml file")?;
 
         ctx.output.blank();
@@ -406,21 +422,25 @@ impl CreateCommand {
 
             let value = if let Some(enum_values) = &input_spec.enum_values {
                 // This is a select input
+                // Sort enum values alphabetically for display
+                let mut sorted_enum_values = enum_values.clone();
+                sorted_enum_values.sort();
+
                 let default_str = input_spec.default
                     .as_ref()
                     .and_then(|v| v.as_str())
-                    .or_else(|| enum_values.first().map(|s| s.as_str()));
+                    .or_else(|| sorted_enum_values.first().map(|s| s.as_str()));
 
                 let selected = if let Some(default) = default_str {
                     // Find the starting cursor position
-                    let starting_cursor = enum_values.iter().position(|v| v == default).unwrap_or(0);
+                    let starting_cursor = sorted_enum_values.iter().position(|v| v == default).unwrap_or(0);
                     // For now, we'll just select without starting cursor support
                     // TODO: Enhance UserInput trait to support starting_cursor
                     let _ = starting_cursor; // Suppress unused warning
-                    ctx.input.select(description, enum_values.clone())
+                    ctx.input.select(description, sorted_enum_values.clone())
                         .context("Failed to get input")?
                 } else {
-                    ctx.input.select(description, enum_values.clone())
+                    ctx.input.select(description, sorted_enum_values)
                         .context("Failed to get input")?
                 };
 
@@ -515,9 +535,12 @@ impl CreateCommand {
         project_name: &str,
         template: &crate::template::metadata::TemplateResource,
         inputs: &std::collections::HashMap<String, serde_json::Value>,
+        template_pack_name: &str,
+        template_name: &str,
     ) -> Result<()> {
         use crate::template::metadata::{
             DynamicProjectEnvironmentResource, DynamicProjectEnvironmentMetadata, ProjectSpec, ResourceDefinition,
+            TemplateReference, EnvironmentReference,
         };
 
         // Create DynamicProjectEnvironmentResource structure with apiVersion/kind from template
@@ -542,6 +565,13 @@ impl CreateCommand {
                 inputs: inputs.clone(),
                 custom: None,  // Templates no longer have custom field
                 plugins: None,  // No plugins added yet
+                template: Some(TemplateReference {
+                    template_pack_name: template_pack_name.to_string(),
+                    name: template_name.to_string(),
+                }),
+                environment: Some(EnvironmentReference {
+                    name: environment_name.to_string(),
+                }),
             },
         };
 

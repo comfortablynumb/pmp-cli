@@ -80,7 +80,18 @@ impl PreviewCommand {
         let init_output = executor.init(env_dir_str)?;
 
         if !init_output.status.success() {
-            anyhow::bail!("Initialization failed");
+            // Display captured stdout and stderr before failing
+            if !init_output.stdout.is_empty() {
+                if let Ok(stdout_str) = String::from_utf8(init_output.stdout.clone()) {
+                    ctx.output.error(&stdout_str);
+                }
+            }
+            if !init_output.stderr.is_empty() {
+                if let Ok(stderr_str) = String::from_utf8(init_output.stderr.clone()) {
+                    ctx.output.error(&stderr_str);
+                }
+            }
+            anyhow::bail!("Initialization failed with exit code: {:?}", init_output.status.code());
         }
 
         ctx.output.success("Initialization completed");

@@ -62,17 +62,6 @@ pub trait Executor: Send + Sync {
         Ok(())
     }
 
-    /// Generate common infrastructure file for plugin module with backend configuration
-    /// Default implementation does nothing (for executors that don't support backends)
-    fn generate_plugin_common_file(
-        &self,
-        _plugin_path: &Path,
-        _executor_config: &HashMap<String, serde_json::Value>,
-        _reference_project_metadata: &ProjectMetadata,
-    ) -> Result<()> {
-        Ok(())
-    }
-
     /// Get the file extension used by this executor (e.g., ".tf" for OpenTofu/Terraform)
     /// Default implementation returns empty string
     #[allow(dead_code)]

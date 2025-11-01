@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde_json::Value;
 use std::collections::HashMap;
 use sha1::{Sha1, Digest};
@@ -185,6 +185,7 @@ fn escape_hcl_string(s: &str) -> String {
 ///
 /// Creates Terraform module blocks that reference plugin modules in the modules/ directory.
 /// Module source paths are relative to the environment directory.
+/// For plugins with reference projects, passes connection parameters from the data source.
 ///
 /// # Arguments
 /// * `plugins` - Slice of AddedPlugin structs containing plugin metadata
@@ -206,10 +207,155 @@ pub fn generate_module_blocks(plugins: &[AddedPlugin]) -> String {
 
         hcl.push_str(&format!("module \"{}\" {{\n", module_name));
         hcl.push_str(&format!("  source = \"{}\"\n", source_path));
+
+        // If plugin has a reference project, pass connection parameters from data source
+        if let Some(ref_project) = &plugin.reference_project {
+            let data_source_name = format!("plugin_{}_{}_{}",
+                plugin.template_pack_name,
+                plugin.name,
+                ref_project.name
+            );
+
+            hcl.push_str("\n  # Connection parameters from reference project\n");
+            hcl.push_str(&format!("  postgres_host         = data.terraform_remote_state.{}.outputs.postgres_host\n", data_source_name));
+            hcl.push_str(&format!("  postgres_port         = data.terraform_remote_state.{}.outputs.postgres_port\n", data_source_name));
+            hcl.push_str(&format!("  postgres_database     = data.terraform_remote_state.{}.outputs.postgres_database_name\n", data_source_name));
+            hcl.push_str(&format!("  postgres_username     = data.terraform_remote_state.{}.outputs.postgres_username\n", data_source_name));
+            hcl.push_str(&format!("  postgres_password     = data.terraform_remote_state.{}.outputs.postgres_password\n", data_source_name));
+            hcl.push_str(&format!("  postgres_sslmode      = data.terraform_remote_state.{}.outputs.postgres_sslmode\n", data_source_name));
+            hcl.push_str(&format!("  postgres_service_name = data.terraform_remote_state.{}.outputs.postgres_service_name\n", data_source_name));
+            hcl.push_str(&format!("  postgres_namespace    = data.terraform_remote_state.{}.outputs.postgres_namespace\n", data_source_name));
+        }
+
         hcl.push_str("}\n\n");
     }
 
     hcl
+}
+
+/// Generate terraform_remote_state data source blocks for plugins with reference projects
+///
+/// # Arguments
+/// * `plugins` - Slice of AddedPlugin structs containing plugin metadata
+/// * `executor_config` - Executor configuration from collection (contains backend settings)
+///
+/// # Returns
+/// HCL string containing data source blocks, or empty string if no plugins with references
+pub fn generate_data_source_backends(
+    plugins: &[AddedPlugin],
+    executor_config: &HashMap<String, serde_json::Value>,
+) -> Result<String> {
+    if plugins.is_empty() {
+        return Ok(String::new());
+    }
+
+    // Filter plugins that have reference projects
+    let plugins_with_refs: Vec<&AddedPlugin> = plugins
+        .iter()
+        .filter(|p| p.reference_project.is_some())
+        .collect();
+
+    if plugins_with_refs.is_empty() {
+        return Ok(String::new());
+    }
+
+    let mut hcl = String::new();
+    hcl.push_str("\n# Data sources for plugin reference projects\n");
+
+    for plugin in plugins_with_refs {
+        let reference = plugin.reference_project.as_ref().unwrap();
+
+        // Data source name: plugin_{template_pack_name}_{plugin_name}_{reference_project_name}
+        let data_source_name = format!("plugin_{}_{}_{}",
+            plugin.template_pack_name,
+            plugin.name,
+            reference.name
+        );
+
+        // Get backend type from executor config
+        let backend_type = executor_config
+            .get("backend")
+            .and_then(|b| b.get("type"))
+            .and_then(|t| t.as_str())
+            .unwrap_or("local");
+
+        // Generate backend config pointing to reference project's state
+        let backend_config_hcl = generate_backend_config_map(
+            executor_config,
+            Some(&reference.api_version),
+            Some(&reference.kind),
+            Some(&reference.environment),
+            Some(&reference.name),
+        )?;
+
+        // Generate data source block
+        hcl.push_str(&format!("data \"terraform_remote_state\" \"{}\" {{\n", data_source_name));
+        hcl.push_str(&format!("  backend = \"{}\"\n", backend_type));
+
+        if !backend_config_hcl.is_empty() {
+            hcl.push_str("  config = {\n");
+            hcl.push_str(&backend_config_hcl);
+            hcl.push_str("  }\n");
+        }
+
+        hcl.push_str("}\n\n");
+    }
+
+    Ok(hcl)
+}
+
+/// Generate backend configuration as a map (for data source config blocks)
+/// Returns the config map content (without wrapping config = {})
+fn generate_backend_config_map(
+    executor_config: &HashMap<String, serde_json::Value>,
+    api_version: Option<&str>,
+    kind: Option<&str>,
+    environment: Option<&str>,
+    project_name: Option<&str>,
+) -> Result<String> {
+    let backend_config = executor_config
+        .get("backend")
+        .and_then(|b| b.as_object())
+        .context("No backend configuration found in executor config")?;
+
+    let backend_type = backend_config
+        .get("type")
+        .and_then(|t| t.as_str())
+        .unwrap_or("local");
+
+    // If local backend, return empty (local doesn't need config in data source)
+    if backend_type == "local" {
+        return Ok(String::new());
+    }
+
+    let mut config_lines = Vec::new();
+
+    // Process each backend config parameter
+    for (key, value) in backend_config.iter() {
+        if key == "type" || key == "table_name" {
+            continue; // Skip the type field and table_name (will be auto-injected)
+        }
+
+        // For other fields, use the value from config
+        let value_str = match value {
+            serde_json::Value::String(s) => format!("\"{}\"", escape_hcl_string(s)),
+            serde_json::Value::Number(n) => n.to_string(),
+            serde_json::Value::Bool(b) => b.to_string(),
+            _ => continue, // Skip complex types
+        };
+
+        config_lines.push(format!("    {} = {}", key, value_str));
+    }
+
+    // Auto-inject table_name for PostgreSQL backends
+    if backend_type == "pg" {
+        if let (Some(api), Some(k), Some(env), Some(name)) = (api_version, kind, environment, project_name) {
+            let table_name = calculate_table_name(api, k, env, name);
+            config_lines.push(format!("    table_name = \"{}\"", escape_hcl_string(&table_name)));
+        }
+    }
+
+    Ok(config_lines.join("\n") + "\n")
 }
 
 #[cfg(test)]

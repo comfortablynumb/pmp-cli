@@ -1,0 +1,146 @@
+terraform {
+  required_providers {
+    postgresql = {
+      source  = "cyrilgdn/postgresql"
+      version = "~> 1.22"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.6"
+    }
+  }
+}
+
+# PostgreSQL provider configuration
+# Connection details are passed as variables from the parent module
+# The parent module reads from the reference postgres project's remote state
+provider "postgresql" {
+  host     = var.postgres_host
+  port     = var.postgres_port
+  database = var.postgres_database
+  username = var.postgres_username
+  password = var.postgres_password
+  sslmode  = var.postgres_sslmode
+}
+
+# Generate secure random password if not provided
+resource "random_password" "role_password" {
+  count = var.role_password == "" ? 1 : 0
+
+  length  = 32
+  special = true
+  upper   = true
+  lower   = true
+  numeric = true
+}
+
+locals {
+  # Use provided password or generated one
+  actual_password = var.role_password != "" ? var.role_password : random_password.role_password[0].result
+
+  # Determine database name (use provided or fall back to database_name variable)
+  actual_database = var.database_name != "" ? var.database_name : "{{database_name}}"
+
+  # Convert privileges array to format expected by PostgreSQL
+  # Valid privileges: SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER, ALL
+  privileges_list = var.privileges
+}
+
+# Create PostgreSQL role
+resource "postgresql_role" "user" {
+  name     = var.role_name
+  login    = true
+  password = local.actual_password
+
+  # Role attributes
+  superuser         = var.superuser
+  create_database   = var.create_db
+  create_role       = var.create_role
+  connection_limit  = var.connection_limit
+
+  # Password expiration
+  valid_until = var.valid_until != "" ? var.valid_until : null
+
+  # Lifecycle
+  lifecycle {
+    ignore_changes = [
+      # Don't force password rotation on every apply
+      password,
+    ]
+  }
+}
+
+# Grant schema privileges
+resource "postgresql_grant" "schema" {
+  count = var.create_schema ? 1 : 0
+
+  database    = local.actual_database
+  role        = postgresql_role.user.name
+  schema      = var.schema_name
+  object_type = "schema"
+  privileges  = ["CREATE", "USAGE"]
+}
+
+# Grant table privileges
+resource "postgresql_grant" "tables" {
+  database    = local.actual_database
+  role        = postgresql_role.user.name
+  schema      = var.schema_name
+  object_type = "table"
+  privileges  = local.privileges_list
+
+  # Grant on all existing tables
+  with_grant_option = var.grant_option
+}
+
+# Grant sequence privileges (needed for INSERT with auto-increment)
+resource "postgresql_grant" "sequences" {
+  count = contains(local.privileges_list, "INSERT") || contains(local.privileges_list, "UPDATE") || contains(local.privileges_list, "ALL") ? 1 : 0
+
+  database    = local.actual_database
+  role        = postgresql_role.user.name
+  schema      = var.schema_name
+  object_type = "sequence"
+  privileges  = ["SELECT", "UPDATE", "USAGE"]
+
+  with_grant_option = var.grant_option
+}
+
+# Grant function privileges
+resource "postgresql_grant" "functions" {
+  count = contains(local.privileges_list, "SELECT") || contains(local.privileges_list, "ALL") ? 1 : 0
+
+  database    = local.actual_database
+  role        = postgresql_role.user.name
+  schema      = var.schema_name
+  object_type = "function"
+  privileges  = ["EXECUTE"]
+
+  with_grant_option = var.grant_option
+}
+
+# Set default privileges for future tables
+resource "postgresql_default_privileges" "tables" {
+  database    = local.actual_database
+  role        = postgresql_role.user.name
+  schema      = var.schema_name
+  owner       = "postgres"  # Adjust if using different owner
+  object_type = "table"
+  privileges  = local.privileges_list
+
+  with_grant_option = var.grant_option
+}
+
+# Set default privileges for future sequences
+resource "postgresql_default_privileges" "sequences" {
+  count = contains(local.privileges_list, "INSERT") || contains(local.privileges_list, "UPDATE") || contains(local.privileges_list, "ALL") ? 1 : 0
+
+  database    = local.actual_database
+  role        = postgresql_role.user.name
+  schema      = var.schema_name
+  owner       = "postgres"  # Adjust if using different owner
+  object_type = "sequence"
+  privileges  = ["SELECT", "UPDATE", "USAGE"]
+
+  with_grant_option = var.grant_option
+}

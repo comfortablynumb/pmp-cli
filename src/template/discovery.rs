@@ -1,7 +1,18 @@
 use super::metadata::{TemplateResource, TemplatePackResource, PluginResource};
 use anyhow::Result;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+
+/// Parse a colon-separated list of paths into a vector
+/// Always uses ":" as separator regardless of platform
+pub fn parse_colon_separated_paths(value: &str) -> Vec<String> {
+    value
+        .split(':')
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .collect()
+}
 
 /// Discovers and loads templates from the filesystem
 pub struct TemplateDiscovery;
@@ -17,39 +28,54 @@ impl TemplateDiscovery {
     }
 
     /// Find all template packs in standard locations plus additional custom paths
-    /// Checks:
-    /// 1. Current directory's .pmp/template-packs
-    /// 2. User's home directory ~/.pmp/template-packs
-    /// 3. Custom paths provided
+    /// Checks (in order):
+    /// 1. Custom paths provided (from --template-packs-paths flag and PMP_TEMPLATE_PACKS_PATHS env var)
+    /// 2. Current directory's .pmp/template-packs
+    /// 3. User's home directory ~/.pmp/template-packs
+    ///
+    /// Deduplication: First template pack found with a given name wins, subsequent duplicates are skipped silently
     pub fn discover_template_packs_with_custom_paths(fs: &dyn crate::traits::FileSystem, output: &dyn crate::traits::Output, custom_paths: &[&str]) -> Result<Vec<TemplatePackInfo>> {
-        let mut template_packs = Vec::new();
+        let mut all_template_packs = Vec::new();
 
-        // Check current directory's .pmp/template-packs
-        let current_templates_path = std::env::current_dir()?.join(".pmp").join("template-packs");
-
-        if fs.exists(&current_templates_path) {
-            template_packs.extend(Self::load_template_packs_from_dir(fs, output, &current_templates_path)?);
-        }
-
-        // Check ~/.pmp/template-packs
-        if let Some(home_dir) = dirs::home_dir() {
-            let home_templates_path = home_dir.join(".pmp").join("template-packs");
-
-            if fs.exists(&home_templates_path) {
-                template_packs.extend(Self::load_template_packs_from_dir(fs, output, &home_templates_path)?);
-            }
-        }
-
-        // Check custom paths
+        // 1. Check custom paths first (highest priority)
         for custom_path in custom_paths {
             let custom_path_buf = PathBuf::from(custom_path);
 
             if fs.exists(&custom_path_buf) {
-                template_packs.extend(Self::load_template_packs_from_dir(fs, output, &custom_path_buf)?);
+                all_template_packs.extend(Self::load_template_packs_from_dir(fs, output, &custom_path_buf)?);
             }
         }
 
-        Ok(template_packs)
+        // 2. Check current directory's .pmp/template-packs
+        let current_templates_path = std::env::current_dir()?.join(".pmp").join("template-packs");
+
+        if fs.exists(&current_templates_path) {
+            all_template_packs.extend(Self::load_template_packs_from_dir(fs, output, &current_templates_path)?);
+        }
+
+        // 3. Check ~/.pmp/template-packs (lowest priority)
+        if let Some(home_dir) = dirs::home_dir() {
+            let home_templates_path = home_dir.join(".pmp").join("template-packs");
+
+            if fs.exists(&home_templates_path) {
+                all_template_packs.extend(Self::load_template_packs_from_dir(fs, output, &home_templates_path)?);
+            }
+        }
+
+        // Deduplicate by template pack name (first one wins)
+        let mut seen_names = HashSet::new();
+        let mut unique_template_packs = Vec::new();
+
+        for pack in all_template_packs {
+            let pack_name = &pack.resource.metadata.name;
+            if !seen_names.contains(pack_name) {
+                seen_names.insert(pack_name.clone());
+                unique_template_packs.push(pack);
+            }
+            // Silently skip duplicates (no warning)
+        }
+
+        Ok(unique_template_packs)
     }
 
     /// Load template packs from a specific directory

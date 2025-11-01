@@ -18,7 +18,7 @@ impl InitCommand {
         ctx: &crate::context::Context,
         name: Option<&str>,
         description: Option<&str>,
-        template_packs_path: Option<&str>,
+        template_packs_paths: Option<&str>,
     ) -> Result<()> {
         let current_dir = std::env::current_dir()
             .context("Failed to get current directory")?;
@@ -27,9 +27,9 @@ impl InitCommand {
 
         // Check if collection already exists and route accordingly
         if collection_file.exists() {
-            Self::edit_existing_collection(ctx, &collection_file, template_packs_path)?;
+            Self::edit_existing_collection(ctx, &collection_file, template_packs_paths)?;
         } else {
-            Self::create_new_collection(ctx, &current_dir, &collection_file, name, description, template_packs_path)?;
+            Self::create_new_collection(ctx, &current_dir, &collection_file, name, description, template_packs_paths)?;
         }
 
         Ok(())
@@ -42,7 +42,7 @@ impl InitCommand {
         collection_file: &PathBuf,
         name: Option<&str>,
         description: Option<&str>,
-        template_packs_path: Option<&str>,
+        template_packs_paths: Option<&str>,
     ) -> Result<()> {
         output::section("Initialize Project Collection");
         output::key_value("Directory", &current_dir.display().to_string());
@@ -74,11 +74,25 @@ impl InitCommand {
         };
 
         // Step 3: Discover templates to get available resource kinds
-        let custom_paths = if let Some(path) = template_packs_path {
-            vec![path]
+        // Parse flag paths (colon-separated)
+        let flag_paths: Vec<String> = if let Some(paths) = template_packs_paths {
+            crate::template::discovery::parse_colon_separated_paths(paths)
         } else {
             vec![]
         };
+
+        // Parse environment variable paths (colon-separated)
+        let env_paths: Vec<String> = std::env::var("PMP_TEMPLATE_PACKS_PATHS")
+            .ok()
+            .map(|p| crate::template::discovery::parse_colon_separated_paths(&p))
+            .unwrap_or_default();
+
+        // Combine paths: flag paths have priority over env paths
+        let mut all_paths = flag_paths;
+        all_paths.extend(env_paths);
+
+        // Convert to Vec<&str> for the discovery function
+        let custom_paths: Vec<&str> = all_paths.iter().map(|s| s.as_str()).collect();
 
         let templates = TemplateDiscovery::discover_templates_with_custom_paths(&*ctx.fs, &*ctx.output, &custom_paths)
             .context("Failed to discover templates")?;
@@ -245,7 +259,7 @@ impl InitCommand {
     fn edit_existing_collection(
         ctx: &crate::context::Context,
         collection_file: &PathBuf,
-        template_packs_path: Option<&str>,
+        template_packs_paths: Option<&str>,
     ) -> Result<()> {
         output::section("Edit Project Collection");
         output::key_value("File", &collection_file.display().to_string());
@@ -294,7 +308,7 @@ impl InitCommand {
                     }
                 }
                 opt if opt.starts_with("Resource kinds") => {
-                    Self::edit_resource_kinds(ctx, &mut collection, template_packs_path)?;
+                    Self::edit_resource_kinds(ctx, &mut collection, template_packs_paths)?;
 
                     // Save after editing
                     collection.save(&*ctx.fs, collection_file)
@@ -394,16 +408,30 @@ impl InitCommand {
     fn edit_resource_kinds(
         ctx: &crate::context::Context,
         collection: &mut ProjectCollectionResource,
-        template_packs_path: Option<&str>,
+        template_packs_paths: Option<&str>,
     ) -> Result<()> {
         output::subsection("Editing Resource Kinds");
 
         // Discover templates
-        let custom_paths = if let Some(path) = template_packs_path {
-            vec![path]
+        // Parse flag paths (colon-separated)
+        let flag_paths: Vec<String> = if let Some(paths) = template_packs_paths {
+            crate::template::discovery::parse_colon_separated_paths(paths)
         } else {
             vec![]
         };
+
+        // Parse environment variable paths (colon-separated)
+        let env_paths: Vec<String> = std::env::var("PMP_TEMPLATE_PACKS_PATHS")
+            .ok()
+            .map(|p| crate::template::discovery::parse_colon_separated_paths(&p))
+            .unwrap_or_default();
+
+        // Combine paths: flag paths have priority over env paths
+        let mut all_paths = flag_paths;
+        all_paths.extend(env_paths);
+
+        // Convert to Vec<&str> for the discovery function
+        let custom_paths: Vec<&str> = all_paths.iter().map(|s| s.as_str()).collect();
 
         let templates = TemplateDiscovery::discover_templates_with_custom_paths(&*ctx.fs, &*ctx.output, &custom_paths)
             .context("Failed to discover templates")?;
