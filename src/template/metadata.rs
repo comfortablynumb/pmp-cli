@@ -570,6 +570,49 @@ pub struct HooksConfig {
     pub post_apply: Vec<String>,
 }
 
+/// Input override configuration for collection-level input customization
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InputOverride {
+    /// The value to use for this input
+    pub value: Value,
+
+    /// If true, show this as the default value and allow user to override.
+    /// If false, use this value directly without prompting the user.
+    #[serde(default = "default_show_as_default")]
+    pub show_as_default: bool,
+}
+
+fn default_show_as_default() -> bool {
+    true
+}
+
+/// Template defaults configuration
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct TemplateDefaults {
+    /// Input overrides for this template
+    #[serde(default)]
+    pub inputs: HashMap<String, InputOverride>,
+}
+
+/// Template configuration in resource kind filter
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TemplateConfig {
+    /// Name of the template pack this template belongs to
+    pub template_pack_name: String,
+
+    /// Whether this template is allowed to be used (default: true)
+    #[serde(default = "default_allowed")]
+    pub allowed: bool,
+
+    /// Default input overrides
+    #[serde(default)]
+    pub defaults: TemplateDefaults,
+}
+
+fn default_allowed() -> bool {
+    true
+}
+
 /// Filter for allowed resource kinds
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResourceKindFilter {
@@ -579,6 +622,11 @@ pub struct ResourceKindFilter {
 
     /// Kind (e.g., "Workload", "Infrastructure")
     pub kind: String,
+
+    /// Optional: Template-specific configurations
+    /// Key: template name, Value: template configuration
+    #[serde(default)]
+    pub templates: Option<HashMap<String, TemplateConfig>>,
 }
 
 impl ResourceKindFilter {
@@ -597,6 +645,29 @@ impl ResourceKindFilter {
     /// Check if this filter matches a template spec
     pub fn matches_template(&self, template: &TemplateSpec) -> bool {
         self.api_version == template.api_version && self.kind == template.kind
+    }
+
+    /// Check if a specific template is allowed and get its configuration
+    /// Returns:
+    /// - Some(Some(config)) if template is configured and allowed
+    /// - Some(None) if template is configured but not allowed
+    /// - None if no template-specific configuration exists (allow by default)
+    pub fn get_template_config(&self, template_name: &str, template_pack_name: &str) -> Option<Option<&TemplateConfig>> {
+        if let Some(ref templates) = self.templates {
+            if let Some(config) = templates.get(template_name) {
+                // Check if template pack name matches
+                if config.template_pack_name == template_pack_name {
+                    // Return config only if allowed
+                    if config.allowed {
+                        return Some(Some(config));
+                    } else {
+                        return Some(None); // Explicitly not allowed
+                    }
+                }
+                // Template pack name doesn't match, treat as not configured
+            }
+        }
+        None // No template-specific configuration
     }
 }
 

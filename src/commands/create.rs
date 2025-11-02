@@ -60,19 +60,40 @@ impl CreateCommand {
         }
 
         // Step 4: Filter template packs by checking their templates against collection's allowed resource kinds
-        let mut filtered_packs_with_templates: Vec<(TemplatePackInfo, Vec<TemplateInfo>)> = Vec::new();
+        let mut filtered_packs_with_templates: Vec<(TemplatePackInfo, Vec<(TemplateInfo, Option<crate::template::metadata::TemplateConfig>)>)> = Vec::new();
 
         for pack in all_template_packs {
             let templates_in_pack = TemplateDiscovery::discover_templates_in_pack(&*ctx.fs, &*ctx.output, &pack.path)
                 .context("Failed to discover templates in pack")?;
 
-            // Filter templates that match allowed resource kinds
-            let matching_templates: Vec<TemplateInfo> = templates_in_pack
+            let pack_name = &pack.resource.metadata.name;
+
+            // Filter templates that match allowed resource kinds and template-specific configuration
+            let matching_templates: Vec<(TemplateInfo, Option<crate::template::metadata::TemplateConfig>)> = templates_in_pack
                 .into_iter()
-                .filter(|t| {
-                    allowed_resource_kinds.iter().any(|filter| {
-                        filter.matches_template(&t.resource.spec)
-                    })
+                .filter_map(|t| {
+                    // Find a matching resource kind filter
+                    for filter in allowed_resource_kinds.iter() {
+                        if filter.matches_template(&t.resource.spec) {
+                            // Check template-specific configuration
+                            let template_name = &t.resource.metadata.name;
+                            match filter.get_template_config(template_name, pack_name) {
+                                Some(Some(config)) => {
+                                    // Template is explicitly configured and allowed
+                                    return Some((t, Some(config.clone())));
+                                }
+                                Some(None) => {
+                                    // Template is explicitly not allowed
+                                    return None;
+                                }
+                                None => {
+                                    // No template-specific config, allow by default
+                                    return Some((t, None));
+                                }
+                            }
+                        }
+                    }
+                    None // No matching resource kind filter
                 })
                 .collect();
 
@@ -114,7 +135,7 @@ impl CreateCommand {
 
             let pack_options: Vec<String> = filtered_packs_with_templates
                 .iter()
-                .map(|(pack, _)| {
+                .map(|(pack, _templates)| {
                     let desc = pack.resource.metadata.description.as_deref().unwrap_or("");
                     if desc.is_empty() {
                         pack.resource.metadata.name.clone()
@@ -144,15 +165,15 @@ impl CreateCommand {
         };
 
         // Step 6: Select template from pack (auto-select if only 1)
-        let selected_template = if available_templates.len() == 1 {
+        let (selected_template, template_config) = if available_templates.len() == 1 {
             // Only one template, use it automatically
-            let template = available_templates.into_iter().next().unwrap();
+            let (template, config) = available_templates.into_iter().next().unwrap();
             ctx.output.subsection("Template");
             ctx.output.key_value_highlight("Template", &template.resource.metadata.name);
             if let Some(desc) = &template.resource.metadata.description {
                 ctx.output.key_value("Description", desc);
             }
-            template
+            (template, config)
         } else {
             // Multiple templates, let user choose
             ctx.output.subsection("Select a template");
@@ -160,12 +181,12 @@ impl CreateCommand {
             // Sort templates by name for consistent display
             let mut sorted_templates = available_templates;
             sorted_templates.sort_by(|a, b| {
-                a.resource.metadata.name.cmp(&b.resource.metadata.name)
+                a.0.resource.metadata.name.cmp(&b.0.resource.metadata.name)
             });
 
             let template_options: Vec<String> = sorted_templates
                 .iter()
-                .map(|t| {
+                .map(|(t, _config)| {
                     let desc = t.resource.metadata.description.as_deref().unwrap_or("");
                     if desc.is_empty() {
                         t.resource.metadata.name.clone()
@@ -183,7 +204,7 @@ impl CreateCommand {
                 .position(|opt| opt == &selected_template_display)
                 .context("Template not found")?;
 
-            let template = sorted_templates.into_iter().nth(template_index).unwrap();
+            let (template, config) = sorted_templates.into_iter().nth(template_index).unwrap();
 
             ctx.output.subsection("Selected Template");
             ctx.output.key_value_highlight("Template", &template.resource.metadata.name);
@@ -191,7 +212,7 @@ impl CreateCommand {
                 ctx.output.key_value("Description", desc);
             }
 
-            template
+            (template, config)
         };
 
         // Step 7: Select environment from ProjectCollection
@@ -296,8 +317,16 @@ impl CreateCommand {
             }
         }
 
-        // Collect inputs from user
-        let mut inputs = Self::collect_template_inputs(ctx, &merged_inputs, &project_name)
+        // Apply collection-level overrides from template config (if any)
+        // Precedence: Template base → Environment overrides → Collection overrides → User input
+        let collection_overrides = if let Some(ref config) = template_config {
+            Some(&config.defaults.inputs)
+        } else {
+            None
+        };
+
+        // Collect inputs from user (respecting collection overrides)
+        let mut inputs = Self::collect_template_inputs_with_overrides(ctx, &merged_inputs, &project_name, collection_overrides)
             .context("Failed to collect inputs")?;
 
         // Step 11: Add internal fields for template rendering
@@ -422,10 +451,12 @@ impl CreateCommand {
     }
 
     /// Collect inputs from user based on template input specifications
-    fn collect_template_inputs(
+    /// Collect template inputs with collection-level overrides
+    fn collect_template_inputs_with_overrides(
         ctx: &crate::context::Context,
         inputs_spec: &std::collections::HashMap<String, crate::template::metadata::InputSpec>,
         project_name: &str,
+        collection_overrides: Option<&std::collections::HashMap<String, crate::template::metadata::InputOverride>>,
     ) -> Result<std::collections::HashMap<String, serde_json::Value>> {
         let mut inputs = std::collections::HashMap::new();
 
@@ -434,79 +465,101 @@ impl CreateCommand {
 
         // Collect each input defined in the template
         for (input_name, input_spec) in inputs_spec {
-            let description = input_spec.description.as_deref().unwrap_or(input_name.as_str());
+            // Check if there's a collection-level override for this input
+            let override_config = collection_overrides.and_then(|overrides| overrides.get(input_name));
 
-            let value = if let Some(enum_values) = &input_spec.enum_values {
-                // This is a select input
-                // Sort enum values alphabetically for display
-                let mut sorted_enum_values = enum_values.clone();
-                sorted_enum_values.sort();
-
-                let default_str = input_spec.default
-                    .as_ref()
-                    .and_then(|v| v.as_str())
-                    .or_else(|| sorted_enum_values.first().map(|s| s.as_str()));
-
-                let selected = if let Some(default) = default_str {
-                    // Find the starting cursor position
-                    let starting_cursor = sorted_enum_values.iter().position(|v| v == default).unwrap_or(0);
-                    // For now, we'll just select without starting cursor support
-                    // TODO: Enhance UserInput trait to support starting_cursor
-                    let _ = starting_cursor; // Suppress unused warning
-                    ctx.input.select(description, sorted_enum_values.clone())
-                        .context("Failed to get input")?
+            let value = if let Some(override_cfg) = override_config {
+                if !override_cfg.show_as_default {
+                    // Use the override value directly without prompting the user
+                    override_cfg.value.clone()
                 } else {
-                    ctx.input.select(description, sorted_enum_values)
-                        .context("Failed to get input")?
-                };
-
-                serde_json::Value::String(selected)
-            } else if let Some(default) = &input_spec.default {
-                // Determine type from default value
-                match default {
-                    serde_json::Value::Bool(b) => {
-                        let answer = ctx.input.confirm(description, *b)
-                            .context("Failed to get input")?;
-                        serde_json::Value::Bool(answer)
-                    }
-                    serde_json::Value::Number(n) => {
-                        let prompt_text = format!("{} (default: {})", description, n);
-                        let answer = ctx.input.text(&prompt_text, Some(&n.to_string()))
-                            .context("Failed to get input")?;
-
-                        // Try to parse as number
-                        if let Ok(num) = answer.parse::<i64>() {
-                            serde_json::Value::Number(num.into())
-                        } else if let Ok(num) = answer.parse::<f64>() {
-                            serde_json::Value::Number(serde_json::Number::from_f64(num).unwrap())
-                        } else {
-                            serde_json::Value::String(answer)
-                        }
-                    }
-                    serde_json::Value::String(s) => {
-                        let prompt_text = format!("{} (default: {})", description, s);
-                        let answer = ctx.input.text(&prompt_text, Some(s))
-                            .context("Failed to get input")?;
-                        serde_json::Value::String(answer)
-                    }
-                    _ => {
-                        // Fallback to string input
-                        let answer = ctx.input.text(description, None)
-                            .context("Failed to get input")?;
-                        serde_json::Value::String(answer)
-                    }
+                    // Show the override value as the default and let user override
+                    Self::prompt_for_input_with_default(ctx, input_name, input_spec, Some(&override_cfg.value))?
                 }
             } else {
-                // No default, prompt for string
-                let answer = ctx.input.text(description, None)
-                    .context("Failed to get input")?;
-                serde_json::Value::String(answer)
+                // No collection override, use normal flow
+                Self::prompt_for_input_with_default(ctx, input_name, input_spec, None)?
             };
 
             inputs.insert(input_name.clone(), value);
         }
 
         Ok(inputs)
+    }
+
+    /// Prompt for a single input, optionally with a collection-level default override
+    fn prompt_for_input_with_default(
+        ctx: &crate::context::Context,
+        input_name: &str,
+        input_spec: &crate::template::metadata::InputSpec,
+        collection_default: Option<&serde_json::Value>,
+    ) -> Result<serde_json::Value> {
+        let description = input_spec.description.as_deref().unwrap_or(input_name);
+
+        // Use collection default if provided, otherwise use template default
+        let effective_default = collection_default.or(input_spec.default.as_ref());
+
+        if let Some(enum_values) = &input_spec.enum_values {
+            // This is a select input
+            let mut sorted_enum_values = enum_values.clone();
+            sorted_enum_values.sort();
+
+            let default_str = effective_default
+                .and_then(|v| v.as_str())
+                .or_else(|| sorted_enum_values.first().map(|s| s.as_str()));
+
+            let selected = if let Some(default) = default_str {
+                let starting_cursor = sorted_enum_values.iter().position(|v| v == default).unwrap_or(0);
+                let _ = starting_cursor; // Suppress unused warning
+                ctx.input.select(description, sorted_enum_values.clone())
+                    .context("Failed to get input")?
+            } else {
+                ctx.input.select(description, sorted_enum_values)
+                    .context("Failed to get input")?
+            };
+
+            Ok(serde_json::Value::String(selected))
+        } else if let Some(default) = effective_default {
+            // Determine type from default value
+            match default {
+                serde_json::Value::Bool(b) => {
+                    let answer = ctx.input.confirm(description, *b)
+                        .context("Failed to get input")?;
+                    Ok(serde_json::Value::Bool(answer))
+                }
+                serde_json::Value::Number(n) => {
+                    let prompt_text = format!("{} (default: {})", description, n);
+                    let answer = ctx.input.text(&prompt_text, Some(&n.to_string()))
+                        .context("Failed to get input")?;
+
+                    // Try to parse as number
+                    if let Ok(num) = answer.parse::<i64>() {
+                        Ok(serde_json::Value::Number(num.into()))
+                    } else if let Ok(num) = answer.parse::<f64>() {
+                        Ok(serde_json::Value::Number(serde_json::Number::from_f64(num).unwrap()))
+                    } else {
+                        Ok(serde_json::Value::String(answer))
+                    }
+                }
+                serde_json::Value::String(s) => {
+                    let prompt_text = format!("{} (default: {})", description, s);
+                    let answer = ctx.input.text(&prompt_text, Some(s))
+                        .context("Failed to get input")?;
+                    Ok(serde_json::Value::String(answer))
+                }
+                _ => {
+                    // Fallback to string input
+                    let answer = ctx.input.text(description, None)
+                        .context("Failed to get input")?;
+                    Ok(serde_json::Value::String(answer))
+                }
+            }
+        } else {
+            // No default, prompt for string
+            let answer = ctx.input.text(description, None)
+                .context("Failed to get input")?;
+            Ok(serde_json::Value::String(answer))
+        }
     }
 
     /// Generate the .pmp.project.yaml file for the project (identifier only, no spec)

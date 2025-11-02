@@ -82,7 +82,7 @@ resource "kubernetes_deployment" "app" {
       spec {
         container {
           name  = "api"
-          image = "${var.docker_image}:${var.version}"
+          image = "${var.docker_image}:${var.docker_image_version}"
 
           port {
             name           = "http"
@@ -229,6 +229,7 @@ resource "kubernetes_horizontal_pod_autoscaler_v2" "app" {
           value         = 50
           period_seconds = 60
         }
+        select_policy  = "Min"
       }
       scale_up {
         stabilization_window_seconds = 0

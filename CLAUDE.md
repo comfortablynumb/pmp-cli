@@ -150,6 +150,58 @@ spec:
 - May contain hyphens (-)
 - No uppercase letters, underscores, or special characters allowed
 
+**Template Configuration** (Optional):
+- `spec.resource_kinds[].templates` - Template-specific configuration for filtering and input overrides
+- Allows filtering which templates can be used for each resource kind
+- Enables collection-level input overrides (change defaults or set fixed values)
+- Structure:
+  ```yaml
+  spec:
+    resource_kinds:
+      - apiVersion: pmp.io/v1
+        kind: KubernetesWorkload
+        templates:
+          <template-name>:
+            template_pack_name: <pack-name>  # Required: template pack this template belongs to
+            allowed: true                     # Optional (default: true): allow/block this template
+            defaults:                         # Optional: input overrides
+              inputs:
+                <input-name>:
+                  value: <value>              # The override value
+                  show_as_default: true       # true: change default; false: skip user prompt
+  ```
+
+**Template Configuration Features**:
+- **Filtering**: Set `allowed: false` to block specific templates for a resource kind
+- **Input Overrides**:
+  - `show_as_default: true` - Changes the default value shown to user (user can still override)
+  - `show_as_default: false` - Uses the value directly without prompting the user
+- **Input Precedence**: Template base → Environment overrides → Collection overrides → User input
+- **Backward Compatible**: Existing collections without `templates` field work unchanged
+
+**Template Configuration Example**:
+```yaml
+spec:
+  resource_kinds:
+    - apiVersion: pmp.io/v1
+      kind: KubernetesWorkload
+      templates:
+        api-service:
+          template_pack_name: microservices
+          allowed: true
+          defaults:
+            inputs:
+              replicas:
+                value: 3
+                show_as_default: true     # User can change from 3
+              environment:
+                value: "production"
+                show_as_default: false    # Always use "production", no prompt
+        legacy-app:
+          template_pack_name: microservices
+          allowed: false                  # Block this template
+```
+
 **Executor Configuration** (Optional):
 - `spec.executor` - Collection-level executor configuration
 - Applies to all projects in the collection (unless overridden at project level)

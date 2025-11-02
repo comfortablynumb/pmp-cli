@@ -7,6 +7,15 @@ spec:
   resource_kinds:
     - apiVersion: pmp.io/v1
       kind: KubernetesWorkload
+      templates:
+        http-api:
+          template_pack_name: kubernetes-workloads
+          defaults:
+            inputs:
+              docker_image:
+                value: ironedge/pmp-test-api
+              version:
+                value: latest
     - apiVersion: pmp.io/v1
       kind: Postgres
   environments:

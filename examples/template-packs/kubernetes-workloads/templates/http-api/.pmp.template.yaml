@@ -22,8 +22,9 @@ spec:
     docker_image:
       description: Docker image name (e.g., nginx, myregistry.io/myapp)
 
-    version:
+    docker_image_version:
       description: Docker image tag/version (e.g., latest, v1.2.3)
+      default: latest
 
     min_replicas:
       default: 2

@@ -4,10 +4,10 @@ variable "docker_image" {
   default     = "{{docker_image}}"
 }
 
-variable "version" {
+variable "docker_image_version" {
   type        = string
   description = "Docker image tag/version"
-  default     = "{{version}}"
+  default     = "{{docker_image_version}}"
 }
 
 variable "min_replicas" {

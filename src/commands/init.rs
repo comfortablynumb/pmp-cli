@@ -110,6 +110,7 @@ impl InitCommand {
                 ResourceKindFilter {
                     api_version: template.resource.spec.api_version.clone(),
                     kind: template.resource.spec.kind.clone(),
+                    templates: None,
                 },
             );
         }
@@ -449,6 +450,7 @@ impl InitCommand {
                 ResourceKindFilter {
                     api_version: template.resource.spec.api_version.clone(),
                     kind: template.resource.spec.kind.clone(),
+                    templates: None,
                 },
             );
         }
