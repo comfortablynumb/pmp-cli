@@ -181,14 +181,85 @@ fn escape_hcl_string(s: &str) -> String {
         .replace('\t', "\\t")
 }
 
+/// Generate Terraform variables for plugin override environment variables
+///
+/// Creates variables that allow runtime overrides of remote state outputs via environment variables.
+/// Variables are named: pmp_plugin_{pack}_{plugin}_{ref_project}_{field}
+/// Environment variables are named: TF_VAR_pmp_plugin_{pack}_{plugin}_{ref_project}_{field}
+///
+/// # Arguments
+/// * `plugins` - Slice of AddedPlugin structs containing plugin metadata and specs
+///
+/// # Returns
+/// HCL string containing variable declarations, or empty string if no variables needed
+pub fn generate_plugin_override_variables(plugins: &[AddedPlugin]) -> String {
+    if plugins.is_empty() {
+        return String::new();
+    }
+
+    let mut hcl = String::new();
+    let mut has_variables = false;
+
+    for plugin in plugins {
+        // Only process plugins with reference projects
+        if plugin.reference_project.is_none() {
+            continue;
+        }
+
+        let ref_project = plugin.reference_project.as_ref().unwrap();
+
+        // Get plugin spec from stored data
+        let plugin_spec = match &plugin.plugin_spec {
+            Some(spec) => spec,
+            None => continue, // Skip if plugin spec not available
+        };
+
+        // Get remote_state configuration
+        let remote_state = match &plugin_spec.requires_project_with_template {
+            Some(template_ref) => match &template_ref.remote_state {
+                Some(rs) => rs,
+                None => continue, // No remote_state config, skip
+            },
+            None => continue,
+        };
+
+        // Generate variables for each required field
+        for (field_name, _field_config) in &remote_state.required_fields {
+            let var_name = format!(
+                "pmp_plugin_{}_{}_{}_{}",
+                plugin.template_pack_name.to_lowercase(),
+                plugin.name.to_lowercase(),
+                ref_project.name.to_lowercase(),
+                field_name.to_lowercase()
+            );
+
+            if !has_variables {
+                hcl.push_str("\n# Plugin override variables (set via TF_VAR_* environment variables)\n");
+                has_variables = true;
+            }
+
+            hcl.push_str(&format!("variable \"{}\" {{\n", var_name));
+            hcl.push_str("  type    = string\n");
+            hcl.push_str("  default = null\n");
+            hcl.push_str(&format!(
+                "  description = \"Override for {}.outputs.{} (env: TF_VAR_{})\"\n",
+                ref_project.name, field_name, var_name
+            ));
+            hcl.push_str("}\n\n");
+        }
+    }
+
+    hcl
+}
+
 /// Generate module blocks for added plugins
 ///
 /// Creates Terraform module blocks that reference plugin modules in the modules/ directory.
 /// Module source paths are relative to the environment directory.
-/// For plugins with reference projects, passes connection parameters from the data source.
+/// For plugins with reference projects, passes parameters from the reference project's remote state.
 ///
 /// # Arguments
-/// * `plugins` - Slice of AddedPlugin structs containing plugin metadata
+/// * `plugins` - Slice of AddedPlugin structs containing plugin metadata and specs
 ///
 /// # Returns
 /// HCL string containing module blocks, or empty string if no plugins
@@ -208,7 +279,7 @@ pub fn generate_module_blocks(plugins: &[AddedPlugin]) -> String {
         hcl.push_str(&format!("module \"{}\" {{\n", module_name));
         hcl.push_str(&format!("  source = \"{}\"\n", source_path));
 
-        // If plugin has a reference project, pass connection parameters from data source
+        // If plugin has a reference project, pass parameters from remote state
         if let Some(ref_project) = &plugin.reference_project {
             let data_source_name = format!("plugin_{}_{}_{}",
                 plugin.template_pack_name,
@@ -216,15 +287,57 @@ pub fn generate_module_blocks(plugins: &[AddedPlugin]) -> String {
                 ref_project.name
             );
 
-            hcl.push_str("\n  # Connection parameters from reference project\n");
-            hcl.push_str(&format!("  postgres_host         = data.terraform_remote_state.{}.outputs.postgres_host\n", data_source_name));
-            hcl.push_str(&format!("  postgres_port         = data.terraform_remote_state.{}.outputs.postgres_port\n", data_source_name));
-            hcl.push_str(&format!("  postgres_database     = data.terraform_remote_state.{}.outputs.postgres_database_name\n", data_source_name));
-            hcl.push_str(&format!("  postgres_username     = data.terraform_remote_state.{}.outputs.postgres_username\n", data_source_name));
-            hcl.push_str(&format!("  postgres_password     = data.terraform_remote_state.{}.outputs.postgres_password\n", data_source_name));
-            hcl.push_str(&format!("  postgres_sslmode      = data.terraform_remote_state.{}.outputs.postgres_sslmode\n", data_source_name));
-            hcl.push_str(&format!("  postgres_service_name = data.terraform_remote_state.{}.outputs.postgres_service_name\n", data_source_name));
-            hcl.push_str(&format!("  postgres_namespace    = data.terraform_remote_state.{}.outputs.postgres_namespace\n", data_source_name));
+            // Get plugin spec from stored data
+            let plugin_spec = match &plugin.plugin_spec {
+                Some(spec) => spec,
+                None => {
+                    // Plugin spec not available - skip parameters
+                    hcl.push_str("}\n\n");
+                    continue;
+                }
+            };
+
+            // Get remote_state configuration
+            let remote_state = match &plugin_spec.requires_project_with_template {
+                Some(template_ref) => match &template_ref.remote_state {
+                    Some(rs) => rs,
+                    None => {
+                        // No remote_state config - skip parameters
+                        hcl.push_str("}\n\n");
+                        continue;
+                    }
+                },
+                None => {
+                    hcl.push_str("}\n\n");
+                    continue;
+                }
+            };
+
+            hcl.push_str("\n  # Parameters from reference project (with optional overrides)\n");
+
+            // Generate module parameters for each required field
+            for (field_name, field_config) in &remote_state.required_fields {
+                // Determine the parameter name (use alias if provided, otherwise use original field name)
+                let param_name = match &field_config.alias {
+                    Some(alias) => alias.clone(),
+                    None => field_name.clone(),
+                };
+
+                // Generate variable name for override
+                let var_name = format!(
+                    "pmp_plugin_{}_{}_{}_{}",
+                    plugin.template_pack_name.to_lowercase(),
+                    plugin.name.to_lowercase(),
+                    ref_project.name.to_lowercase(),
+                    field_name.to_lowercase()
+                );
+
+                // Generate coalesce expression: prefer env var, fallback to remote state
+                hcl.push_str(&format!(
+                    "  {} = coalesce(var.{}, data.terraform_remote_state.{}.outputs.{})\n",
+                    param_name, var_name, data_source_name, field_name
+                ));
+            }
         }
 
         hcl.push_str("}\n\n");

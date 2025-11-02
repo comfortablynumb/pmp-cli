@@ -196,7 +196,11 @@ impl PreviewCommand {
         }
 
         // Select project
-        let project_options: Vec<String> = all_projects
+        // Sort projects by name for consistent display
+        let mut sorted_projects: Vec<_> = all_projects.iter().collect();
+        sorted_projects.sort_by(|a, b| a.name.cmp(&b.name));
+
+        let project_options: Vec<String> = sorted_projects
             .iter()
             .map(|p| format!("{} ({})", p.name, p.kind))
             .collect();
@@ -207,7 +211,7 @@ impl PreviewCommand {
         let project_index = project_options.iter().position(|opt| opt == &selected_project_display)
             .context("Project not found")?;
 
-        let selected_project = &all_projects[project_index];
+        let selected_project = sorted_projects[project_index];
         let project_path = manager.get_project_path(selected_project);
 
         // Select environment

@@ -164,7 +164,7 @@ impl Executor for OpenTofuExecutor {
         project_metadata: &ProjectMetadata,
         plugins: Option<&[crate::template::metadata::AddedPlugin]>,
     ) -> Result<()> {
-        use super::backend::{generate_backend_config, generate_module_blocks, generate_data_source_backends};
+        use super::backend::{generate_backend_config, generate_module_blocks, generate_data_source_backends, generate_plugin_override_variables};
 
         // Generate backend HCL with project metadata for table name generation
         let backend_hcl = generate_backend_config(
@@ -184,6 +184,13 @@ impl Executor for OpenTofuExecutor {
             String::new()
         };
 
+        // Generate plugin override variables
+        let variables_hcl = if let Some(plugin_list) = plugins {
+            generate_plugin_override_variables(plugin_list)
+        } else {
+            String::new()
+        };
+
         // Generate module blocks for plugins
         let modules_hcl = if let Some(plugin_list) = plugins {
             generate_module_blocks(plugin_list)
@@ -191,17 +198,20 @@ impl Executor for OpenTofuExecutor {
             String::new()
         };
 
-        // Combine backend, data sources, and modules
+        // Combine backend, data sources, variables, and modules
         let mut combined_hcl = backend_hcl;
         if !data_sources_hcl.is_empty() {
             combined_hcl.push_str(&data_sources_hcl);
+        }
+        if !variables_hcl.is_empty() {
+            combined_hcl.push_str(&variables_hcl);
         }
         if !modules_hcl.is_empty() {
             combined_hcl.push_str(&modules_hcl);
         }
 
         if combined_hcl.is_empty() {
-            // No backend config, data sources, or modules to write
+            // No backend config, data sources, variables, or modules to write
             return Ok(());
         }
 

@@ -663,10 +663,12 @@ impl InitCommand {
         environments: &HashMap<String, Environment>,
         prompt: &str
     ) -> Result<String> {
-        let env_options: Vec<String> = environments
+        // Sort environments by name for consistent display
+        let mut env_options: Vec<String> = environments
             .iter()
             .map(|(key, env)| format!("{} ({})", key, env.name))
             .collect();
+        env_options.sort();
 
         let selected = Select::new(prompt, env_options.clone())
             .prompt()

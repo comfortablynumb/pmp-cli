@@ -12,6 +12,19 @@ spec:
     apiVersion: pmp.io/v1
     kind: Postgres
 
+    # Remote state configuration - maps reference project outputs to plugin module parameters
+    remote_state:
+      required_fields:
+        postgres_host: {}  # No alias - parameter name same as output name
+        postgres_port: {}
+        postgres_database_name:
+          alias: postgres_database  # Module parameter will be named 'postgres_database'
+        postgres_username: {}
+        postgres_password: {}
+        postgres_sslmode: {}
+        postgres_service_name: {}
+        postgres_namespace: {}
+
   inputs:
     role_name:
       description: Database role/user name to create

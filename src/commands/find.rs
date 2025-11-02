@@ -85,7 +85,11 @@ impl FindCommand {
         let selected_project = if projects.len() == 1 {
             projects[0]
         } else {
-            let project_options: Vec<String> = projects
+            // Sort projects by name for consistent display
+            let mut sorted_projects = projects.to_vec();
+            sorted_projects.sort_by(|a, b| a.name.cmp(&b.name));
+
+            let project_options: Vec<String> = sorted_projects
                 .iter()
                 .map(|p| format!("{} ({})", p.name, p.kind))
                 .collect();
@@ -97,7 +101,7 @@ impl FindCommand {
             let index = project_options.iter().position(|opt| opt == &selected)
                 .context("Project not found")?;
 
-            projects[index]
+            sorted_projects[index]
         };
 
         let full_path = manager.get_project_path(selected_project);

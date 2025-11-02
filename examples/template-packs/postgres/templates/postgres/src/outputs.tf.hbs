@@ -39,10 +39,62 @@ output "postgres_service_url" {
   value       = "postgresql://${helm_release.postgres.name}.${helm_release.postgres.namespace}.svc.cluster.local:5432/${var.database_name}"
 }
 
-output "postgres_host" {
-  description = "PostgreSQL service hostname"
-  value       = "${helm_release.postgres.name}.${helm_release.postgres.namespace}.svc.cluster.local"
+# Data source to fetch LoadBalancer IP when service_type is LoadBalancer
+{{#if (eq service_type "LoadBalancer")}}
+data "kubernetes_service" "postgres" {
+  metadata {
+    name      = "${helm_release.postgres.name}-postgresql"
+    namespace = helm_release.postgres.namespace
+  }
+  depends_on = [helm_release.postgres]
 }
+{{/if}}
+
+output "postgres_host" {
+  description = "PostgreSQL service hostname (external for LoadBalancer, internal for ClusterIP/NodePort)"
+  value       = {{#if (eq service_type "LoadBalancer")}}try(
+    coalesce(
+      try(data.kubernetes_service.postgres.status[0].load_balancer[0].ingress[0].hostname, null),
+      try(data.kubernetes_service.postgres.status[0].load_balancer[0].ingress[0].ip, null),
+      "${helm_release.postgres.name}.${helm_release.postgres.namespace}.svc.cluster.local"
+    ),
+    "${helm_release.postgres.name}.${helm_release.postgres.namespace}.svc.cluster.local"
+  ){{else}}"${helm_release.postgres.name}.${helm_release.postgres.namespace}.svc.cluster.local"{{/if}}
+}
+
+{{#if (eq service_type "LoadBalancer")}}
+output "postgres_external_host" {
+  description = "PostgreSQL LoadBalancer external hostname or IP"
+  value       = try(
+    coalesce(
+      try(data.kubernetes_service.postgres.status[0].load_balancer[0].ingress[0].hostname, null),
+      try(data.kubernetes_service.postgres.status[0].load_balancer[0].ingress[0].ip, null),
+      "pending"
+    ),
+    "pending"
+  )
+}
+
+output "postgres_loadbalancer_status" {
+  description = "LoadBalancer status and connection info"
+  value = <<-EOT
+    LoadBalancer Service: ${helm_release.postgres.name}-postgresql
+    External Hostname/IP: ${try(
+      coalesce(
+        try(data.kubernetes_service.postgres.status[0].load_balancer[0].ingress[0].hostname, null),
+        try(data.kubernetes_service.postgres.status[0].load_balancer[0].ingress[0].ip, null),
+        "pending (waiting for cloud provider to assign)"
+      ),
+      "pending (waiting for cloud provider to assign)"
+    )}
+    Port: 5432
+
+    Connect from outside the cluster:
+    PGPASSWORD="${var.postgres_password}" psql -h <external-ip-or-hostname> -U ${var.postgres_username} -d ${var.database_name} -p 5432
+  EOT
+  sensitive = true
+}
+{{/if}}
 
 output "postgres_connection_string" {
   description = "PostgreSQL connection string (JDBC format)"

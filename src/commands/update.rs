@@ -530,7 +530,12 @@ impl UpdateCommand {
         if requires_reference {
             // 2. Let user select compatible project
             output::blank();
-            let project_options: Vec<String> = selected_plugin_with_projects.compatible_projects.iter()
+
+            // Sort projects by name for consistent display
+            let mut sorted_projects = selected_plugin_with_projects.compatible_projects.clone();
+            sorted_projects.sort_by(|a, b| a.project_ref.name.cmp(&b.project_ref.name));
+
+            let project_options: Vec<String> = sorted_projects.iter()
                 .map(|cp| {
                     format!("{} ({})", cp.project_ref.name, cp.project_ref.kind)
                 })
@@ -544,7 +549,7 @@ impl UpdateCommand {
                 .position(|opt| opt == &selected_project_display)
                 .context("Project not found")?;
 
-            let selected_compatible_project = &selected_plugin_with_projects.compatible_projects[project_index];
+            let selected_compatible_project = &sorted_projects[project_index];
 
             output::blank();
             output::key_value_highlight("Reference Project", &selected_compatible_project.project_ref.name);
@@ -756,6 +761,7 @@ impl UpdateCommand {
                 reference_project: reference_project_metadata,
                 inputs: plugin_inputs.clone(),
                 files: generated_files,
+                plugin_spec: Some(selected_plugin_with_projects.plugin_info.resource.spec.clone()),
             });
         }
 
@@ -1026,7 +1032,11 @@ impl UpdateCommand {
         }
 
         // Select project
-        let project_options: Vec<String> = all_projects
+        // Sort projects by name for consistent display
+        let mut sorted_projects: Vec<_> = all_projects.iter().collect();
+        sorted_projects.sort_by(|a, b| a.name.cmp(&b.name));
+
+        let project_options: Vec<String> = sorted_projects
             .iter()
             .map(|p| format!("{} ({})", p.name, p.kind))
             .collect();
@@ -1038,7 +1048,7 @@ impl UpdateCommand {
         let project_index = project_options.iter().position(|opt| opt == &selected_project_display)
             .context("Project not found")?;
 
-        let selected_project = &all_projects[project_index];
+        let selected_project = sorted_projects[project_index];
         let project_path = manager.get_project_path(selected_project);
 
         // Select environment

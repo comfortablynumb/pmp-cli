@@ -107,6 +107,11 @@ impl CreateCommand {
             (pack, templates)
         } else {
             // Multiple packs, let user choose
+            // Sort packs by name for consistent display
+            filtered_packs_with_templates.sort_by(|a, b| {
+                a.0.resource.metadata.name.cmp(&b.0.resource.metadata.name)
+            });
+
             let pack_options: Vec<String> = filtered_packs_with_templates
                 .iter()
                 .map(|(pack, _)| {
@@ -151,7 +156,14 @@ impl CreateCommand {
         } else {
             // Multiple templates, let user choose
             ctx.output.subsection("Select a template");
-            let template_options: Vec<String> = available_templates
+
+            // Sort templates by name for consistent display
+            let mut sorted_templates = available_templates;
+            sorted_templates.sort_by(|a, b| {
+                a.resource.metadata.name.cmp(&b.resource.metadata.name)
+            });
+
+            let template_options: Vec<String> = sorted_templates
                 .iter()
                 .map(|t| {
                     let desc = t.resource.metadata.description.as_deref().unwrap_or("");
@@ -171,7 +183,7 @@ impl CreateCommand {
                 .position(|opt| opt == &selected_template_display)
                 .context("Template not found")?;
 
-            let template = available_templates.into_iter().nth(template_index).unwrap();
+            let template = sorted_templates.into_iter().nth(template_index).unwrap();
 
             ctx.output.subsection("Selected Template");
             ctx.output.key_value_highlight("Template", &template.resource.metadata.name);
@@ -197,7 +209,12 @@ impl CreateCommand {
         } else {
             // Multiple environments, let user choose
             ctx.output.subsection("Select an environment");
-            let env_options: Vec<String> = collection.spec.environments.values().map(|env| {
+
+            // Sort environments by name for consistent display
+            let mut sorted_envs: Vec<_> = collection.spec.environments.iter().collect();
+            sorted_envs.sort_by(|a, b| a.1.name.cmp(&b.1.name));
+
+            let env_options: Vec<String> = sorted_envs.iter().map(|(_, env)| {
                     if let Some(desc) = &env.description {
                         format!("{} - {}", env.name, desc)
                     } else {
@@ -213,11 +230,10 @@ impl CreateCommand {
             let env_index = env_options.iter().position(|opt| opt == &selected_env_display)
                 .context("Environment not found")?;
 
-            collection.spec.environments
-                .keys()
-                .nth(env_index)
+            sorted_envs
+                .get(env_index)
+                .map(|(key, _)| (*key).clone())
                 .context("Environment key not found")?
-                .clone()
         };
 
         // Step 8: Validate resource kind
