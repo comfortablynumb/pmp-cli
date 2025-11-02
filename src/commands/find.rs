@@ -114,7 +114,7 @@ impl FindCommand {
 
         // Load project metadata
         let project_file = full_path.join(".pmp.project.yaml");
-        if !project_file.exists() {
+        if !ctx.fs.exists(&project_file) {
             anyhow::bail!("Project file not found: {:?}", project_file);
         }
 
@@ -153,7 +153,7 @@ impl FindCommand {
         let env_path = full_path.join("environments").join(selected_env);
         let env_file = env_path.join(".pmp.environment.yaml");
 
-        if !env_file.exists() {
+        if !ctx.fs.exists(&env_file) {
             anyhow::bail!("Environment file not found: {:?}", env_file);
         }
 

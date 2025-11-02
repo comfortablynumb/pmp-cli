@@ -6,7 +6,6 @@ use crate::template::{
 };
 use crate::template::metadata::{ProjectCollectionResource, AllowedPluginConfig, AddedPlugin, ProjectPlugins, PluginProjectReference};
 use anyhow::{Context, Result};
-use inquire::Select;
 use std::path::{Path, PathBuf};
 use std::collections::HashMap;
 use serde_json::Value;
@@ -48,7 +47,7 @@ impl UpdateCommand {
 
         // Load environment resource to get current configuration
         let env_file = env_path.join(".pmp.environment.yaml");
-        if !env_file.exists() {
+        if !ctx.fs.exists(&env_file) {
             anyhow::bail!("Environment file not found: {:?}", env_file);
         }
 
@@ -84,16 +83,15 @@ impl UpdateCommand {
         // If there are plugins with compatible projects or plugins to remove, ask user what they want to do
         if !plugins_with_projects.is_empty() || has_plugins {
             output::blank();
-            let mut options = vec!["Update the project"];
+            let mut options: Vec<String> = vec!["Update the project".to_string()];
             if !plugins_with_projects.is_empty() {
-                options.push("Add Plugin");
+                options.push("Add Plugin".to_string());
             }
             if has_plugins {
-                options.push("Remove Plugin");
+                options.push("Remove Plugin".to_string());
             }
 
-            let action = Select::new("What would you like to do?", options)
-                .prompt()
+            let action = ctx.input.select("What would you like to do?", options)
                 .context("Failed to select action")?;
 
             if action == "Add Plugin" {
@@ -188,6 +186,7 @@ impl UpdateCommand {
         output::dimmed("Please provide the following information (current values shown as defaults):");
 
         let mut new_inputs = Self::collect_template_inputs_with_defaults(
+            ctx,
             &merged_inputs,
             current_inputs,
             &project_name,
@@ -216,9 +215,7 @@ impl UpdateCommand {
         }
 
         // Confirm before regenerating
-        let confirm = inquire::Confirm::new("Regenerate environment files with these inputs?")
-            .with_default(true)
-            .prompt()
+        let confirm = ctx.input.confirm("Regenerate environment files with these inputs?", true)
             .context("Failed to get confirmation")?;
 
         if !confirm {
@@ -232,7 +229,7 @@ impl UpdateCommand {
         let renderer = TemplateRenderer::new();
         let template_src = &matching_template.path;
 
-        if !template_src.exists() {
+        if !ctx.fs.exists(template_src) {
             anyhow::bail!(
                 "Template directory not found: {}",
                 template_src.display()
@@ -282,6 +279,7 @@ impl UpdateCommand {
             .unwrap_or(&matching_template.resource.metadata.name);
 
         Self::generate_project_environment_yaml(
+            ctx,
             &env_path,
             &env_name,
             &project_name,
@@ -364,12 +362,11 @@ impl UpdateCommand {
                         let environments_dir = project_path.join("environments");
 
                         // Find the first environment to get resource details
-                        if let Ok(env_entries) = std::fs::read_dir(&environments_dir) {
-                            for env_entry in env_entries.filter_map(|e| e.ok()) {
-                                let env_path = env_entry.path();
+                        if let Ok(env_entries) = ctx.fs.read_dir(&environments_dir) {
+                            for env_path in env_entries {
                                 let env_file = env_path.join(".pmp.environment.yaml");
 
-                                if env_file.exists() {
+                                if ctx.fs.exists(&env_file) {
                                     if let Ok(env_resource) = DynamicProjectEnvironmentResource::from_file(&*ctx.fs, &env_file) {
                                         // Check if this project matches the required template
                                         if env_resource.api_version == required_template.api_version
@@ -503,8 +500,7 @@ impl UpdateCommand {
             })
             .collect();
 
-        let selected_plugin_display = Select::new("Select a plugin to add:", plugin_options.clone())
-            .prompt()
+        let selected_plugin_display = ctx.input.select("Select a plugin to add:", plugin_options.clone())
             .context("Failed to select plugin")?;
 
         let plugin_index = plugin_options.iter()
@@ -541,8 +537,7 @@ impl UpdateCommand {
                 })
                 .collect();
 
-            let selected_project_display = Select::new("Select a project:", project_options.clone())
-                .prompt()
+            let selected_project_display = ctx.input.select("Select a project:", project_options.clone())
                 .context("Failed to select project")?;
 
             let project_index = project_options.iter()
@@ -566,8 +561,7 @@ impl UpdateCommand {
             let reference_env_name = if reference_environments.len() == 1 {
                 reference_environments[0].clone()
             } else {
-                Select::new("Select reference environment:", reference_environments.clone())
-                    .prompt()
+                ctx.input.select("Select reference environment:", reference_environments.clone())
                     .context("Failed to select reference environment")?
             };
 
@@ -578,7 +572,7 @@ impl UpdateCommand {
             let reference_env_path = selected_compatible_project.project_path.join("environments").join(&reference_env_name);
             let reference_env_file = reference_env_path.join(".pmp.environment.yaml");
 
-            if !reference_env_file.exists() {
+            if !ctx.fs.exists(&reference_env_file) {
                 anyhow::bail!("Reference environment file not found: {:?}", reference_env_file);
             }
 
@@ -659,7 +653,7 @@ impl UpdateCommand {
         output::subsection("Plugin Inputs");
         output::dimmed("Please provide the following information:");
 
-        let mut plugin_inputs = Self::collect_plugin_inputs(&merged_inputs, target_project_name)?;
+        let mut plugin_inputs = Self::collect_plugin_inputs(ctx, &merged_inputs, target_project_name)?;
 
         // 6. Add internal fields (inherit from target project/environment)
         plugin_inputs.insert("name".to_string(), Value::String(target_project_name.to_string()));
@@ -769,7 +763,7 @@ impl UpdateCommand {
         let target_env_file = target_env_path.join(".pmp.environment.yaml");
         let yaml_content = serde_yaml::to_string(&env_resource)
             .context("Failed to serialize environment resource to YAML")?;
-        std::fs::write(&target_env_file, yaml_content)
+        ctx.fs.write(&target_env_file, &yaml_content)
             .with_context(|| format!("Failed to write environment file: {:?}", target_env_file))?;
 
         // Regenerate common file to include the new plugin module
@@ -823,7 +817,7 @@ impl UpdateCommand {
 
     /// Remove a plugin from the current environment
     fn remove_plugin_interactive(
-        _ctx: &crate::context::Context,
+        ctx: &crate::context::Context,
         _collection_root: &Path,
         collection: &ProjectCollectionResource,
         env_path: &Path,
@@ -850,8 +844,7 @@ impl UpdateCommand {
             .collect();
 
         output::subsection("Select Plugin to Remove");
-        let selected_display = Select::new("Which plugin would you like to remove?", plugin_options.clone())
-            .prompt()
+        let selected_display = ctx.input.select("Which plugin would you like to remove?", plugin_options.clone())
             .context("Failed to select plugin")?;
 
         let plugin_index = plugin_options.iter()
@@ -869,9 +862,7 @@ impl UpdateCommand {
         output::key_value("Reference Project", &plugin_ref_project);
 
         // Confirm removal
-        let confirm = inquire::Confirm::new("Are you sure you want to remove this plugin?")
-            .with_default(false)
-            .prompt()
+        let confirm = ctx.input.confirm("Are you sure you want to remove this plugin?", false)
             .context("Failed to get confirmation")?;
 
         if !confirm {
@@ -889,8 +880,8 @@ impl UpdateCommand {
             .join(&plugin_name)
             .join(&plugin_ref_project);
 
-        if plugin_path.exists() {
-            std::fs::remove_dir_all(&plugin_path)
+        if ctx.fs.exists(&plugin_path) {
+            ctx.fs.remove_dir_all(&plugin_path)
                 .with_context(|| format!("Failed to remove plugin directory: {:?}", plugin_path))?;
             output::dimmed(&format!("  Deleted: {}", plugin_path.display()));
         } else {
@@ -907,7 +898,7 @@ impl UpdateCommand {
         let env_file = env_path.join(".pmp.environment.yaml");
         let yaml_content = serde_yaml::to_string(&env_resource)
             .context("Failed to serialize environment resource to YAML")?;
-        std::fs::write(&env_file, yaml_content)
+        ctx.fs.write(&env_file, &yaml_content)
             .with_context(|| format!("Failed to write environment file: {:?}", env_file))?;
 
         // Regenerate common file without the removed plugin
@@ -976,7 +967,7 @@ impl UpdateCommand {
     fn check_in_environment(ctx: &crate::context::Context, dir: &Path) -> Result<Option<(PathBuf, String, String)>> {
         let env_file = dir.join(".pmp.environment.yaml");
 
-        if env_file.exists() {
+        if ctx.fs.exists(&env_file) {
             let resource = DynamicProjectEnvironmentResource::from_file(&*ctx.fs, &env_file)?;
             let env_name = resource.metadata.environment_name.clone();
             let project_name = resource.metadata.name.clone();
@@ -991,7 +982,7 @@ impl UpdateCommand {
     fn check_in_project(ctx: &crate::context::Context, dir: &Path) -> Result<Option<(PathBuf, String)>> {
         let project_file = dir.join(".pmp.project.yaml");
 
-        if project_file.exists() {
+        if ctx.fs.exists(&project_file) {
             let resource = ProjectResource::from_file(&*ctx.fs, &project_file)?;
             return Ok(Some((dir.to_path_buf(), resource.metadata.name.clone())));
         }
@@ -1013,8 +1004,7 @@ impl UpdateCommand {
             return Ok(environments[0].clone());
         }
 
-        let selected = Select::new("Select an environment:", environments.clone())
-            .prompt()
+        let selected = ctx.input.select("Select an environment:", environments.clone())
             .context("Failed to select environment")?;
 
         Ok(selected)
@@ -1041,8 +1031,7 @@ impl UpdateCommand {
             .map(|p| format!("{} ({})", p.name, p.kind))
             .collect();
 
-        let selected_project_display = Select::new("Select a project:", project_options.clone())
-            .prompt()
+        let selected_project_display = ctx.input.select("Select a project:", project_options.clone())
             .context("Failed to select project")?;
 
         let project_index = project_options.iter().position(|opt| opt == &selected_project_display)
@@ -1060,11 +1049,11 @@ impl UpdateCommand {
 
     /// Collect inputs from user based on template input specifications, using current values as defaults
     fn collect_template_inputs_with_defaults(
+        ctx: &crate::context::Context,
         inputs_spec: &std::collections::HashMap<String, crate::template::metadata::InputSpec>,
         current_inputs: &std::collections::HashMap<String, serde_json::Value>,
         project_name: &str,
     ) -> Result<std::collections::HashMap<String, serde_json::Value>> {
-        use inquire::{Select, Text, Confirm};
 
         let mut inputs = std::collections::HashMap::new();
 
@@ -1084,21 +1073,14 @@ impl UpdateCommand {
                 let mut sorted_enum_values = enum_values.clone();
                 sorted_enum_values.sort();
 
-                let default_str = current_value
+                let _default_str = current_value
                     .and_then(|v| v.as_str())
                     .or_else(|| input_spec.default.as_ref().and_then(|v| v.as_str()))
                     .or_else(|| sorted_enum_values.first().map(|s| s.as_str()));
 
-                let selected = if let Some(default) = default_str {
-                    Select::new(description, sorted_enum_values.clone())
-                        .with_starting_cursor(sorted_enum_values.iter().position(|v| v == default).unwrap_or(0))
-                        .prompt()
-                        .context("Failed to get input")?
-                } else {
-                    Select::new(description, sorted_enum_values)
-                        .prompt()
-                        .context("Failed to get input")?
-                };
+                // Note: The starting cursor feature (pre-selecting the default) is not supported by the trait
+                let selected = ctx.input.select(description, sorted_enum_values)
+                    .context("Failed to get input")?;
 
                 serde_json::Value::String(selected)
             } else {
@@ -1107,17 +1089,13 @@ impl UpdateCommand {
 
                 match default_value {
                     Some(serde_json::Value::Bool(b)) => {
-                        let answer = Confirm::new(description)
-                            .with_default(*b)
-                            .prompt()
+                        let answer = ctx.input.confirm(description, *b)
                             .context("Failed to get input")?;
                         serde_json::Value::Bool(answer)
                     }
                     Some(serde_json::Value::Number(n)) => {
                         let prompt_text = format!("{} (current: {})", description, n);
-                        let answer = Text::new(&prompt_text)
-                            .with_default(&n.to_string())
-                            .prompt()
+                        let answer = ctx.input.text(&prompt_text, Some(&n.to_string()))
                             .context("Failed to get input")?;
 
                         // Try to parse as number
@@ -1131,16 +1109,13 @@ impl UpdateCommand {
                     }
                     Some(serde_json::Value::String(s)) => {
                         let prompt_text = format!("{} (current: {})", description, s);
-                        let answer = Text::new(&prompt_text)
-                            .with_default(s)
-                            .prompt()
+                        let answer = ctx.input.text(&prompt_text, Some(s))
                             .context("Failed to get input")?;
                         serde_json::Value::String(answer)
                     }
                     _ => {
                         // No current value or default, prompt for string
-                        let answer = Text::new(description)
-                            .prompt()
+                        let answer = ctx.input.text(description, None)
                             .context("Failed to get input")?;
                         serde_json::Value::String(answer)
                     }
@@ -1224,6 +1199,7 @@ impl UpdateCommand {
 
     /// Generate the .pmp.environment.yaml file for the project environment (with spec)
     fn generate_project_environment_yaml(
+        ctx: &crate::context::Context,
         environment_path: &Path,
         environment_name: &str,
         project_name: &str,
@@ -1275,7 +1251,7 @@ impl UpdateCommand {
 
         // Write to .pmp.environment.yaml file
         let pmp_env_yaml_path = environment_path.join(".pmp.environment.yaml");
-        std::fs::write(&pmp_env_yaml_path, yaml_content)
+        ctx.fs.write(&pmp_env_yaml_path, &yaml_content)
             .with_context(|| format!("Failed to write .pmp.environment.yaml file: {:?}", pmp_env_yaml_path))?;
 
         output::dimmed(&format!("  Updated: {}", pmp_env_yaml_path.display()));
@@ -1285,10 +1261,10 @@ impl UpdateCommand {
 
     /// Collect plugin inputs from user
     fn collect_plugin_inputs(
+        ctx: &crate::context::Context,
         inputs_spec: &HashMap<String, crate::template::metadata::InputSpec>,
         project_name: &str,
     ) -> Result<HashMap<String, Value>> {
-        use inquire::{Select, Text, Confirm};
 
         let mut inputs = HashMap::new();
 
@@ -1310,38 +1286,27 @@ impl UpdateCommand {
                 let mut sorted_enum_values = enum_values.clone();
                 sorted_enum_values.sort();
 
-                let default_str = input_spec.default
+                let _default_str = input_spec.default
                     .as_ref()
                     .and_then(|v| v.as_str())
                     .or_else(|| sorted_enum_values.first().map(|s| s.as_str()));
 
-                let selected = if let Some(default) = default_str {
-                    Select::new(description, sorted_enum_values.clone())
-                        .with_starting_cursor(sorted_enum_values.iter().position(|v| v == default).unwrap_or(0))
-                        .prompt()
-                        .context("Failed to get input")?
-                } else {
-                    Select::new(description, sorted_enum_values)
-                        .prompt()
-                        .context("Failed to get input")?
-                };
+                // Note: The starting cursor feature (pre-selecting the default) is not supported by the trait
+                let selected = ctx.input.select(description, sorted_enum_values)
+                    .context("Failed to get input")?;
 
                 Value::String(selected)
             } else if let Some(default) = &input_spec.default {
                 // Determine type from default value
                 match default {
                     Value::Bool(b) => {
-                        let answer = Confirm::new(description)
-                            .with_default(*b)
-                            .prompt()
+                        let answer = ctx.input.confirm(description, *b)
                             .context("Failed to get input")?;
                         Value::Bool(answer)
                     }
                     Value::Number(n) => {
                         let prompt_text = format!("{} (default: {})", description, n);
-                        let answer = Text::new(&prompt_text)
-                            .with_default(&n.to_string())
-                            .prompt()
+                        let answer = ctx.input.text(&prompt_text, Some(&n.to_string()))
                             .context("Failed to get input")?;
 
                         // Try to parse as number
@@ -1359,9 +1324,7 @@ impl UpdateCommand {
                         } else {
                             description.to_string()
                         };
-                        let answer = Text::new(&prompt_text)
-                            .with_default(s)
-                            .prompt()
+                        let answer = ctx.input.text(&prompt_text, Some(s))
                             .context("Failed to get input")?;
                         Value::String(answer)
                     }
@@ -1371,16 +1334,14 @@ impl UpdateCommand {
                     }
                     _ => {
                         // Fallback to string input
-                        let answer = Text::new(description)
-                            .prompt()
+                        let answer = ctx.input.text(description, None)
                             .context("Failed to get input")?;
                         Value::String(answer)
                     }
                 }
             } else {
                 // No default, prompt for string
-                let answer = Text::new(description)
-                    .prompt()
+                let answer = ctx.input.text(description, None)
                     .context("Failed to get input")?;
                 Value::String(answer)
             };

@@ -5,7 +5,7 @@ use crate::template::metadata::{
     ProjectCollectionSpec, ResourceKindFilter,
 };
 use anyhow::{Context, Result};
-use inquire::{Confirm, MultiSelect, Select, Text};
+use inquire::MultiSelect;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -26,7 +26,7 @@ impl InitCommand {
         let collection_file = current_dir.join(".pmp.project-collection.yaml");
 
         // Check if collection already exists and route accordingly
-        if collection_file.exists() {
+        if ctx.fs.exists(&collection_file) {
             Self::edit_existing_collection(ctx, &collection_file, template_packs_paths)?;
         } else {
             Self::create_new_collection(ctx, &current_dir, &collection_file, name, description, template_packs_paths)?;
@@ -52,9 +52,7 @@ impl InitCommand {
         let collection_name = if let Some(n) = name {
             n.to_string()
         } else {
-            Text::new("Collection name:")
-                .with_default("My Infrastructure")
-                .prompt()
+            ctx.input.text("Collection name:", Some("My Infrastructure"))
                 .context("Failed to get collection name")?
         };
 
@@ -62,9 +60,7 @@ impl InitCommand {
         let collection_description = if let Some(d) = description {
             Some(d.to_string())
         } else {
-            let desc = Text::new("Description (optional):")
-                .with_default("")
-                .prompt()
+            let desc = ctx.input.text("Description (optional):", Some(""))
                 .context("Failed to get description")?;
             if desc.is_empty() {
                 None
@@ -149,8 +145,7 @@ impl InitCommand {
         loop {
             // Prompt for environment key
             let env_key = loop {
-                let key = Text::new("Environment key (lowercase, alphanumeric, underscores; cannot start with number):")
-                    .prompt()
+                let key = ctx.input.text("Environment key (lowercase, alphanumeric, underscores; cannot start with number):", None)
                     .context("Failed to get environment key")?;
 
                 // Validate environment key
@@ -169,15 +164,12 @@ impl InitCommand {
             };
 
             // Prompt for display name
-            let env_name = Text::new("Environment display name:")
-                .with_default(&Self::capitalize_first(&env_key))
-                .prompt()
+            let default_name = Self::capitalize_first(&env_key);
+            let env_name = ctx.input.text("Environment display name:", Some(&default_name))
                 .context("Failed to get environment name")?;
 
             // Prompt for optional description
-            let env_description = Text::new("Environment description (optional):")
-                .with_default("")
-                .prompt()
+            let env_description = ctx.input.text("Environment description (optional):", Some(""))
                 .context("Failed to get environment description")?;
 
             environments.insert(
@@ -196,9 +188,7 @@ impl InitCommand {
             output::blank();
 
             // Ask if they want to add another environment
-            let add_another = Confirm::new("Add another environment?")
-                .with_default(false)
-                .prompt()
+            let add_another = ctx.input.confirm("Add another environment?", false)
                 .context("Failed to get confirmation")?;
 
             if !add_another {
@@ -233,7 +223,7 @@ impl InitCommand {
 
         // Step 9: Create the projects directory
         let projects_dir = current_dir.join("projects");
-        std::fs::create_dir_all(&projects_dir)
+        ctx.fs.create_dir_all(&projects_dir)
             .context("Failed to create projects directory")?;
 
         // Step 10: Display success message
@@ -276,21 +266,20 @@ impl InitCommand {
             Self::display_collection_summary(&collection);
 
             // Present editing options with hints
-            let options = vec![
-                "Metadata - Edit collection name and description",
-                "Resource kinds - Add or remove allowed resource kinds from templates",
-                "Environments - Add, edit, or remove environments",
-                "Exit - Save and exit",
+            let options: Vec<String> = vec![
+                "Metadata - Edit collection name and description".to_string(),
+                "Resource kinds - Add or remove allowed resource kinds from templates".to_string(),
+                "Environments - Add, edit, or remove environments".to_string(),
+                "Exit - Save and exit".to_string(),
             ];
 
-            let choice = Select::new("What would you like to edit?", options)
-                .prompt()
+            let choice = ctx.input.select("What would you like to edit?", options)
                 .context("Failed to select option")?;
 
             // Handle the selection
             match choice {
                 opt if opt.starts_with("Metadata") => {
-                    Self::edit_metadata(&mut collection)?;
+                    Self::edit_metadata(ctx, &mut collection)?;
 
                     // Save after editing
                     collection.save(&*ctx.fs, collection_file)
@@ -299,9 +288,7 @@ impl InitCommand {
                     output::blank();
 
                     // Ask if they want to continue
-                    let continue_editing = Confirm::new("Continue editing?")
-                        .with_default(true)
-                        .prompt()
+                    let continue_editing = ctx.input.confirm("Continue editing?", true)
                         .context("Failed to get confirmation")?;
 
                     if !continue_editing {
@@ -318,9 +305,7 @@ impl InitCommand {
                     output::blank();
 
                     // Ask if they want to continue
-                    let continue_editing = Confirm::new("Continue editing?")
-                        .with_default(true)
-                        .prompt()
+                    let continue_editing = ctx.input.confirm("Continue editing?", true)
                         .context("Failed to get confirmation")?;
 
                     if !continue_editing {
@@ -328,7 +313,7 @@ impl InitCommand {
                     }
                 }
                 opt if opt.starts_with("Environments") => {
-                    Self::edit_environments(&mut collection)?;
+                    Self::edit_environments(ctx, &mut collection)?;
 
                     // Save after editing
                     collection.save(&*ctx.fs, collection_file)
@@ -337,9 +322,7 @@ impl InitCommand {
                     output::blank();
 
                     // Ask if they want to continue
-                    let continue_editing = Confirm::new("Continue editing?")
-                        .with_default(true)
-                        .prompt()
+                    let continue_editing = ctx.input.confirm("Continue editing?", true)
                         .context("Failed to get confirmation")?;
 
                     if !continue_editing {
@@ -379,18 +362,14 @@ impl InitCommand {
     }
 
     /// Edit collection metadata
-    fn edit_metadata(collection: &mut ProjectCollectionResource) -> Result<()> {
+    fn edit_metadata(ctx: &crate::context::Context, collection: &mut ProjectCollectionResource) -> Result<()> {
         output::subsection("Editing Metadata");
 
-        let new_name = Text::new("Collection name:")
-            .with_default(&collection.metadata.name)
-            .prompt()
+        let new_name = ctx.input.text("Collection name:", Some(&collection.metadata.name))
             .context("Failed to get collection name")?;
 
         let current_desc = collection.metadata.description.as_deref().unwrap_or("");
-        let new_desc = Text::new("Description (optional):")
-            .with_default(current_desc)
-            .prompt()
+        let new_desc = ctx.input.text("Description (optional):", Some(current_desc))
             .context("Failed to get description")?;
 
         collection.metadata.name = new_name;
@@ -499,31 +478,30 @@ impl InitCommand {
     }
 
     /// Edit environments with add/edit/remove options
-    fn edit_environments(collection: &mut ProjectCollectionResource) -> Result<()> {
+    fn edit_environments(ctx: &crate::context::Context, collection: &mut ProjectCollectionResource) -> Result<()> {
         output::subsection("Editing Environments");
 
         loop {
-            let action = Select::new(
+            let action = ctx.input.select(
                 "What would you like to do?",
                 vec![
-                    "Add new environment",
-                    "Edit existing environment",
-                    "Remove environment",
-                    "Done editing environments"
+                    "Add new environment".to_string(),
+                    "Edit existing environment".to_string(),
+                    "Remove environment".to_string(),
+                    "Done editing environments".to_string(),
                 ]
             )
-            .prompt()
             .context("Failed to select action")?;
 
-            match action {
+            match action.as_str() {
                 "Add new environment" => {
-                    Self::add_environment(&mut collection.spec.environments)?;
+                    Self::add_environment(ctx, &mut collection.spec.environments)?;
                 }
                 "Edit existing environment" => {
-                    Self::edit_single_environment(&mut collection.spec.environments)?;
+                    Self::edit_single_environment(ctx, &mut collection.spec.environments)?;
                 }
                 "Remove environment" => {
-                    Self::remove_environment(&mut collection.spec.environments)?;
+                    Self::remove_environment(ctx, &mut collection.spec.environments)?;
                 }
                 "Done editing environments" => break,
                 _ => {}
@@ -536,11 +514,10 @@ impl InitCommand {
     }
 
     /// Add a new environment
-    fn add_environment(environments: &mut HashMap<String, Environment>) -> Result<()> {
+    fn add_environment(ctx: &crate::context::Context, environments: &mut HashMap<String, Environment>) -> Result<()> {
         // Prompt for environment key
         let env_key = loop {
-            let key = Text::new("Environment key (lowercase, alphanumeric, underscores; cannot start with number):")
-                .prompt()
+            let key = ctx.input.text("Environment key (lowercase, alphanumeric, underscores; cannot start with number):", None)
                 .context("Failed to get environment key")?;
 
             // Validate environment key
@@ -559,15 +536,12 @@ impl InitCommand {
         };
 
         // Prompt for display name
-        let env_name = Text::new("Environment display name:")
-            .with_default(&Self::capitalize_first(&env_key))
-            .prompt()
+        let default_name = Self::capitalize_first(&env_key);
+        let env_name = ctx.input.text("Environment display name:", Some(&default_name))
             .context("Failed to get environment name")?;
 
         // Prompt for optional description
-        let env_description = Text::new("Environment description (optional):")
-            .with_default("")
-            .prompt()
+        let env_description = ctx.input.text("Environment description (optional):", Some(""))
             .context("Failed to get environment description")?;
 
         environments.insert(
@@ -588,7 +562,7 @@ impl InitCommand {
     }
 
     /// Edit a single existing environment
-    fn edit_single_environment(environments: &mut HashMap<String, Environment>) -> Result<()> {
+    fn edit_single_environment(ctx: &crate::context::Context, environments: &mut HashMap<String, Environment>) -> Result<()> {
         if environments.is_empty() {
             output::warning("No environments to edit.");
             output::blank();
@@ -596,21 +570,17 @@ impl InitCommand {
         }
 
         // Select environment to edit
-        let env_key = Self::select_environment(environments, "Select environment to edit:")?;
+        let env_key = Self::select_environment(ctx, environments, "Select environment to edit:")?;
 
         let env = environments.get_mut(&env_key).unwrap();
 
         // Edit display name
-        let new_name = Text::new("Environment display name:")
-            .with_default(&env.name)
-            .prompt()
+        let new_name = ctx.input.text("Environment display name:", Some(&env.name))
             .context("Failed to get environment name")?;
 
         // Edit description
         let current_desc = env.description.as_deref().unwrap_or("");
-        let new_desc = Text::new("Environment description (optional):")
-            .with_default(current_desc)
-            .prompt()
+        let new_desc = ctx.input.text("Environment description (optional):", Some(current_desc))
             .context("Failed to get environment description")?;
 
         env.name = new_name;
@@ -626,7 +596,7 @@ impl InitCommand {
     }
 
     /// Remove an environment
-    fn remove_environment(environments: &mut HashMap<String, Environment>) -> Result<()> {
+    fn remove_environment(ctx: &crate::context::Context, environments: &mut HashMap<String, Environment>) -> Result<()> {
         if environments.is_empty() {
             output::warning("No environments to remove.");
             output::blank();
@@ -640,12 +610,10 @@ impl InitCommand {
         }
 
         // Select environment to remove
-        let env_key = Self::select_environment(environments, "Select environment to remove:")?;
+        let env_key = Self::select_environment(ctx, environments, "Select environment to remove:")?;
 
         // Confirm removal
-        let confirm = Confirm::new(&format!("Are you sure you want to remove environment '{}'?", env_key))
-            .with_default(false)
-            .prompt()
+        let confirm = ctx.input.confirm(&format!("Are you sure you want to remove environment '{}'?", env_key), false)
             .context("Failed to get confirmation")?;
 
         if confirm {
@@ -662,6 +630,7 @@ impl InitCommand {
 
     /// Helper to select an environment from the list
     fn select_environment(
+        ctx: &crate::context::Context,
         environments: &HashMap<String, Environment>,
         prompt: &str
     ) -> Result<String> {
@@ -672,8 +641,7 @@ impl InitCommand {
             .collect();
         env_options.sort();
 
-        let selected = Select::new(prompt, env_options.clone())
-            .prompt()
+        let selected = ctx.input.select(prompt, env_options.clone())
             .context("Failed to select environment")?;
 
         // Extract the key from the selected option (format: "key (name)")

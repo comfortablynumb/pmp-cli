@@ -161,9 +161,9 @@ impl FileSystem for MockFileSystem {
     }
 
     fn write(&self, path: &Path, contents: &str) -> Result<()> {
-        // Ensure parent directory exists in mock
+        // Ensure all parent directories exist in mock (recursively)
         if let Some(parent) = path.parent() {
-            self.directories.write().unwrap().insert(parent.to_path_buf(), ());
+            self.create_dir_all(parent)?;
         }
 
         self.files
@@ -248,13 +248,22 @@ impl FileSystem for MockFileSystem {
 
         let mut entries = Vec::new();
 
-        // Walk files
+        // Add the root path itself if it exists (depth 0)
+        if self.is_dir(path) {
+            entries.push(path.to_path_buf());
+        }
+
+        // Walk files - depth is calculated from the root
+        // max_depth=0: only root
+        // max_depth=1: root + immediate children
+        // max_depth=2: root + children + grandchildren
         for file_path in files.keys() {
-            if file_path.starts_with(path) {
-                let depth = file_path.strip_prefix(path)
-                    .unwrap()
-                    .components()
-                    .count();
+            if file_path.starts_with(path) && file_path != path {
+                let relative = match file_path.strip_prefix(path) {
+                    Ok(rel) => rel,
+                    Err(_) => continue,
+                };
+                let depth = relative.components().count();
                 if depth <= max_depth {
                     entries.push(file_path.clone());
                 }
@@ -263,11 +272,12 @@ impl FileSystem for MockFileSystem {
 
         // Walk directories
         for dir_path in directories.keys() {
-            if dir_path.starts_with(path) {
-                let depth = dir_path.strip_prefix(path)
-                    .unwrap()
-                    .components()
-                    .count();
+            if dir_path.starts_with(path) && dir_path != path {
+                let relative = match dir_path.strip_prefix(path) {
+                    Ok(rel) => rel,
+                    Err(_) => continue,
+                };
+                let depth = relative.components().count();
                 if depth <= max_depth {
                     entries.push(dir_path.clone());
                 }

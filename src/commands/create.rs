@@ -281,7 +281,7 @@ impl CreateCommand {
             };
 
             // Check if path exists OR if project name already exists in collection
-            let name_exists = if check_path.exists() {
+            let name_exists = if ctx.fs.exists(&check_path) {
                 true
             } else {
                 // Check if any existing project has this name
@@ -344,22 +344,33 @@ impl CreateCommand {
         );
 
         // Step 12: Determine project root path
+        // Convert resource kind to snake_case for directory name
+        let resource_kind_snake = resource_kind
+            .chars()
+            .fold(String::new(), |mut acc, c| {
+                if c.is_uppercase() && !acc.is_empty() {
+                    acc.push('_');
+                }
+                acc.push(c.to_ascii_lowercase());
+                acc
+            });
+
         let project_root = if let Some(path) = output_path {
             std::path::PathBuf::from(path)
         } else {
-            collection_root.join("projects").join(&project_name)
+            collection_root.join("projects").join(&resource_kind_snake).join(&project_name)
         };
 
         // Step 13: Determine environment path
         let environment_path = project_root.join("environments").join(&selected_environment);
 
         // Step 14: Create the directories
-        if !project_root.exists() {
-            std::fs::create_dir_all(&project_root)
+        if !ctx.fs.exists(&project_root) {
+            ctx.fs.create_dir_all(&project_root)
                 .context(format!("Failed to create project root directory: {}", project_root.display()))?;
         }
-        if !environment_path.exists() {
-            std::fs::create_dir_all(&environment_path)
+        if !ctx.fs.exists(&environment_path) {
+            ctx.fs.create_dir_all(&environment_path)
                 .context(format!("Failed to create environment directory: {}", environment_path.display()))?;
         }
 
@@ -369,7 +380,7 @@ impl CreateCommand {
         let renderer = TemplateRenderer::new();
         let template_src = &selected_template.path;
 
-        if !template_src.exists() {
+        if !ctx.fs.exists(template_src) {
             anyhow::bail!(
                 "Template directory not found: {}",
                 template_src.display()
@@ -588,7 +599,7 @@ impl CreateCommand {
 
         // Write to .pmp.project.yaml file
         let pmp_yaml_path = project_root.join(".pmp.project.yaml");
-        std::fs::write(&pmp_yaml_path, yaml_content)
+        ctx.fs.write(&pmp_yaml_path, &yaml_content)
             .with_context(|| format!("Failed to write .pmp.project.yaml file: {:?}", pmp_yaml_path))?;
 
         ctx.output.dimmed(&format!("  Created: {}", pmp_yaml_path.display()));
@@ -650,7 +661,7 @@ impl CreateCommand {
 
         // Write to .pmp.environment.yaml file
         let pmp_env_yaml_path = environment_path.join(".pmp.environment.yaml");
-        std::fs::write(&pmp_env_yaml_path, yaml_content)
+        ctx.fs.write(&pmp_env_yaml_path, &yaml_content)
             .with_context(|| format!("Failed to write .pmp.environment.yaml file: {:?}", pmp_env_yaml_path))?;
 
         ctx.output.dimmed(&format!("  Created: {}", pmp_env_yaml_path.display()));
@@ -658,4 +669,443 @@ impl CreateCommand {
         Ok(())
     }
 
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::traits::{MockFileSystem, MockUserInput, MockOutput, MockCommandExecutor, FileSystem};
+    use crate::traits::user_input::MockResponse;
+    use crate::context::Context;
+    use crate::executor::registry::DefaultExecutorRegistry;
+    use std::sync::Arc;
+    use std::path::PathBuf;
+
+    /// Helper to create a test context with mocks
+    fn create_test_context(
+        fs: Arc<MockFileSystem>,
+        input: MockUserInput,
+    ) -> Context {
+        Context {
+            fs,
+            input: Arc::new(input),
+            output: Arc::new(MockOutput::new()),
+            command: Arc::new(MockCommandExecutor::new()),
+            executor_registry: Arc::new(DefaultExecutorRegistry::with_defaults()),
+        }
+    }
+
+    /// Helper to set up a basic template pack in the mock filesystem
+    fn setup_template_pack(
+        fs: &MockFileSystem,
+        pack_name: &str,
+        template_name: &str,
+        resource_kind: &str,
+        inputs: &str,
+    ) -> PathBuf {
+        // Use actual current directory for template pack discovery to work
+        let current_dir = std::env::current_dir().unwrap();
+        let pack_path = current_dir.join(".pmp/template-packs").join(pack_name);
+
+        // Create template pack file
+        let pack_yaml = format!(
+            r#"apiVersion: pmp.io/v1
+kind: TemplatePack
+metadata:
+  name: {}
+  description: Test template pack
+spec: {{}}"#,
+            pack_name
+        );
+        fs.write(&pack_path.join(".pmp.template-pack.yaml"), &pack_yaml).unwrap();
+
+        // Create template directory
+        let template_dir = pack_path.join("templates").join(template_name);
+
+        // Create template file
+        let template_yaml = format!(
+            r#"apiVersion: pmp.io/v1
+kind: Template
+metadata:
+  name: {}
+  description: Test template
+spec:
+  apiVersion: pmp.io/v1
+  kind: {}
+  executor: opentofu
+  inputs:
+{}"#,
+            template_name, resource_kind, inputs
+        );
+        fs.write(&template_dir.join(".pmp.template.yaml"), &template_yaml).unwrap();
+
+        // Create src/ subdirectory with a simple template file
+        // Templates must have a src/ subdirectory according to the renderer
+        fs.write(&template_dir.join("src/main.tf.hbs"), "# Test template").unwrap();
+
+        pack_path
+    }
+
+    /// Helper to set up a project collection
+    /// Creates the collection file in the current directory
+    fn setup_project_collection(
+        fs: &MockFileSystem,
+        resource_kinds_yaml: &str,
+    ) {
+        let collection_yaml = format!(
+            r#"apiVersion: pmp.io/v1
+kind: ProjectCollection
+metadata:
+  name: Test Collection
+  description: Test collection
+spec:
+  resource_kinds:
+{}
+  environments:
+    dev:
+      name: Development
+      description: Development environment"#,
+            resource_kinds_yaml
+        );
+        // Create in actual current directory (for discovery to work)
+        let current_dir = std::env::current_dir().unwrap();
+        fs.write(&current_dir.join(".pmp.project-collection.yaml"), &collection_yaml).unwrap();
+    }
+
+    #[test]
+    fn test_template_filtering_allowed_true() {
+        // Set up mock filesystem
+        let fs = Arc::new(MockFileSystem::new());
+
+        // Set up template pack with a template
+        setup_template_pack(
+            &fs,
+            "test-pack",
+            "allowed-template",
+            "TestResource",
+            r#"    replica_count:
+      default: 1
+      description: Number of replicas"#,
+        );
+
+        // Set up collection with template allowed
+        setup_project_collection(
+            &fs,
+            r#"    - apiVersion: pmp.io/v1
+      kind: TestResource
+      templates:
+        allowed-template:
+          template_pack_name: test-pack
+          allowed: true"#,
+        );
+
+        // Set up mock user input
+        let input = MockUserInput::new();
+        input.add_response(MockResponse::Text("test_project".to_string())); // project name
+        input.add_response(MockResponse::Text("1".to_string())); // replica_count
+
+        let ctx = create_test_context(Arc::clone(&fs), input);
+
+        // Run create command
+        let result = CreateCommand::execute(
+            &ctx,
+            None, // output_path
+            None, // template_packs_paths
+        );
+
+        // Verify template was allowed and project was created
+        assert!(result.is_ok(), "Create command should succeed: {:?}", result);
+    }
+
+    #[test]
+    fn test_template_filtering_allowed_false() {
+        // Set up mock filesystem
+        let fs = Arc::new(MockFileSystem::new());
+
+        // Set up template pack with a template
+        setup_template_pack(
+            &fs,
+            "test-pack",
+            "blocked-template",
+            "TestResource",
+            r#"    replica_count:
+      default: 1
+      description: Number of replicas"#,
+        );
+
+        // Set up collection with template blocked
+        setup_project_collection(
+            &fs,
+            r#"    - apiVersion: pmp.io/v1
+      kind: TestResource
+      templates:
+        blocked-template:
+          template_pack_name: test-pack
+          allowed: false"#,
+        );
+
+        let input = MockUserInput::new();
+        let ctx = create_test_context(Arc::clone(&fs), input);
+
+        // Run create command
+        let result = CreateCommand::execute(
+            &ctx,
+            None,
+            None,
+        );
+
+        // Should fail because no templates are available
+        assert!(result.is_err(), "Create command should fail when all templates are blocked");
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(
+            err_msg.contains("No template packs contain templates") ||
+            err_msg.contains("allowed in this collection"),
+            "Error should mention no matching templates: {}", err_msg
+        );
+    }
+
+    #[test]
+    fn test_input_override_show_as_default_true() {
+        // Set up mock filesystem
+        let fs = Arc::new(MockFileSystem::new());
+
+        // Set up template pack
+        setup_template_pack(
+            &fs,
+            "test-pack",
+            "test-template",
+            "TestResource",
+            r#"    replica_count:
+      default: 1
+      description: Number of replicas"#,
+        );
+
+        // Set up collection with input override (show_as_default: true)
+        setup_project_collection(
+            &fs,
+            r#"    - apiVersion: pmp.io/v1
+      kind: TestResource
+      templates:
+        test-template:
+          template_pack_name: test-pack
+          allowed: true
+          defaults:
+            inputs:
+              replica_count:
+                value: 5
+                show_as_default: true"#,
+        );
+
+        // Set up mock user input
+        let input = MockUserInput::new();
+        input.add_response(MockResponse::Text("test_project".to_string())); // project name
+        // User should be prompted for replica_count with default of 5
+        input.add_response(MockResponse::Text("3".to_string())); // Override the default to 3
+
+        let ctx = create_test_context(Arc::clone(&fs), input);
+
+        // Run create command
+        let result = CreateCommand::execute(
+            &ctx,
+            None,
+            None,
+        );
+
+        assert!(result.is_ok(), "Create command should succeed: {:?}", result);
+
+        // Verify the environment file was created with user's input (3, not the collection default 5)
+        let current_dir = std::env::current_dir().unwrap();
+        let env_file_path = current_dir.join("projects/test_resource/test_project/environments/dev/.pmp.environment.yaml");
+        assert!(fs.has_file(&env_file_path), "Environment file should be created");
+
+        let env_content = fs.get_file_contents(&env_file_path).unwrap();
+        assert!(env_content.contains("replica_count: 3"), "Environment file should contain user's input value");
+    }
+
+    #[test]
+    fn test_input_override_show_as_default_false() {
+        // Set up mock filesystem
+        let fs = Arc::new(MockFileSystem::new());
+
+        // Set up template pack
+        setup_template_pack(
+            &fs,
+            "test-pack",
+            "test-template",
+            "TestResource",
+            r#"    replica_count:
+      default: 1
+      description: Number of replicas
+    environment_name:
+      default: dev
+      description: Environment name"#,
+        );
+
+        // Set up collection with input override (show_as_default: false)
+        setup_project_collection(
+            &fs,
+            r#"    - apiVersion: pmp.io/v1
+      kind: TestResource
+      templates:
+        test-template:
+          template_pack_name: test-pack
+          allowed: true
+          defaults:
+            inputs:
+              replica_count:
+                value: 5
+                show_as_default: false"#,
+        );
+
+        // Set up mock user input
+        let input = MockUserInput::new();
+        input.add_response(MockResponse::Text("test_project".to_string())); // project name
+        // User should NOT be prompted for replica_count (it's fixed at 5)
+        input.add_response(MockResponse::Text("prod".to_string())); // environment_name (still asked)
+
+        let ctx = create_test_context(Arc::clone(&fs), input);
+
+        // Run create command
+        let result = CreateCommand::execute(
+            &ctx,
+            None,
+            None,
+        );
+
+        assert!(result.is_ok(), "Create command should succeed: {:?}", result);
+
+        // Verify the environment file was created with collection's fixed value
+        let current_dir = std::env::current_dir().unwrap();
+        let env_file_path = current_dir.join("projects/test_resource/test_project/environments/dev/.pmp.environment.yaml");
+        assert!(fs.has_file(&env_file_path), "Environment file should be created");
+
+        let env_content = fs.get_file_contents(&env_file_path).unwrap();
+        assert!(env_content.contains("replica_count: 5"), "Environment file should contain collection's fixed value");
+        assert!(env_content.contains("environment_name: prod"), "Environment file should contain user's input for other fields");
+    }
+
+    #[test]
+    fn test_backward_compatibility_no_templates_field() {
+        // Set up mock filesystem
+        let fs = Arc::new(MockFileSystem::new());
+
+        // Set up template pack
+        setup_template_pack(
+            &fs,
+            "test-pack",
+            "test-template",
+            "TestResource",
+            r#"    replica_count:
+      default: 1
+      description: Number of replicas"#,
+        );
+
+        // Set up collection WITHOUT templates field (backward compatible)
+        setup_project_collection(
+            &fs,
+            r#"    - apiVersion: pmp.io/v1
+      kind: TestResource"#,
+        );
+
+        // Set up mock user input
+        let input = MockUserInput::new();
+        input.add_response(MockResponse::Text("test_project".to_string())); // project name
+        input.add_response(MockResponse::Text("2".to_string())); // replica_count
+
+        let ctx = create_test_context(Arc::clone(&fs), input);
+
+        // Run create command
+        let result = CreateCommand::execute(
+            &ctx,
+            None,
+            None,
+        );
+
+        assert!(result.is_ok(), "Create command should succeed with old config format: {:?}", result);
+
+        // Verify project was created
+        let current_dir = std::env::current_dir().unwrap();
+        let env_file_path = current_dir.join("projects/test_resource/test_project/environments/dev/.pmp.environment.yaml");
+        assert!(fs.has_file(&env_file_path), "Environment file should be created");
+    }
+
+    #[test]
+    fn test_multiple_templates_with_different_configurations() {
+        // Set up mock filesystem
+        let fs = Arc::new(MockFileSystem::new());
+
+        // Set up two templates in the same pack
+        setup_template_pack(
+            &fs,
+            "test-pack",
+            "template-a",
+            "TestResource",
+            r#"    setting_a:
+      default: "a"
+      description: Setting A"#,
+        );
+
+        // Add second template (manually since helper only does one)
+        let current_dir = std::env::current_dir().unwrap();
+        let template_dir = current_dir.join(".pmp/template-packs/test-pack/templates/template-b");
+        let template_yaml = r#"apiVersion: pmp.io/v1
+kind: Template
+metadata:
+  name: template-b
+  description: Template B
+spec:
+  apiVersion: pmp.io/v1
+  kind: TestResource
+  executor: opentofu
+  inputs:
+    setting_b:
+      default: "b"
+      description: Setting B"#;
+        fs.write(&template_dir.join(".pmp.template.yaml"), template_yaml).unwrap();
+        fs.write(&template_dir.join("src/main.tf.hbs"), "# Template B").unwrap();
+
+        // Set up collection with different configurations for each template
+        setup_project_collection(
+            &fs,
+            r#"    - apiVersion: pmp.io/v1
+      kind: TestResource
+      templates:
+        template-a:
+          template_pack_name: test-pack
+          allowed: true
+          defaults:
+            inputs:
+              setting_a:
+                value: "override-a"
+                show_as_default: false
+        template-b:
+          template_pack_name: test-pack
+          allowed: false"#,
+        );
+
+        // Set up mock user input
+        let input = MockUserInput::new();
+        // Only template-a should be available, template-b is blocked
+        input.add_response(MockResponse::Text("test_project".to_string())); // project name
+        // setting_a should not be prompted (show_as_default: false)
+
+        let ctx = create_test_context(Arc::clone(&fs), input);
+
+        // Run create command
+        let result = CreateCommand::execute(
+            &ctx,
+            None,
+            None,
+        );
+
+        assert!(result.is_ok(), "Create command should succeed: {:?}", result);
+
+        // Verify the environment file was created with template-a's configuration
+        let current_dir = std::env::current_dir().unwrap();
+        let env_file_path = current_dir.join("projects/test_resource/test_project/environments/dev/.pmp.environment.yaml");
+        assert!(fs.has_file(&env_file_path), "Environment file should be created");
+
+        let env_content = fs.get_file_contents(&env_file_path).unwrap();
+        assert!(env_content.contains("setting_a: override-a"), "Environment file should contain template-a's override");
+    }
 }
