@@ -204,17 +204,3 @@ resource "helm_release" "vault" {
   wait    = true
   timeout = 600
 }
-
-# Create KV v2 mount for this environment
-# Note: This resource will be created after Vault is initialized and unsealed
-resource "vault_mount" "kv" {
-  path        = "kv-{{environment}}"
-  type        = "kv-v2"
-  description = "KV Version 2 secret engine for {{environment}} environment"
-
-  options = {
-    version = "2"
-  }
-
-  depends_on = [helm_release.vault]
-}

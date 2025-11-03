@@ -1,0 +1,26 @@
+apiVersion: pmp.io/v1
+kind: Plugin
+metadata:
+  name: init
+  description: Initialize a KV v2 secret engine mount for an environment
+
+spec:
+  role: vault-initialization
+
+  requires_project_with_template:
+    apiVersion: pmp.io/v1
+    kind: KubernetesWorkload
+
+  inputs:
+    mount_name:
+      type: string
+      description: Name for the KV v2 mount (will default to environment name if left empty)
+      default: ""
+      validation:
+        pattern: ^[a-z0-9-]*$
+        error_message: Mount name must contain only lowercase letters, numbers, and hyphens
+
+    mount_description:
+      type: string
+      description: Description for the KV v2 mount
+      default: ""

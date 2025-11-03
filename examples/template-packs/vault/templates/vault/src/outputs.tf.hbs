@@ -71,17 +71,6 @@ output "initialization_commands" {
   EOT
 }
 
-# KV Mount outputs for plugin integration
-output "kv_mount_path" {
-  description = "Path to the KV v2 mount for this environment"
-  value       = vault_mount.kv.path
-}
-
-output "kv_mount_accessor" {
-  description = "Accessor ID for the KV mount"
-  value       = vault_mount.kv.accessor
-}
-
 output "vault_address" {
   description = "Internal Vault address for application access"
   value       = "http://${helm_release.vault.name}.${helm_release.vault.namespace}.svc.cluster.local:8200"
