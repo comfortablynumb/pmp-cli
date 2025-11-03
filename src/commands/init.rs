@@ -1,15 +1,15 @@
 use crate::output;
 use crate::template::TemplateDiscovery;
 use crate::template::metadata::{
-    Environment, ProjectCollectionMetadata, ProjectCollectionResource,
-    ProjectCollectionSpec, ResourceKindFilter,
+    Environment, InfrastructureMetadata, InfrastructureResource,
+    InfrastructureSpec, ResourceKindFilter,
 };
 use anyhow::{Context, Result};
 use inquire::MultiSelect;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-/// Handles the 'init' command - initializes or edits a ProjectCollection
+/// Handles the 'init' command - initializes or edits an Infrastructure
 pub struct InitCommand;
 
 impl InitCommand {
@@ -23,28 +23,28 @@ impl InitCommand {
         let current_dir = std::env::current_dir()
             .context("Failed to get current directory")?;
 
-        let collection_file = current_dir.join(".pmp.project-collection.yaml");
+        let infrastructure_file = current_dir.join(".pmp.infrastructure.yaml");
 
-        // Check if collection already exists and route accordingly
-        if ctx.fs.exists(&collection_file) {
-            Self::edit_existing_collection(ctx, &collection_file, template_packs_paths)?;
+        // Check if infrastructure already exists and route accordingly
+        if ctx.fs.exists(&infrastructure_file) {
+            Self::edit_existing_infrastructure(ctx, &infrastructure_file, template_packs_paths)?;
         } else {
-            Self::create_new_collection(ctx, &current_dir, &collection_file, name, description, template_packs_paths)?;
+            Self::create_new_infrastructure(ctx, &current_dir, &infrastructure_file, name, description, template_packs_paths)?;
         }
 
         Ok(())
     }
 
-    /// Create a new ProjectCollection
-    fn create_new_collection(
+    /// Create a new Infrastructure
+    fn create_new_infrastructure(
         ctx: &crate::context::Context,
         current_dir: &PathBuf,
-        collection_file: &PathBuf,
+        infrastructure_file: &PathBuf,
         name: Option<&str>,
         description: Option<&str>,
         template_packs_paths: Option<&str>,
     ) -> Result<()> {
-        output::section("Initialize Project Collection");
+        output::section("Initialize Infrastructure");
         output::key_value("Directory", &current_dir.display().to_string());
         output::blank();
 
@@ -114,15 +114,15 @@ impl InitCommand {
         // Step 5: Present resource kinds as multi-select
         let resource_kinds = if resource_kinds_map.is_empty() {
             output::warning("No templates found in the system.");
-            output::dimmed("The ProjectCollection will be created without any resource kinds.");
-            output::dimmed("You can add templates later and update the collection file.");
+            output::dimmed("The Infrastructure will be created without any resource kinds.");
+            output::dimmed("You can add templates later and update the infrastructure file.");
             output::blank();
             vec![]
         } else {
             let kind_options: Vec<String> = resource_kinds_map.keys().cloned().collect();
 
             let selected_keys = MultiSelect::new(
-                "Select resource kinds to allow in this collection:",
+                "Select resource kinds to allow in this infrastructure:",
                 kind_options.clone()
             )
             .prompt()
@@ -138,7 +138,7 @@ impl InitCommand {
         let mut environments: HashMap<String, Environment> = HashMap::new();
 
         output::subsection("Environments");
-        output::dimmed("Let's add environments to the collection.");
+        output::dimmed("Let's add environments to the infrastructure.");
         output::dimmed("You need at least one environment.");
         output::blank();
 
@@ -149,7 +149,7 @@ impl InitCommand {
                     .context("Failed to get environment key")?;
 
                 // Validate environment key
-                if !ProjectCollectionResource::is_valid_environment_name(&key) {
+                if !InfrastructureResource::is_valid_environment_name(&key) {
                     output::warning("Invalid environment key. Must be lowercase alphanumeric with underscores, and cannot start with a number.");
                     continue;
                 }
@@ -201,15 +201,15 @@ impl InitCommand {
             anyhow::bail!("At least one environment is required.");
         }
 
-        // Step 7: Create the ProjectCollectionResource
-        let collection = ProjectCollectionResource {
+        // Step 7: Create the InfrastructureResource
+        let infrastructure = InfrastructureResource {
             api_version: "pmp.io/v1".to_string(),
-            kind: "ProjectCollection".to_string(),
-            metadata: ProjectCollectionMetadata {
+            kind: "Infrastructure".to_string(),
+            metadata: InfrastructureMetadata {
                 name: collection_name.clone(),
                 description: collection_description,
             },
-            spec: ProjectCollectionSpec {
+            spec: InfrastructureSpec {
                 resource_kinds,
                 environments,
                 hooks: None,
@@ -217,9 +217,9 @@ impl InitCommand {
             },
         };
 
-        // Step 8: Save the collection file
-        collection.save(&*ctx.fs, &collection_file)
-            .context("Failed to save .pmp.project-collection.yaml")?;
+        // Step 8: Save the infrastructure file
+        infrastructure.save(&*ctx.fs, &infrastructure_file)
+            .context("Failed to save .pmp.infrastructure.yaml")?;
 
         // Step 9: Create the projects directory
         let projects_dir = current_dir.join("projects");
@@ -228,17 +228,17 @@ impl InitCommand {
 
         // Step 10: Display success message
         output::blank();
-        output::success("ProjectCollection created successfully!");
+        output::success("Infrastructure created successfully!");
 
         output::subsection("Summary");
-        output::key_value_highlight("Collection", &collection_name);
-        output::key_value("File", &collection_file.display().to_string());
+        output::key_value_highlight("Infrastructure", &collection_name);
+        output::key_value("File", &infrastructure_file.display().to_string());
         output::key_value("Projects directory", &projects_dir.display().to_string());
-        output::key_value("Resource kinds", &collection.spec.resource_kinds.len().to_string());
-        output::key_value("Environments", &collection.spec.environments.len().to_string());
+        output::key_value("Resource kinds", &infrastructure.spec.resource_kinds.len().to_string());
+        output::key_value("Environments", &infrastructure.spec.environments.len().to_string());
 
         let next_steps_list = vec![
-            format!("Review and edit {} if needed", collection_file.display()),
+            format!("Review and edit {} if needed", infrastructure_file.display()),
             "Run 'pmp create' to create a new project from a template".to_string(),
         ];
         output::next_steps(&next_steps_list);
@@ -246,28 +246,28 @@ impl InitCommand {
         Ok(())
     }
 
-    /// Edit an existing ProjectCollection
-    fn edit_existing_collection(
+    /// Edit an existing Infrastructure
+    fn edit_existing_infrastructure(
         ctx: &crate::context::Context,
-        collection_file: &PathBuf,
+        infrastructure_file: &PathBuf,
         template_packs_paths: Option<&str>,
     ) -> Result<()> {
-        output::section("Edit Project Collection");
-        output::key_value("File", &collection_file.display().to_string());
+        output::section("Edit Infrastructure");
+        output::key_value("File", &infrastructure_file.display().to_string());
         output::blank();
 
-        // Load existing collection
-        let mut collection = ProjectCollectionResource::from_file(&*ctx.fs, collection_file)
-            .context("Failed to load existing collection")?;
+        // Load existing infrastructure
+        let mut infrastructure = InfrastructureResource::from_file(&*ctx.fs, infrastructure_file)
+            .context("Failed to load existing infrastructure")?;
 
         // Iterative editing loop
         loop {
-            // Display current collection info
-            Self::display_collection_summary(&collection);
+            // Display current infrastructure info
+            Self::display_infrastructure_summary(&infrastructure);
 
             // Present editing options with hints
             let options: Vec<String> = vec![
-                "Metadata - Edit collection name and description".to_string(),
+                "Metadata - Edit infrastructure name and description".to_string(),
                 "Resource kinds - Add or remove allowed resource kinds from templates".to_string(),
                 "Environments - Add, edit, or remove environments".to_string(),
                 "Exit - Save and exit".to_string(),
@@ -279,12 +279,12 @@ impl InitCommand {
             // Handle the selection
             match choice {
                 opt if opt.starts_with("Metadata") => {
-                    Self::edit_metadata(ctx, &mut collection)?;
+                    Self::edit_metadata(ctx, &mut infrastructure)?;
 
                     // Save after editing
-                    collection.save(&*ctx.fs, collection_file)
-                        .context("Failed to save collection")?;
-                    output::success(&format!("Changes saved to {}", collection_file.display()));
+                    infrastructure.save(&*ctx.fs, infrastructure_file)
+                        .context("Failed to save infrastructure")?;
+                    output::success(&format!("Changes saved to {}", infrastructure_file.display()));
                     output::blank();
 
                     // Ask if they want to continue
@@ -296,12 +296,12 @@ impl InitCommand {
                     }
                 }
                 opt if opt.starts_with("Resource kinds") => {
-                    Self::edit_resource_kinds(ctx, &mut collection, template_packs_paths)?;
+                    Self::edit_resource_kinds(ctx, &mut infrastructure, template_packs_paths)?;
 
                     // Save after editing
-                    collection.save(&*ctx.fs, collection_file)
-                        .context("Failed to save collection")?;
-                    output::success(&format!("Changes saved to {}", collection_file.display()));
+                    infrastructure.save(&*ctx.fs, infrastructure_file)
+                        .context("Failed to save infrastructure")?;
+                    output::success(&format!("Changes saved to {}", infrastructure_file.display()));
                     output::blank();
 
                     // Ask if they want to continue
@@ -313,12 +313,12 @@ impl InitCommand {
                     }
                 }
                 opt if opt.starts_with("Environments") => {
-                    Self::edit_environments(ctx, &mut collection)?;
+                    Self::edit_environments(ctx, &mut infrastructure)?;
 
                     // Save after editing
-                    collection.save(&*ctx.fs, collection_file)
-                        .context("Failed to save collection")?;
-                    output::success(&format!("Changes saved to {}", collection_file.display()));
+                    infrastructure.save(&*ctx.fs, infrastructure_file)
+                        .context("Failed to save infrastructure")?;
+                    output::success(&format!("Changes saved to {}", infrastructure_file.display()));
                     output::blank();
 
                     // Ask if they want to continue
@@ -337,43 +337,43 @@ impl InitCommand {
         }
 
         output::blank();
-        output::success("Done editing ProjectCollection!");
-        output::key_value("File", &collection_file.display().to_string());
+        output::success("Done editing Infrastructure!");
+        output::key_value("File", &infrastructure_file.display().to_string());
 
         Ok(())
     }
 
-    /// Display a summary of the current collection
-    fn display_collection_summary(collection: &ProjectCollectionResource) {
-        output::subsection("Current Collection");
-        output::key_value_highlight("Name", &collection.metadata.name);
-        if let Some(desc) = &collection.metadata.description {
+    /// Display a summary of the current infrastructure
+    fn display_infrastructure_summary(infrastructure: &InfrastructureResource) {
+        output::subsection("Current Infrastructure");
+        output::key_value_highlight("Name", &infrastructure.metadata.name);
+        if let Some(desc) = &infrastructure.metadata.description {
             output::key_value("Description", desc);
         }
-        output::key_value("Resource kinds", &collection.spec.resource_kinds.len().to_string());
-        for rk in &collection.spec.resource_kinds {
+        output::key_value("Resource kinds", &infrastructure.spec.resource_kinds.len().to_string());
+        for rk in &infrastructure.spec.resource_kinds {
             output::list_item(&format!("{}/{}", rk.api_version, rk.kind));
         }
-        output::key_value("Environments", &collection.spec.environments.len().to_string());
-        for (key, env) in &collection.spec.environments {
+        output::key_value("Environments", &infrastructure.spec.environments.len().to_string());
+        for (key, env) in &infrastructure.spec.environments {
             output::list_item(&format!("{} ({})", key, env.name));
         }
         output::blank();
     }
 
-    /// Edit collection metadata
-    fn edit_metadata(ctx: &crate::context::Context, collection: &mut ProjectCollectionResource) -> Result<()> {
+    /// Edit infrastructure metadata
+    fn edit_metadata(ctx: &crate::context::Context, infrastructure: &mut InfrastructureResource) -> Result<()> {
         output::subsection("Editing Metadata");
 
-        let new_name = ctx.input.text("Collection name:", Some(&collection.metadata.name))
-            .context("Failed to get collection name")?;
+        let new_name = ctx.input.text("Infrastructure name:", Some(&infrastructure.metadata.name))
+            .context("Failed to get infrastructure name")?;
 
-        let current_desc = collection.metadata.description.as_deref().unwrap_or("");
+        let current_desc = infrastructure.metadata.description.as_deref().unwrap_or("");
         let new_desc = ctx.input.text("Description (optional):", Some(current_desc))
             .context("Failed to get description")?;
 
-        collection.metadata.name = new_name;
-        collection.metadata.description = if new_desc.is_empty() {
+        infrastructure.metadata.name = new_name;
+        infrastructure.metadata.description = if new_desc.is_empty() {
             None
         } else {
             Some(new_desc)
@@ -387,7 +387,7 @@ impl InitCommand {
     /// Edit resource kinds with pre-selection of current kinds
     fn edit_resource_kinds(
         ctx: &crate::context::Context,
-        collection: &mut ProjectCollectionResource,
+        infrastructure: &mut InfrastructureResource,
         template_packs_paths: Option<&str>,
     ) -> Result<()> {
         output::subsection("Editing Resource Kinds");
@@ -444,7 +444,7 @@ impl InitCommand {
         let kind_options: Vec<String> = resource_kinds_map.keys().cloned().collect();
 
         // Find which current resource kinds should be pre-selected
-        let current_kind_keys: Vec<String> = collection
+        let current_kind_keys: Vec<String> = infrastructure
             .spec
             .resource_kinds
             .iter()
@@ -460,25 +460,25 @@ impl InitCommand {
             .collect();
 
         let selected_keys = MultiSelect::new(
-            "Select resource kinds to allow in this collection:",
+            "Select resource kinds to allow in this infrastructure:",
             kind_options.clone()
         )
         .with_default(&default_indices)
         .prompt()
         .context("Failed to select resource kinds")?;
 
-        collection.spec.resource_kinds = selected_keys
+        infrastructure.spec.resource_kinds = selected_keys
             .iter()
             .filter_map(|key| resource_kinds_map.get(key).cloned())
             .collect();
 
-        output::success(&format!("Resource kinds updated ({} selected)", collection.spec.resource_kinds.len()));
+        output::success(&format!("Resource kinds updated ({} selected)", infrastructure.spec.resource_kinds.len()));
         output::blank();
         Ok(())
     }
 
     /// Edit environments with add/edit/remove options
-    fn edit_environments(ctx: &crate::context::Context, collection: &mut ProjectCollectionResource) -> Result<()> {
+    fn edit_environments(ctx: &crate::context::Context, infrastructure: &mut InfrastructureResource) -> Result<()> {
         output::subsection("Editing Environments");
 
         loop {
@@ -495,13 +495,13 @@ impl InitCommand {
 
             match action.as_str() {
                 "Add new environment" => {
-                    Self::add_environment(ctx, &mut collection.spec.environments)?;
+                    Self::add_environment(ctx, &mut infrastructure.spec.environments)?;
                 }
                 "Edit existing environment" => {
-                    Self::edit_single_environment(ctx, &mut collection.spec.environments)?;
+                    Self::edit_single_environment(ctx, &mut infrastructure.spec.environments)?;
                 }
                 "Remove environment" => {
-                    Self::remove_environment(ctx, &mut collection.spec.environments)?;
+                    Self::remove_environment(ctx, &mut infrastructure.spec.environments)?;
                 }
                 "Done editing environments" => break,
                 _ => {}
@@ -521,7 +521,7 @@ impl InitCommand {
                 .context("Failed to get environment key")?;
 
             // Validate environment key
-            if !ProjectCollectionResource::is_valid_environment_name(&key) {
+            if !InfrastructureResource::is_valid_environment_name(&key) {
                 output::warning("Invalid environment key. Must be lowercase alphanumeric with underscores, and cannot start with a number.");
                 continue;
             }

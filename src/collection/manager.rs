@@ -1,63 +1,63 @@
 use crate::collection::discovery::CollectionDiscovery;
 use crate::template::metadata::{
-    ProjectCollectionMetadata, ProjectCollectionResource, ProjectCollectionSpec, ProjectReference,
+    InfrastructureMetadata, InfrastructureResource, InfrastructureSpec, ProjectReference,
 };
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 
-/// Manager for ProjectCollection operations
+/// Manager for Infrastructure operations
 pub struct CollectionManager {
-    collection: ProjectCollectionResource,
+    infrastructure: InfrastructureResource,
     root_path: PathBuf,
     projects: Vec<ProjectReference>,
 }
 
 impl CollectionManager {
-    /// Load the collection from the current directory or parent directories
+    /// Load the infrastructure from the current directory or parent directories
     pub fn load(ctx: &crate::context::Context) -> Result<Self> {
-        let (collection, root_path) = CollectionDiscovery::find_collection(&*ctx.fs)?
-            .context("No ProjectCollection found in current directory or parent directories")?;
+        let (infrastructure, root_path) = CollectionDiscovery::find_collection(&*ctx.fs)?
+            .context("No Infrastructure found in current directory or parent directories")?;
 
         // Discover projects in the "projects" folder
         let projects = CollectionDiscovery::discover_projects(&*ctx.fs, &*ctx.output, &root_path)?;
 
         Ok(Self {
-            collection,
+            infrastructure,
             root_path,
             projects,
         })
     }
 
-    /// Load the collection from a specific path
+    /// Load the infrastructure from a specific path
     #[allow(dead_code)]
     pub fn load_from_path(ctx: &crate::context::Context, path: &Path) -> Result<Self> {
-        let (collection, root_path) = CollectionDiscovery::find_collection_in_path(&*ctx.fs, path)?
-            .context("No ProjectCollection found at the specified path")?;
+        let (infrastructure, root_path) = CollectionDiscovery::find_collection_in_path(&*ctx.fs, path)?
+            .context("No Infrastructure found at the specified path")?;
 
         // Discover projects in the "projects" folder
         let projects = CollectionDiscovery::discover_projects(&*ctx.fs, &*ctx.output, &root_path)?;
 
         Ok(Self {
-            collection,
+            infrastructure,
             root_path,
             projects,
         })
     }
 
-    /// Create a new ProjectCollection at the specified path
+    /// Create a new Infrastructure at the specified path
     #[allow(dead_code)]
     pub fn create(ctx: &crate::context::Context, path: &Path, name: String, description: Option<String>) -> Result<Self> {
-        let pmp_file = path.join(".pmp.project-collection.yaml");
+        let pmp_file = path.join(".pmp.infrastructure.yaml");
 
         if ctx.fs.exists(&pmp_file) {
-            anyhow::bail!("A .pmp.project-collection.yaml file already exists at this location");
+            anyhow::bail!("A .pmp.infrastructure.yaml file already exists at this location");
         }
 
-        let collection = ProjectCollectionResource {
+        let infrastructure = InfrastructureResource {
             api_version: "pmp.io/v1".to_string(),
-            kind: "ProjectCollection".to_string(),
-            metadata: ProjectCollectionMetadata { name, description },
-            spec: ProjectCollectionSpec {
+            kind: "Infrastructure".to_string(),
+            metadata: InfrastructureMetadata { name, description },
+            spec: InfrastructureSpec {
                 resource_kinds: vec![],
                 environments: std::collections::HashMap::new(),
                 hooks: None,
@@ -65,14 +65,14 @@ impl CollectionManager {
             },
         };
 
-        collection.save(&*ctx.fs, &pmp_file)?;
+        infrastructure.save(&*ctx.fs, &pmp_file)?;
 
         // Create the projects directory
         let projects_dir = path.join("projects");
         ctx.fs.create_dir_all(&projects_dir)?;
 
         Ok(Self {
-            collection,
+            infrastructure,
             root_path: path.to_path_buf(),
             projects: vec![],
         })
@@ -102,17 +102,17 @@ impl CollectionManager {
             .collect()
     }
 
-    /// Get all projects in the collection
+    /// Get all projects in the infrastructure
     pub fn get_all_projects(&self) -> &[ProjectReference] {
         &self.projects
     }
 
-    /// Get the collection metadata
-    pub fn get_metadata(&self) -> &ProjectCollectionMetadata {
-        &self.collection.metadata
+    /// Get the infrastructure metadata
+    pub fn get_metadata(&self) -> &InfrastructureMetadata {
+        &self.infrastructure.metadata
     }
 
-    /// Get the collection root path
+    /// Get the infrastructure root path
     #[allow(dead_code)]
     pub fn get_root_path(&self) -> &Path {
         &self.root_path

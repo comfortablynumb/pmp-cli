@@ -1,8 +1,8 @@
-# Project Collection
+# Infrastructure
 
 ## Overview
 
-A **ProjectCollection** is a new concept in PMP that allows you to manage multiple projects in a centralized way. When you define a `.pmp.yaml` file with `kind: ProjectCollection`, PMP recognizes that directory as a collection of projects and provides additional features for managing them.
+A **Infrastructure** is a new concept in PMP that allows you to manage multiple projects in a centralized way. When you define a `.pmp.yaml` file with `kind: Infrastructure`, PMP recognizes that directory as a collection of projects and provides additional features for managing them.
 
 ## Features
 
@@ -19,7 +19,7 @@ Search for projects within the collection using various criteria:
 - **All projects**: `pmp find`
 
 ### 3. Automatic Project Registration
-When you create a new project inside a ProjectCollection, PMP automatically:
+When you create a new project inside a Infrastructure, PMP automatically:
 - Detects the collection
 - Validates that no duplicate exists
 - Registers the project in the collection's `.pmp.yaml`
@@ -29,7 +29,7 @@ When you create a new project inside a ProjectCollection, PMP automatically:
 Enable `organize_by_category: true` to automatically structure projects by category:
 ```
 my-platform/
-├── .pmp.yaml (kind: ProjectCollection)
+├── .pmp.yaml (kind: Infrastructure)
 ├── workload/
 │   ├── api-gateway/
 │   │   └── .pmp.yaml
@@ -44,11 +44,11 @@ my-platform/
 
 ## Configuration
 
-### Basic ProjectCollection `.pmp.yaml`
+### Basic Infrastructure `.pmp.yaml`
 
 ```yaml
 apiVersion: pmp.io/v1
-kind: ProjectCollection
+kind: Infrastructure
 metadata:
   name: my-platform
   description: A collection of infrastructure and application projects
@@ -64,7 +64,7 @@ spec:
 
 ```yaml
 apiVersion: pmp.io/v1
-kind: ProjectCollection
+kind: Infrastructure
 metadata:
   name: my-platform
   description: A complete platform with workloads and infrastructure
@@ -85,7 +85,7 @@ spec:
 
 ## Usage
 
-### Creating a ProjectCollection
+### Creating a Infrastructure
 
 1. Create a directory for your collection:
    ```bash
@@ -93,11 +93,11 @@ spec:
    cd my-platform
    ```
 
-2. Create a `.pmp.yaml` file with `kind: ProjectCollection`:
+2. Create a `.pmp.yaml` file with `kind: Infrastructure`:
    ```bash
    cat > .pmp.yaml << EOF
    apiVersion: pmp.io/v1
-   kind: ProjectCollection
+   kind: Infrastructure
    metadata:
      name: my-platform
      description: My platform projects
@@ -109,7 +109,7 @@ spec:
 
 ### Creating Projects in a Collection
 
-Once inside a ProjectCollection directory, simply use `pmp create` as usual:
+Once inside a Infrastructure directory, simply use `pmp create` as usual:
 
 ```bash
 cd my-platform
@@ -117,7 +117,7 @@ pmp create
 ```
 
 PMP will:
-1. Detect the ProjectCollection
+1. Detect the Infrastructure
 2. Prompt you to select a template
 3. Create the project
 4. Automatically register it in the collection
@@ -174,9 +174,9 @@ Each project in the collection's `spec.projects` array has the following structu
 
 ## Validation
 
-PMP enforces the following validations for ProjectCollections:
+PMP enforces the following validations for Infrastructures:
 
-1. **Kind Validation**: The `.pmp.yaml` must have `kind: ProjectCollection`
+1. **Kind Validation**: The `.pmp.yaml` must have `kind: Infrastructure`
 2. **Duplicate Prevention**: No two projects can have the same `name` and `kind` combination
 3. **Path Constraints**: Projects must be inside the collection directory
 
@@ -239,7 +239,7 @@ Periodically review your collection to:
 ### Multi-Team Platform
 ```yaml
 apiVersion: pmp.io/v1
-kind: ProjectCollection
+kind: Infrastructure
 metadata:
   name: company-platform
   description: All teams' infrastructure projects
@@ -292,7 +292,7 @@ spec:
 
 **Cause**: The project was created outside the collection directory, or the collection couldn't be found.
 
-**Solution**: Make sure you're running `pmp create` from within the ProjectCollection directory or a subdirectory.
+**Solution**: Make sure you're running `pmp create` from within the Infrastructure directory or a subdirectory.
 
 ### Duplicate Project Error
 

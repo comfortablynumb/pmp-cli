@@ -1,0 +1,77 @@
+terraform {
+  required_providers {
+    kubernetes = {
+      source  = "hashicorp/kubernetes"
+      version = "~> 2.23"
+    }
+    helm = {
+      source  = "hashicorp/helm"
+      version = "~> 2.11"
+    }
+  }
+}
+
+provider "kubernetes" {
+  config_path = "~/.kube/config"
+}
+
+provider "helm" {
+  kubernetes {
+    config_path = "~/.kube/config"
+  }
+}
+
+{{#if create_namespace}}
+resource "kubernetes_namespace" "helm_namespace" {
+  metadata {
+    name = var.namespace
+    labels = {
+      name    = var.namespace
+      managed = "opentofu"
+      project = "{{name}}"
+    }
+  }
+}
+{{/if}}
+
+resource "helm_release" "app" {
+  name       = var.release_name
+  {{#if repository}}
+  repository = var.repository
+  {{/if}}
+  chart      = var.chart_name
+  {{#if chart_version}}
+  version    = var.chart_version
+  {{/if}}
+  namespace  = var.namespace
+  {{#if create_namespace}}
+  depends_on = [kubernetes_namespace.helm_namespace]
+  {{/if}}
+
+  # Parse and apply values from JSON
+  values = var.values_json != "{}" ? [
+    yamlencode(jsondecode(var.values_json))
+  ] : []
+
+  # Apply simple key-value overrides
+  dynamic "set" {
+    for_each = jsondecode(var.set_values_json)
+    content {
+      name  = set.key
+      value = set.value
+    }
+  }
+
+  wait              = var.wait
+  timeout           = var.timeout
+  atomic            = var.atomic
+  force_update      = var.force_update
+  recreate_pods     = var.recreate_pods
+  cleanup_on_fail   = var.cleanup_on_fail
+  create_namespace  = false  # We handle namespace creation separately
+
+  # Prevent drift on values we don't manage
+  lifecycle {
+    ignore_changes = []
+  }
+}

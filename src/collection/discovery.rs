@@ -1,31 +1,31 @@
-use crate::template::metadata::{ProjectCollectionResource, ProjectReference, ProjectResource};
+use crate::template::metadata::{InfrastructureResource, ProjectReference, ProjectResource};
 use anyhow::Result;
 use std::path::{Path, PathBuf};
 
-/// Discovery for ProjectCollection resources
+/// Discovery for Infrastructure resources
 pub struct CollectionDiscovery;
 
 impl CollectionDiscovery {
-    /// Try to find a ProjectCollection in the current directory or parent directories
-    pub fn find_collection(fs: &dyn crate::traits::FileSystem) -> Result<Option<(ProjectCollectionResource, PathBuf)>> {
+    /// Try to find an Infrastructure in the current directory or parent directories
+    pub fn find_collection(fs: &dyn crate::traits::FileSystem) -> Result<Option<(InfrastructureResource, PathBuf)>> {
         let current_dir = std::env::current_dir()?;
         Self::find_collection_in_path(fs, &current_dir)
     }
 
-    /// Try to find a ProjectCollection starting from a specific path
+    /// Try to find an Infrastructure starting from a specific path
     pub fn find_collection_in_path(
         fs: &dyn crate::traits::FileSystem,
         start_path: &Path,
-    ) -> Result<Option<(ProjectCollectionResource, PathBuf)>> {
+    ) -> Result<Option<(InfrastructureResource, PathBuf)>> {
         let mut current = start_path.to_path_buf();
 
         loop {
-            let pmp_file = current.join(".pmp.project-collection.yaml");
+            let pmp_file = current.join(".pmp.infrastructure.yaml");
 
             if fs.exists(&pmp_file) {
-                // Try to load as ProjectCollection
-                if let Ok(collection) = ProjectCollectionResource::from_file(fs, &pmp_file) {
-                    return Ok(Some((collection, current)));
+                // Try to load as Infrastructure
+                if let Ok(infrastructure) = InfrastructureResource::from_file(fs, &pmp_file) {
+                    return Ok(Some((infrastructure, current)));
                 }
             }
 
@@ -38,22 +38,22 @@ impl CollectionDiscovery {
         Ok(None)
     }
 
-    /// Check if the current directory is inside a ProjectCollection
+    /// Check if the current directory is inside an Infrastructure
     #[allow(dead_code)]
     pub fn is_in_collection(fs: &dyn crate::traits::FileSystem) -> Result<bool> {
         Ok(Self::find_collection(fs)?.is_some())
     }
 
-    /// Get the path to the collection root directory
+    /// Get the path to the infrastructure root directory
     #[allow(dead_code)]
     pub fn get_collection_root(fs: &dyn crate::traits::FileSystem) -> Result<Option<PathBuf>> {
         Ok(Self::find_collection(fs)?.map(|(_, path)| path))
     }
 
-    /// Discover all projects in the "projects" folder of a collection
+    /// Discover all projects in the "projects" folder of an infrastructure
     /// Scans all levels of subdirectories to find .pmp.yaml files
-    pub fn discover_projects(fs: &dyn crate::traits::FileSystem, output: &dyn crate::traits::Output, collection_root: &Path) -> Result<Vec<ProjectReference>> {
-        let projects_dir = collection_root.join("projects");
+    pub fn discover_projects(fs: &dyn crate::traits::FileSystem, output: &dyn crate::traits::Output, infrastructure_root: &Path) -> Result<Vec<ProjectReference>> {
+        let projects_dir = infrastructure_root.join("projects");
 
         if !fs.exists(&projects_dir) {
             return Ok(Vec::new());
@@ -75,9 +75,9 @@ impl CollectionDiscovery {
                             // Get the resource kind from the first environment we find
                             let kind = Self::get_project_kind(fs, output, project_dir)?;
 
-                            // Calculate relative path from collection root
+                            // Calculate relative path from infrastructure root
                             let relative_path = project_dir
-                                .strip_prefix(collection_root)
+                                .strip_prefix(infrastructure_root)
                                 .unwrap_or(project_dir)
                                 .to_string_lossy()
                                 .to_string();

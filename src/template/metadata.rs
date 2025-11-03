@@ -489,57 +489,57 @@ pub struct ExecutorProjectConfig {
 
 
 // ============================================================================
-// ProjectCollection Resource (Kubernetes-style)
+// Infrastructure Resource (Kubernetes-style)
 // ============================================================================
 
-/// Kubernetes-style ProjectCollection resource
+/// Kubernetes-style Infrastructure resource
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProjectCollectionResource {
+pub struct InfrastructureResource {
     /// API version (e.g., "pmp.io/v1")
     #[serde(rename = "apiVersion")]
     pub api_version: String,
 
-    /// Kind of resource (always "ProjectCollection")
+    /// Kind of resource (always "Infrastructure")
     pub kind: String,
 
-    /// Metadata about the project collection
-    pub metadata: ProjectCollectionMetadata,
+    /// Metadata about the infrastructure
+    pub metadata: InfrastructureMetadata,
 
-    /// ProjectCollection specification
-    pub spec: ProjectCollectionSpec,
+    /// Infrastructure specification
+    pub spec: InfrastructureSpec,
 }
 
-/// ProjectCollection metadata (Kubernetes-style)
+/// Infrastructure metadata (Kubernetes-style)
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProjectCollectionMetadata {
-    /// Name of the project collection
+pub struct InfrastructureMetadata {
+    /// Name of the infrastructure
     pub name: String,
 
-    /// Description of this project collection
+    /// Description of this infrastructure
     #[serde(default)]
     pub description: Option<String>,
 }
 
-/// ProjectCollection specification
+/// Infrastructure specification
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProjectCollectionSpec {
-    /// Allowed resource kinds in this collection
+pub struct InfrastructureSpec {
+    /// Allowed resource kinds in this infrastructure
     #[serde(default)]
     pub resource_kinds: Vec<ResourceKindFilter>,
 
-    /// Available environments for projects in this collection
+    /// Available environments for projects in this infrastructure
     pub environments: HashMap<String, Environment>,
 
-    /// Optional: Hooks configuration for all projects in this collection
+    /// Optional: Hooks configuration for all projects in this infrastructure
     #[serde(default)]
     pub hooks: Option<HooksConfig>,
 
-    /// Optional: Executor configuration for all projects in this collection
+    /// Optional: Executor configuration for all projects in this infrastructure
     #[serde(default)]
     pub executor: Option<ExecutorCollectionConfig>,
 }
 
-/// Executor configuration at the collection level
+/// Executor configuration at the infrastructure level
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecutorCollectionConfig {
     /// Executor name (e.g., "opentofu", "terraform")
@@ -570,7 +570,7 @@ pub struct HooksConfig {
     pub post_apply: Vec<String>,
 }
 
-/// Input override configuration for collection-level input customization
+/// Input override configuration for infrastructure-level input customization
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InputOverride {
     /// The value to use for this input
@@ -682,7 +682,7 @@ impl ResourceSpec {
     }
 }
 
-/// Environment definition in ProjectCollection
+/// Environment definition in Infrastructure
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Environment {
     /// Display name
@@ -693,7 +693,7 @@ pub struct Environment {
     pub description: Option<String>,
 }
 
-/// Reference to a project in the collection
+/// Reference to a project in the infrastructure
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectReference {
     /// Name of the project
@@ -702,7 +702,7 @@ pub struct ProjectReference {
     /// Kind of the project (e.g., "KubernetesWorkload", "Infrastructure")
     pub kind: String,
 
-    /// Path to the project relative to the collection root
+    /// Path to the project relative to the infrastructure root
     pub path: String,
 }
 
@@ -823,16 +823,16 @@ impl DynamicProjectEnvironmentResource {
     }
 }
 
-impl ProjectCollectionResource {
-    /// Load project collection resource from a .pmp.yaml file
+impl InfrastructureResource {
+    /// Load infrastructure resource from a .pmp.yaml file
     pub fn from_file(fs: &dyn crate::traits::FileSystem, path: &std::path::Path) -> anyhow::Result<Self> {
         let content = fs.read_to_string(path)?;
-        let resource: ProjectCollectionResource = serde_yaml::from_str(&content)?;
+        let resource: InfrastructureResource = serde_yaml::from_str(&content)?;
 
         // Validate kind
-        if resource.kind != "ProjectCollection" {
+        if resource.kind != "Infrastructure" {
             anyhow::bail!(
-                "Expected kind 'ProjectCollection', got '{}'",
+                "Expected kind 'Infrastructure', got '{}'",
                 resource.kind
             );
         }
@@ -842,7 +842,7 @@ impl ProjectCollectionResource {
             if !Self::is_valid_environment_name(env_key) {
                 anyhow::bail!(
                     "Invalid environment name '{}'. Environment names must be lowercase alphanumeric with underscores, and cannot start with a number. \
-                     Note: As of this version, hyphens are no longer supported. Please rename '{}' to '{}' in your .pmp.project-collection.yaml file.",
+                     Note: As of this version, hyphens are no longer supported. Please rename '{}' to '{}' in your .pmp.infrastructure.yaml file.",
                     env_key,
                     env_key,
                     env_key.replace('-', "_")
@@ -860,7 +860,7 @@ impl ProjectCollectionResource {
             && name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
     }
 
-    /// Save the collection to a .pmp.yaml file
+    /// Save the infrastructure to a .pmp.yaml file
     pub fn save(&self, fs: &dyn crate::traits::FileSystem, path: &std::path::Path) -> anyhow::Result<()> {
         let content = serde_yaml::to_string(self)?;
         fs.write(path, &content)?;

@@ -45,7 +45,7 @@ impl PreviewCommand {
 
         // Load collection to get hooks
         let (collection, _collection_root) = CollectionDiscovery::find_collection(&*ctx.fs)?
-            .context("ProjectCollection is required to run commands")?;
+            .context("Infrastructure is required to run commands")?;
 
         let hooks = collection.get_hooks();
 

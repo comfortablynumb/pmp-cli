@@ -1,5 +1,5 @@
 apiVersion: pmp.io/v1
-kind: ProjectCollection
+kind: Infrastructure
 metadata:
   name: Infrastructure Example with PostgreSQL Backend
   description: Example project collection demonstrating PostgreSQL remote state backend configuration

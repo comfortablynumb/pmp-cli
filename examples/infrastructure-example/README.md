@@ -57,7 +57,7 @@ cargo run -- create
 ```
 
 PMP will:
-1. Detect the `.pmp.project-collection.yaml` configuration
+1. Detect the `.pmp.infrastructure.yaml` configuration
 2. Show available template packs and templates
 3. Prompt for environment selection (development, staging, or production)
 4. Generate project files with PostgreSQL backend configuration
@@ -110,7 +110,7 @@ The state will now be stored in PostgreSQL instead of local files.
 
 ## Configuration Details
 
-### Project Collection Settings
+### Infrastructure Settings
 
 - **Allowed Resource Kinds**: KubernetesWorkload, Database
 - **Environments**: development, staging, production
@@ -139,7 +139,7 @@ environment:
   POSTGRES_DB: your_database
 ```
 
-Update the connection string in `.pmp.project-collection.yaml`:
+Update the connection string in `.pmp.infrastructure.yaml`:
 
 ```yaml
 spec:
@@ -151,7 +151,7 @@ spec:
 
 ### Add Additional Environments
 
-Edit `.pmp.project-collection.yaml` and add new environment definitions:
+Edit `.pmp.infrastructure.yaml` and add new environment definitions:
 
 ```yaml
 spec:

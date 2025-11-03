@@ -23,14 +23,14 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Initialize a new ProjectCollection
-    #[command(long_about = "Initialize a new ProjectCollection in the current directory\n\nExamples:\n  pmp init\n  pmp init --name \"My Infrastructure\"\n  pmp init --name \"Dev Projects\" --description \"Development infrastructure\"")]
+    /// Initialize a new Infrastructure
+    #[command(long_about = "Initialize a new Infrastructure in the current directory\n\nExamples:\n  pmp init\n  pmp init --name \"My Infrastructure\"\n  pmp init --name \"Dev Projects\" --description \"Development infrastructure\"")]
     Init {
-        /// Name of the project collection (defaults to "My Infrastructure")
+        /// Name of the infrastructure (defaults to "My Infrastructure")
         #[arg(short, long)]
         name: Option<String>,
 
-        /// Description of the project collection
+        /// Description of the infrastructure
         #[arg(short, long)]
         description: Option<String>,
 
@@ -67,8 +67,8 @@ enum Commands {
         path: Option<String>,
     },
 
-    /// Find projects in a ProjectCollection
-    #[command(long_about = "Find projects in a ProjectCollection\n\nExamples:\n  pmp find\n  pmp find --name my-api\n  pmp find --kind KubernetesWorkload")]
+    /// Find projects in an Infrastructure
+    #[command(long_about = "Find projects in an Infrastructure\n\nExamples:\n  pmp find\n  pmp find --name my-api\n  pmp find --kind KubernetesWorkload")]
     Find {
         /// Filter by project name (case-insensitive substring match)
         #[arg(short, long)]

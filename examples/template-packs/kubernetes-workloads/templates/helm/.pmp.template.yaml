@@ -1,0 +1,67 @@
+apiVersion: pmp.io/v1
+kind: Template
+metadata:
+  name: helm
+  description: Deploy any Helm chart to Kubernetes with custom values and configuration
+
+spec:
+  apiVersion: pmp.io/v1
+  kind: KubernetesWorkload
+  executor: opentofu
+
+  inputs:
+    release_name:
+      description: Helm release name (must be unique in the namespace)
+
+    chart_name:
+      description: Helm chart name (e.g., nginx, postgresql, prometheus)
+
+    chart_version:
+      description: Helm chart version (leave empty for latest)
+      default: ""
+
+    repository:
+      description: Helm chart repository URL (leave empty for default Helm repos)
+      default: ""
+
+    namespace:
+      description: Kubernetes namespace for the Helm release
+      default: default
+
+    create_namespace:
+      description: Create the namespace if it doesn't exist
+      default: true
+
+    values_json:
+      description: Helm values as JSON object (e.g., {"replicaCount":3,"service":{"type":"LoadBalancer"}})
+      default: "{}"
+
+    set_values_json:
+      description: Simple key-value overrides as JSON object (e.g., {"image.tag":"v1.2.3","replicas":"5"})
+      default: "{}"
+
+    wait:
+      description: Wait for all resources to be ready before marking the release as successful
+      default: true
+
+    timeout:
+      description: Timeout in seconds for deployment operations
+      default: 600
+
+    atomic:
+      description: If true, rollback changes on failure
+      default: true
+
+    force_update:
+      description: Force resource update through delete/recreate if needed
+      default: false
+
+    recreate_pods:
+      description: Perform pods restart during upgrade/rollback
+      default: false
+
+    cleanup_on_fail:
+      description: Delete resources created during a failed release
+      default: true
+
+  environments: {}

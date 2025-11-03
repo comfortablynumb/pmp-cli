@@ -10,22 +10,22 @@ pub struct CreateCommand;
 impl CreateCommand {
     /// Execute the create command
     pub fn execute(ctx: &crate::context::Context, output_path: Option<&str>, template_packs_paths: Option<&str>) -> Result<()> {
-        // Step 1: ProjectCollection is REQUIRED
-        let (collection, collection_root) = CollectionDiscovery::find_collection(&*ctx.fs)?
-            .context("ProjectCollection is required. No .pmp.project-collection.yaml found in current directory or parent directories.\n\nPlease create a ProjectCollection first or navigate to an existing one.")?;
+        // Step 1: Infrastructure is REQUIRED
+        let (infrastructure, infrastructure_root) = CollectionDiscovery::find_collection(&*ctx.fs)?
+            .context("Infrastructure is required. No .pmp.infrastructure.yaml found in current directory or parent directories.\n\nPlease create an Infrastructure first or navigate to an existing one.")?;
 
-        ctx.output.section("Project Collection");
-        ctx.output.key_value_highlight("Name", &collection.metadata.name);
-        if let Some(desc) = &collection.metadata.description {
+        ctx.output.section("Infrastructure");
+        ctx.output.key_value_highlight("Name", &infrastructure.metadata.name);
+        if let Some(desc) = &infrastructure.metadata.description {
             ctx.output.key_value("Description", desc);
         }
 
-        // Step 2: Get resource kinds from collection
-        let allowed_resource_kinds = &collection.spec.resource_kinds;
+        // Step 2: Get resource kinds from infrastructure
+        let allowed_resource_kinds = &infrastructure.spec.resource_kinds;
 
         if allowed_resource_kinds.is_empty() {
             anyhow::bail!(
-                "ProjectCollection must define resource_kinds.\n\nPlease add resource kinds to the ProjectCollection."
+                "Infrastructure must define resource_kinds.\n\nPlease add resource kinds to the Infrastructure."
             );
         }
 
@@ -105,7 +105,7 @@ impl CreateCommand {
 
         if filtered_packs_with_templates.is_empty() {
             anyhow::bail!(
-                "No template packs contain templates that match the resource kinds allowed in this collection.\n\nAllowed resource kinds: {}",
+                "No template packs contain templates that match the resource kinds allowed in this infrastructure.\n\nAllowed resource kinds: {}",
                 allowed_resource_kinds.iter()
                     .map(|r| format!("{}/{}", r.api_version, r.kind))
                     .collect::<Vec<_>>()
@@ -215,12 +215,12 @@ impl CreateCommand {
             (template, config)
         };
 
-        // Step 7: Select environment from ProjectCollection
-        let selected_environment = if collection.spec.environments.is_empty() {
-            anyhow::bail!("ProjectCollection must define at least one environment");
-        } else if collection.spec.environments.len() == 1 {
+        // Step 7: Select environment from Infrastructure
+        let selected_environment = if infrastructure.spec.environments.is_empty() {
+            anyhow::bail!("Infrastructure must define at least one environment");
+        } else if infrastructure.spec.environments.len() == 1 {
             // Only one environment, use it automatically
-            let (env_key, env) = collection.spec.environments.iter().next().unwrap();
+            let (env_key, env) = infrastructure.spec.environments.iter().next().unwrap();
             ctx.output.subsection("Environment");
             ctx.output.environment_badge(&env.name);
             if let Some(desc) = &env.description {
@@ -232,7 +232,7 @@ impl CreateCommand {
             ctx.output.subsection("Select an environment");
 
             // Sort environments by name for consistent display
-            let mut sorted_envs: Vec<_> = collection.spec.environments.iter().collect();
+            let mut sorted_envs: Vec<_> = infrastructure.spec.environments.iter().collect();
             sorted_envs.sort_by(|a, b| a.1.name.cmp(&b.1.name));
 
             let env_options: Vec<String> = sorted_envs.iter().map(|(_, env)| {
@@ -277,7 +277,7 @@ impl CreateCommand {
             let check_path = if let Some(path) = output_path {
                 std::path::PathBuf::from(path)
             } else {
-                collection_root.join("projects").join(&project_name)
+                infrastructure_root.join("projects").join(&project_name)
             };
 
             // Check if path exists OR if project name already exists in collection
@@ -285,7 +285,7 @@ impl CreateCommand {
                 true
             } else {
                 // Check if any existing project has this name
-                match CollectionDiscovery::discover_projects(&*ctx.fs, &*ctx.output, &collection_root) {
+                match CollectionDiscovery::discover_projects(&*ctx.fs, &*ctx.output, &infrastructure_root) {
                     Ok(projects) => projects.iter().any(|p| p.name == project_name),
                     Err(_) => false, // If discovery fails, just check path existence
                 }
@@ -293,8 +293,8 @@ impl CreateCommand {
 
             if name_exists {
                 ctx.output.blank();
-                ctx.output.warning(&format!("A project named '{}' already exists in this collection.", project_name));
-                ctx.output.dimmed("Project names must be unique across the entire collection.");
+                ctx.output.warning(&format!("A project named '{}' already exists in this infrastructure.", project_name));
+                ctx.output.dimmed("Project names must be unique across the entire infrastructure.");
                 ctx.output.dimmed("Please choose a different name:");
                 project_name = SchemaValidator::prompt_for_project_name(ctx)
                     .context("Failed to get project name")?;
@@ -317,7 +317,7 @@ impl CreateCommand {
             }
         }
 
-        // Apply collection-level overrides from template config (if any)
+        // Apply infrastructure-level overrides from template config (if any)
         // Precedence: Template base → Environment overrides → Collection overrides → User input
         let collection_overrides = if let Some(ref config) = template_config {
             Some(&config.defaults.inputs)
@@ -358,7 +358,7 @@ impl CreateCommand {
         let project_root = if let Some(path) = output_path {
             std::path::PathBuf::from(path)
         } else {
-            collection_root.join("projects").join(&resource_kind_snake).join(&project_name)
+            infrastructure_root.join("projects").join(&resource_kind_snake).join(&project_name)
         };
 
         // Step 13: Determine environment path
@@ -392,7 +392,7 @@ impl CreateCommand {
             .context("Failed to render template")?;
 
         // Step 15.5: Generate common file (e.g., _common.tf) if executor config is present
-        if let Some(executor_config) = &collection.spec.executor {
+        if let Some(executor_config) = &infrastructure.spec.executor {
             if !executor_config.config.is_empty() {
                 // Create executor instance (for now, create directly; will use registry in Phase 3)
                 let executor: Box<dyn crate::executor::Executor> = match executor_config.name.as_str() {
@@ -444,7 +444,7 @@ impl CreateCommand {
         ctx.output.success("Project created successfully!");
 
         ctx.output.subsection("Project Details");
-        ctx.output.key_value("Collection", &collection.metadata.name);
+        ctx.output.key_value("Infrastructure", &infrastructure.metadata.name);
         ctx.output.key_value_highlight("Name", &project_name);
         ctx.output.key_value("Kind", &selected_template.resource.spec.kind);
         ctx.output.environment_badge(&selected_environment);
@@ -462,7 +462,7 @@ impl CreateCommand {
     }
 
     /// Collect inputs from user based on template input specifications
-    /// Collect template inputs with collection-level overrides
+    /// Collect template inputs with infrastructure-level overrides
     fn collect_template_inputs_with_overrides(
         ctx: &crate::context::Context,
         inputs_spec: &std::collections::HashMap<String, crate::template::metadata::InputSpec>,
@@ -476,7 +476,7 @@ impl CreateCommand {
 
         // Collect each input defined in the template
         for (input_name, input_spec) in inputs_spec {
-            // Check if there's a collection-level override for this input
+            // Check if there's a infrastructure-level override for this input
             let override_config = collection_overrides.and_then(|overrides| overrides.get(input_name));
 
             let value = if let Some(override_cfg) = override_config {
@@ -498,7 +498,7 @@ impl CreateCommand {
         Ok(inputs)
     }
 
-    /// Prompt for a single input, optionally with a collection-level default override
+    /// Prompt for a single input, optionally with a infrastructure-level default override
     fn prompt_for_input_with_default(
         ctx: &crate::context::Context,
         input_name: &str,
@@ -746,18 +746,18 @@ spec:
         pack_path
     }
 
-    /// Helper to set up a project collection
-    /// Creates the collection file in the current directory
-    fn setup_project_collection(
+    /// Helper to set up an infrastructure
+    /// Creates the infrastructure file in the current directory
+    fn setup_infrastructure(
         fs: &MockFileSystem,
         resource_kinds_yaml: &str,
     ) {
-        let collection_yaml = format!(
+        let infrastructure_yaml = format!(
             r#"apiVersion: pmp.io/v1
-kind: ProjectCollection
+kind: Infrastructure
 metadata:
-  name: Test Collection
-  description: Test collection
+  name: Test Infrastructure
+  description: Test infrastructure
 spec:
   resource_kinds:
 {}
@@ -769,7 +769,7 @@ spec:
         );
         // Create in actual current directory (for discovery to work)
         let current_dir = std::env::current_dir().unwrap();
-        fs.write(&current_dir.join(".pmp.project-collection.yaml"), &collection_yaml).unwrap();
+        fs.write(&current_dir.join(".pmp.infrastructure.yaml"), &infrastructure_yaml).unwrap();
     }
 
     #[test]
@@ -789,7 +789,7 @@ spec:
         );
 
         // Set up collection with template allowed
-        setup_project_collection(
+        setup_infrastructure(
             &fs,
             r#"    - apiVersion: pmp.io/v1
       kind: TestResource
@@ -834,7 +834,7 @@ spec:
         );
 
         // Set up collection with template blocked
-        setup_project_collection(
+        setup_infrastructure(
             &fs,
             r#"    - apiVersion: pmp.io/v1
       kind: TestResource
@@ -859,7 +859,7 @@ spec:
         let err_msg = format!("{}", result.unwrap_err());
         assert!(
             err_msg.contains("No template packs contain templates") ||
-            err_msg.contains("allowed in this collection"),
+            err_msg.contains("allowed in this infrastructure"),
             "Error should mention no matching templates: {}", err_msg
         );
     }
@@ -881,7 +881,7 @@ spec:
         );
 
         // Set up collection with input override (show_as_default: true)
-        setup_project_collection(
+        setup_infrastructure(
             &fs,
             r#"    - apiVersion: pmp.io/v1
       kind: TestResource
@@ -942,7 +942,7 @@ spec:
         );
 
         // Set up collection with input override (show_as_default: false)
-        setup_project_collection(
+        setup_infrastructure(
             &fs,
             r#"    - apiVersion: pmp.io/v1
       kind: TestResource
@@ -1001,7 +1001,7 @@ spec:
         );
 
         // Set up collection WITHOUT templates field (backward compatible)
-        setup_project_collection(
+        setup_infrastructure(
             &fs,
             r#"    - apiVersion: pmp.io/v1
       kind: TestResource"#,
@@ -1065,7 +1065,7 @@ spec:
         fs.write(&template_dir.join("src/main.tf.hbs"), "# Template B").unwrap();
 
         // Set up collection with different configurations for each template
-        setup_project_collection(
+        setup_infrastructure(
             &fs,
             r#"    - apiVersion: pmp.io/v1
       kind: TestResource

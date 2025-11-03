@@ -53,7 +53,7 @@ This template creates a Kubernetes workload for local minikube using the `hashic
 
 ## Usage with PMP
 
-1. Ensure you have a `.pmp.project-collection.yaml` that allows `KubernetesWorkload` kind:
+1. Ensure you have a `.pmp.infrastructure.yaml` that allows `KubernetesWorkload` kind:
    ```yaml
    spec:
      resource_kinds:

@@ -136,10 +136,10 @@ spec:
 - `variables.tf.hbs` - Variable definitions
 - `outputs.tf.hbs` - Output definitions (connection info, secrets, usage instructions)
 
-### ProjectCollection System
+### Infrastructure System
 
 **Required**: Yes - cannot create projects without one
-**File**: `.pmp.project-collection.yaml`
+**File**: `.pmp.infrastructure.yaml`
 
 **Must define**:
 - `spec.environments` - Available environments (keys must be lowercase alphanumeric + optional hyphens)
@@ -293,7 +293,7 @@ spec:
 4. Discover templates within selected pack
 5. User selects template (auto-selected if only one available)
 6. Plugins are NOT shown to users - they are reusable components only
-7. User selects environment (from the environments defined in the project collection)
+7. User selects environment (from the environments defined in the infrastructure)
 8. User provides name, optional description, and inputs defined in the template
 9. Render template files from template directory into environment folder
 10. **Auto-generate `_common.tf`** (if executor config with backend is present in collection)
@@ -330,13 +330,13 @@ spec:
 - **Plugins**: `.pmp.plugin.yaml` (inside `templates/` subdirectory of pack)
 - **Project Identifiers**: `.pmp.project.yaml` (metadata only, no spec)
 - **Environment Specs**: `.pmp.environment.yaml` (contains full spec)
-- **Collections**: `.pmp.project-collection.yaml`
+- **Infrastructure**: `.pmp.infrastructure.yaml`
 
 ### Directory Structure
 
 ```
 collection/
-├── .pmp.project-collection.yaml
+├── .pmp.infrastructure.yaml
 └── projects/
     └── {resource_kind_snake}/
         └── {project_name}/

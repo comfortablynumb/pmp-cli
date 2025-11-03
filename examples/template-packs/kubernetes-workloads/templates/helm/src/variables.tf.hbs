@@ -1,0 +1,97 @@
+variable "release_name" {
+  description = "Helm release name (must be unique in the namespace)"
+  type        = string
+  default     = "{{release_name}}"
+}
+
+variable "chart_name" {
+  description = "Helm chart name"
+  type        = string
+  default     = "{{chart_name}}"
+}
+
+variable "chart_version" {
+  description = "Helm chart version (leave empty for latest)"
+  type        = string
+  default     = "{{chart_version}}"
+}
+
+variable "repository" {
+  description = "Helm chart repository URL"
+  type        = string
+  default     = "{{repository}}"
+}
+
+variable "namespace" {
+  description = "Kubernetes namespace for the Helm release"
+  type        = string
+  default     = "{{namespace}}"
+}
+
+variable "create_namespace" {
+  description = "Create the namespace if it doesn't exist"
+  type        = bool
+  default     = {{bool create_namespace}}
+}
+
+variable "values_json" {
+  description = "Helm values as JSON string"
+  type        = string
+  default     = <<-EOT
+{{values_json}}
+EOT
+
+  validation {
+    condition     = can(jsondecode(var.values_json))
+    error_message = "values_json must be valid JSON"
+  }
+}
+
+variable "set_values_json" {
+  description = "Simple key-value overrides as JSON object"
+  type        = string
+  default     = <<-EOT
+{{set_values_json}}
+EOT
+
+  validation {
+    condition     = can(jsondecode(var.set_values_json))
+    error_message = "set_values_json must be valid JSON"
+  }
+}
+
+variable "wait" {
+  description = "Wait for all resources to be ready"
+  type        = bool
+  default     = {{bool wait}}
+}
+
+variable "timeout" {
+  description = "Timeout in seconds for deployment operations"
+  type        = number
+  default     = {{timeout}}
+}
+
+variable "atomic" {
+  description = "Rollback changes on failure"
+  type        = bool
+  default     = {{bool atomic}}
+}
+
+variable "force_update" {
+  description = "Force resource update through delete/recreate if needed"
+  type        = bool
+  default     = {{bool force_update}}
+}
+
+variable "recreate_pods" {
+  description = "Perform pods restart during upgrade/rollback"
+  type        = bool
+  default     = {{bool recreate_pods}}
+}
+
+variable "cleanup_on_fail" {
+  description = "Delete resources created during a failed release"
+  type        = bool
+  default     = {{bool cleanup_on_fail}}
+}

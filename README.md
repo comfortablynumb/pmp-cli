@@ -4,7 +4,7 @@ A CLI for managing Infrastructure as Code projects using OpenTofu/Terraform with
 
 ## Features
 
-- **ProjectCollection-based organization** - All projects live in a collection with defined environments and resource kinds
+- **Infrastructure-based organization** - All projects live in a collection with defined environments and resource kinds
 - **Template-based project creation** with custom input definitions (no JSON Schema)
 - **Multiple IaC executors** via trait-based architecture (OpenTofu included)
 - **Pre/post execution hooks** for custom workflows
@@ -25,15 +25,15 @@ cargo build --release
 
 ## Quick Start
 
-### 1. Create a ProjectCollection
+### 1. Create a Infrastructure
 
-A ProjectCollection is **required** before creating any projects. It defines the workspace for your infrastructure projects.
+A Infrastructure is **required** before creating any projects. It defines the workspace for your infrastructure projects.
 
-Create a `.pmp.project-collection.yaml` file:
+Create a `.pmp.infrastructure.yaml` file:
 
 ```yaml
 apiVersion: pmp.io/v1
-kind: ProjectCollection
+kind: Infrastructure
 metadata:
   name: "My Infrastructure"
   description: "Company infrastructure projects"
@@ -159,7 +159,7 @@ projects/
 
 ## Commands
 
-- `pmp create` - Create new project (requires ProjectCollection)
+- `pmp create` - Create new project (requires Infrastructure)
 - `pmp preview` - Preview changes (plan)
 - `pmp apply` - Apply changes
 - `pmp find` - Search projects by name or kind

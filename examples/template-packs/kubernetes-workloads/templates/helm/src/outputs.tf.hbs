@@ -1,0 +1,95 @@
+output "release_name" {
+  description = "Name of the Helm release"
+  value       = helm_release.app.name
+}
+
+output "namespace" {
+  description = "Kubernetes namespace where the Helm release is deployed"
+  value       = helm_release.app.namespace
+}
+
+output "chart" {
+  description = "Helm chart that was deployed"
+  value       = helm_release.app.chart
+}
+
+output "chart_version" {
+  description = "Version of the Helm chart deployed"
+  value       = helm_release.app.version
+}
+
+output "status" {
+  description = "Status of the Helm release"
+  value       = helm_release.app.status
+}
+
+output "revision" {
+  description = "Revision number of the Helm release"
+  value       = helm_release.app.version
+}
+
+{{#if repository}}
+output "repository" {
+  description = "Helm chart repository URL"
+  value       = var.repository
+}
+{{/if}}
+
+output "values_applied" {
+  description = "Values that were applied to the Helm chart"
+  value       = var.values_json != "{}" ? jsondecode(var.values_json) : {}
+  sensitive   = true  # May contain sensitive data
+}
+
+output "kubectl_commands" {
+  description = "Useful kubectl commands for managing the Helm release"
+  value = <<-EOT
+    # Get release status
+    helm status {{release_name}} -n {{namespace}}
+
+    # Get release values
+    helm get values {{release_name}} -n {{namespace}}
+
+    # Get all resources created by the release
+    helm get manifest {{release_name}} -n {{namespace}}
+
+    # List all pods in the namespace
+    kubectl get pods -n {{namespace}}
+
+    # View logs for a pod (replace POD_NAME)
+    kubectl logs -n {{namespace}} POD_NAME
+
+    # Get services in the namespace
+    kubectl get svc -n {{namespace}}
+
+    # Upgrade the release (if needed)
+    helm upgrade {{release_name}} {{chart_name}} -n {{namespace}}{{#if repository}} --repo {{repository}}{{/if}}
+
+    # Rollback to previous revision
+    helm rollback {{release_name}} -n {{namespace}}
+
+    # Uninstall the release
+    helm uninstall {{release_name}} -n {{namespace}}
+  EOT
+}
+
+output "access_instructions" {
+  description = "Instructions for accessing the deployed application"
+  value = <<-EOT
+    The Helm chart '{{chart_name}}' has been deployed as release '{{release_name}}' in namespace '{{namespace}}'.
+
+    To check the status of your deployment:
+      helm status {{release_name}} -n {{namespace}}
+
+    To see what resources were created:
+      kubectl get all -n {{namespace}} -l app.kubernetes.io/instance={{release_name}}
+
+    Refer to the chart documentation for specific access instructions:
+      helm show readme {{chart_name}}{{#if repository}} --repo {{repository}}{{/if}}
+
+    Common next steps:
+    - Check pod status: kubectl get pods -n {{namespace}}
+    - View services: kubectl get svc -n {{namespace}}
+    - Port-forward for local access: kubectl port-forward -n {{namespace}} svc/SERVICE_NAME LOCAL_PORT:REMOTE_PORT
+  EOT
+}

@@ -4,7 +4,7 @@ use crate::template::{
     TemplateDiscovery, TemplateRenderer, ProjectResource, DynamicProjectEnvironmentResource,
     PluginInfo, TemplateInfo, ProjectReference,
 };
-use crate::template::metadata::{ProjectCollectionResource, AllowedPluginConfig, AddedPlugin, ProjectPlugins, PluginProjectReference};
+use crate::template::metadata::{InfrastructureResource, AllowedPluginConfig, AddedPlugin, ProjectPlugins, PluginProjectReference};
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 use std::collections::HashMap;
@@ -65,7 +65,7 @@ impl UpdateCommand {
 
         // Load collection to ensure we're in a valid collection context
         let (collection, collection_root) = CollectionDiscovery::find_collection(&*ctx.fs)?
-            .context("ProjectCollection is required to run commands")?;
+            .context("Infrastructure is required to run commands")?;
 
         // Discover plugins with compatible projects
         let plugins_with_projects = Self::discover_plugins_with_compatible_projects(
@@ -456,7 +456,7 @@ impl UpdateCommand {
     fn add_plugin_with_project_selection(
         ctx: &crate::context::Context,
         _collection_root: &Path,
-        collection: &ProjectCollectionResource,
+        collection: &InfrastructureResource,
         plugins_with_projects: Vec<PluginWithProjects>,
         _template_packs_paths: Option<&str>,
         target_env_path: &Path,
@@ -819,7 +819,7 @@ impl UpdateCommand {
     fn remove_plugin_interactive(
         ctx: &crate::context::Context,
         _collection_root: &Path,
-        collection: &ProjectCollectionResource,
+        collection: &InfrastructureResource,
         env_path: &Path,
         project_name: &str,
         env_name: &str,
