@@ -8,6 +8,10 @@ terraform {
       source  = "hashicorp/helm"
       version = "~> 2.11"
     }
+    vault = {
+      source  = "hashicorp/vault"
+      version = "~> 3.23"
+    }
   }
 }
 
@@ -19,6 +23,15 @@ provider "helm" {
   kubernetes {
     config_path = "~/.kube/config"
   }
+}
+
+# Vault provider configuration
+# Note: Requires Vault to be initialized and unsealed before applying KV mount
+# The VAULT_ADDR and VAULT_TOKEN environment variables must be set
+provider "vault" {
+  # Address will be set via VAULT_ADDR environment variable
+  # Example: export VAULT_ADDR="http://vault.{{namespace}}.svc.cluster.local:8200"
+  skip_child_token = true
 }
 
 {{#if create_namespace}}
@@ -190,4 +203,18 @@ resource "helm_release" "vault" {
   # Wait for deployment to be ready
   wait    = true
   timeout = 600
+}
+
+# Create KV v2 mount for this environment
+# Note: This resource will be created after Vault is initialized and unsealed
+resource "vault_mount" "kv" {
+  path        = "kv-{{environment}}"
+  type        = "kv-v2"
+  description = "KV Version 2 secret engine for {{environment}} environment"
+
+  options = {
+    version = "2"
+  }
+
+  depends_on = [helm_release.vault]
 }

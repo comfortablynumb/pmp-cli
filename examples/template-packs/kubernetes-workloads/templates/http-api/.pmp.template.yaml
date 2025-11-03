@@ -17,6 +17,8 @@ spec:
           k8s_secret_namespace:
             default: ""
             description: Kubernetes namespace for credential secret (defaults to project namespace)
+      - template_pack_name: vault
+        plugin_name: secret
 
   inputs:
     docker_image:
