@@ -28,7 +28,8 @@ spec:
 
     target_revision:
       default: ""
-      description: Chart version to deploy (optional, defaults to latest)
+      description: Chart version to deploy (required)
+      required: true
 
     helm_release_name:
       default: ""
@@ -53,5 +54,15 @@ spec:
     destination_server:
       default: "https://kubernetes.default.svc"
       description: Target Kubernetes cluster API server URL
+
+  dependencies:
+    - project:
+        apiVersion: pmp.io/v1
+        kind: KubernetesWorkload
+        label_selector:
+          pmp.io/project-type: application
+          pmp.io/project-vendor: argo-cd
+        remote_state:
+          data_source_name: argocd_instance
 
   environments: {}

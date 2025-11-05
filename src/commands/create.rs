@@ -251,7 +251,8 @@ impl CreateCommand {
                             if ctx.fs.exists(&env_file) {
                                 if let Ok(env_resource) = crate::template::metadata::DynamicProjectEnvironmentResource::from_file(&*ctx.fs, &env_file) {
                                     if env_resource.api_version == template_ref.api_version
-                                        && env_resource.kind == template_ref.kind {
+                                        && env_resource.kind == template_ref.kind
+                                        && Self::labels_match(&project.labels, &template_ref.label_selector) {
                                         compatible_projects.push((project.clone(), project_path.clone()));
                                         break;
                                     }
@@ -547,6 +548,7 @@ impl CreateCommand {
             &project_root,
             &project_name,
             inputs.get("description").and_then(|v| v.as_str()),
+            &selected_template.resource.metadata.labels,
         ).context("Failed to generate .pmp.project.yaml file")?;
 
         // Step 17: Auto-generate .pmp.environment.yaml file (with spec)
@@ -696,12 +698,32 @@ impl CreateCommand {
         }
     }
 
+    /// Check if project labels match the required label selector
+    /// All labels in selector must be present and match (AND logic)
+    fn labels_match(
+        project_labels: &std::collections::HashMap<String, String>,
+        selector: &std::collections::HashMap<String, String>,
+    ) -> bool {
+        if selector.is_empty() {
+            return true; // No label requirements
+        }
+
+        for (key, value) in selector.iter() {
+            match project_labels.get(key) {
+                Some(project_value) if project_value == value => continue,
+                _ => return false,
+            }
+        }
+        true
+    }
+
     /// Generate the .pmp.project.yaml file for the project (identifier only, no spec)
     fn generate_project_identifier_yaml(
         ctx: &crate::context::Context,
         project_root: &std::path::Path,
         project_name: &str,
         description: Option<&str>,
+        template_labels: &std::collections::HashMap<String, String>,
     ) -> Result<()> {
         use crate::template::metadata::{ProjectResource, ProjectMetadata};
 
@@ -712,6 +734,7 @@ impl CreateCommand {
             metadata: ProjectMetadata {
                 name: project_name.to_string(),
                 description: description.map(|s| s.to_string()),
+                labels: template_labels.clone(), // Propagate from template
             },
             spec: None,
         };

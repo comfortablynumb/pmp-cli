@@ -69,6 +69,10 @@ pub struct TemplateMetadata {
     /// Description of what this template creates
     #[serde(default)]
     pub description: Option<String>,
+
+    /// Labels for categorization and filtering (Kubernetes-style)
+    #[serde(default)]
+    pub labels: HashMap<String, String>,
 }
 
 /// Template specification
@@ -166,6 +170,11 @@ pub struct TemplateProjectRef {
 
     /// Kind of the required project
     pub kind: String,
+
+    /// Optional label selector for filtering compatible projects
+    /// All labels must match (AND logic)
+    #[serde(default)]
+    pub label_selector: HashMap<String, String>,
 
     /// Remote state configuration for accessing the reference project
     #[serde(default)]
@@ -339,6 +348,10 @@ pub struct ProjectMetadata {
     /// Description of this project
     #[serde(default)]
     pub description: Option<String>,
+
+    /// Labels inherited from template or defined by user
+    #[serde(default)]
+    pub labels: HashMap<String, String>,
 }
 
 /// Reference to the project where a plugin is added
@@ -764,6 +777,10 @@ pub struct ProjectReference {
 
     /// Path to the project relative to the infrastructure root
     pub path: String,
+
+    /// Labels for categorization and filtering
+    #[serde(default)]
+    pub labels: HashMap<String, String>,
 }
 
 // ============================================================================

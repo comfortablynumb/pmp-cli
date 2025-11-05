@@ -86,6 +86,7 @@ impl CollectionDiscovery {
                                 name: resource.metadata.name.clone(),
                                 kind,
                                 path: relative_path,
+                                labels: resource.metadata.labels.clone(),
                             });
                         }
                         Err(e) => {

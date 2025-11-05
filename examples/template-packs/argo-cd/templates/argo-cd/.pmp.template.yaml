@@ -3,7 +3,9 @@ kind: Template
 metadata:
   name: argo-cd
   description: Basic Argo CD installation with Helm
-
+  labels:
+    pmp.io/project-type: application
+    pmp.io/project-vendor: argo-cd
 spec:
   apiVersion: pmp.io/v1
   kind: KubernetesWorkload
