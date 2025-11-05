@@ -95,6 +95,11 @@ pub struct TemplateSpec {
     /// Plugins configuration (allowed plugins from other templates)
     #[serde(default)]
     pub plugins: Option<PluginsConfig>,
+
+    /// Dependencies on other projects
+    /// If set, user must select projects matching these dependencies when creating a project
+    #[serde(default)]
+    pub dependencies: Vec<TemplateDependency>,
 }
 
 /// Plugins configuration in template
@@ -150,6 +155,36 @@ pub struct RemoteStateConfig {
     /// Key: name of the output in the reference project's remote state
     /// Value: configuration for how to use this output
     pub required_fields: HashMap<String, RequiredField>,
+}
+
+/// Reference to a project required by a template
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TemplateProjectRef {
+    /// API version of the required project
+    #[serde(rename = "apiVersion")]
+    pub api_version: String,
+
+    /// Kind of the required project
+    pub kind: String,
+
+    /// Remote state configuration for accessing the reference project
+    #[serde(default)]
+    pub remote_state: Option<TemplateRemoteStateConfig>,
+}
+
+/// Remote state configuration for a template reference project
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TemplateRemoteStateConfig {
+    /// Name of the data source in _common.tf (e.g., "postgres_instance")
+    /// Will be prefixed with "template_ref_" in the actual data source name
+    pub data_source_name: String,
+}
+
+/// Dependency on another project (used in templates)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TemplateDependency {
+    /// Project reference containing apiVersion, kind, and remote_state config
+    pub project: TemplateProjectRef,
 }
 
 // ============================================================================
@@ -323,6 +358,26 @@ pub struct PluginProjectReference {
     pub environment: String,
 }
 
+/// Reference to a project required by a template
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TemplateReferenceProject {
+    /// API version of the resource kind
+    #[serde(rename = "apiVersion")]
+    pub api_version: String,
+
+    /// Kind of the resource
+    pub kind: String,
+
+    /// Name of the reference project
+    pub name: String,
+
+    /// Environment name of the reference project
+    pub environment: String,
+
+    /// Data source name for this reference in _common.tf
+    pub data_source_name: String,
+}
+
 /// Information about a plugin that has been added to a project environment
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AddedPlugin {
@@ -409,6 +464,11 @@ pub struct ProjectSpec {
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub environment: Option<EnvironmentReference>,
+
+    /// Reference projects required by the template
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub template_reference_projects: Vec<TemplateReferenceProject>,
 }
 
 // ============================================================================

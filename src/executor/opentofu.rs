@@ -163,8 +163,9 @@ impl Executor for OpenTofuExecutor {
         executor_config: &HashMap<String, serde_json::Value>,
         project_metadata: &ProjectMetadata,
         plugins: Option<&[crate::template::metadata::AddedPlugin]>,
+        template_reference_projects: &[crate::template::metadata::TemplateReferenceProject],
     ) -> Result<()> {
-        use super::backend::{generate_backend_config, generate_module_blocks, generate_data_source_backends, generate_plugin_override_variables};
+        use super::backend::{generate_backend_config, generate_module_blocks, generate_data_source_backends, generate_plugin_override_variables, generate_template_data_source_backends};
 
         // Generate backend HCL with project metadata for table name generation
         let backend_hcl = generate_backend_config(
@@ -176,10 +177,16 @@ impl Executor for OpenTofuExecutor {
         )
         .context("Failed to generate backend configuration")?;
 
+        // Generate data source backends for template reference projects
+        let template_data_sources_hcl = generate_template_data_source_backends(
+            template_reference_projects,
+            executor_config,
+        ).context("Failed to generate template data source backends")?;
+
         // Generate data source backends for plugins with reference projects
-        let data_sources_hcl = if let Some(plugin_list) = plugins {
+        let plugin_data_sources_hcl = if let Some(plugin_list) = plugins {
             generate_data_source_backends(plugin_list, executor_config)
-                .context("Failed to generate data source backends")?
+                .context("Failed to generate plugin data source backends")?
         } else {
             String::new()
         };
@@ -200,8 +207,11 @@ impl Executor for OpenTofuExecutor {
 
         // Combine backend, data sources, variables, and modules
         let mut combined_hcl = backend_hcl;
-        if !data_sources_hcl.is_empty() {
-            combined_hcl.push_str(&data_sources_hcl);
+        if !template_data_sources_hcl.is_empty() {
+            combined_hcl.push_str(&template_data_sources_hcl);
+        }
+        if !plugin_data_sources_hcl.is_empty() {
+            combined_hcl.push_str(&plugin_data_sources_hcl);
         }
         if !variables_hcl.is_empty() {
             combined_hcl.push_str(&variables_hcl);

@@ -58,6 +58,7 @@ pub trait Executor: Send + Sync {
         _executor_config: &HashMap<String, serde_json::Value>,
         _project_metadata: &ProjectMetadata,
         _plugins: Option<&[crate::template::metadata::AddedPlugin]>,
+        _template_reference_projects: &[crate::template::metadata::TemplateReferenceProject],
     ) -> Result<()> {
         Ok(())
     }

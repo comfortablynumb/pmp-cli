@@ -38,3 +38,7 @@ target
 
 # Local templates
 /.pmp
+
+# Other
+
+/nul

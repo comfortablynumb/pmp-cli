@@ -254,6 +254,7 @@ impl UpdateCommand {
                     // Get plugins from current environment resource to include in common file
                     let plugins = current_env_resource.spec.plugins.as_ref()
                         .map(|p| p.added.as_slice());
+                    let template_reference_projects = &current_env_resource.spec.template_reference_projects;
                     let metadata = crate::executor::ProjectMetadata {
                         api_version: &matching_template.resource.spec.api_version,
                         kind: &matching_template.resource.spec.kind,
@@ -265,6 +266,7 @@ impl UpdateCommand {
                         &executor_config.config,
                         &metadata,
                         plugins,
+                        template_reference_projects,
                     ).context("Failed to generate common file")?;
                 }
             }
@@ -778,6 +780,7 @@ impl UpdateCommand {
                     output::dimmed("  Regenerating common file with plugin modules...");
                     let plugins = env_resource.spec.plugins.as_ref()
                         .map(|p| p.added.as_slice());
+                    let template_reference_projects = &env_resource.spec.template_reference_projects;
                     let metadata = crate::executor::ProjectMetadata {
                         api_version: &env_resource.api_version,
                         kind: &env_resource.kind,
@@ -789,6 +792,7 @@ impl UpdateCommand {
                         &executor_config.config,
                         &metadata,
                         plugins,
+                        template_reference_projects,
                     ).context("Failed to regenerate common file")?;
                 }
             }
@@ -913,6 +917,7 @@ impl UpdateCommand {
                     output::dimmed("  Regenerating common file...");
                     let plugins = env_resource.spec.plugins.as_ref()
                         .map(|p| p.added.as_slice());
+                    let template_reference_projects = &env_resource.spec.template_reference_projects;
                     let metadata = crate::executor::ProjectMetadata {
                         api_version: &env_resource.api_version,
                         kind: &env_resource.kind,
@@ -924,6 +929,7 @@ impl UpdateCommand {
                         &executor_config.config,
                         &metadata,
                         plugins,
+                        template_reference_projects,
                     ).context("Failed to regenerate common file")?;
                 }
             }
@@ -1242,6 +1248,7 @@ impl UpdateCommand {
                 environment: Some(EnvironmentReference {
                     name: environment_name.to_string(),
                 }),
+                template_reference_projects: Vec::new(),  // No template references in tests
             },
         };
 

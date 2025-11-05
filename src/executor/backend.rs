@@ -417,6 +417,61 @@ pub fn generate_data_source_backends(
     Ok(hcl)
 }
 
+/// Generate terraform_remote_state data source blocks for template reference projects
+///
+/// # Arguments
+/// * `template_refs` - Slice of TemplateReferenceProject structs containing reference project metadata
+/// * `executor_config` - Executor configuration from collection (contains backend settings)
+///
+/// # Returns
+/// HCL string containing data source blocks, or empty string if no template references
+pub fn generate_template_data_source_backends(
+    template_refs: &[crate::template::metadata::TemplateReferenceProject],
+    executor_config: &HashMap<String, serde_json::Value>,
+) -> Result<String> {
+    if template_refs.is_empty() {
+        return Ok(String::new());
+    }
+
+    let mut hcl = String::new();
+    hcl.push_str("\n# Data sources for template reference projects\n");
+
+    for template_ref in template_refs {
+        // Data source name: template_ref_{data_source_name}
+        let data_source_name = format!("template_ref_{}", template_ref.data_source_name);
+
+        // Get backend type from executor config
+        let backend_type = executor_config
+            .get("backend")
+            .and_then(|b| b.get("type"))
+            .and_then(|t| t.as_str())
+            .unwrap_or("local");
+
+        // Generate backend config pointing to reference project's state
+        let backend_config_hcl = generate_backend_config_map(
+            executor_config,
+            Some(&template_ref.api_version),
+            Some(&template_ref.kind),
+            Some(&template_ref.environment),
+            Some(&template_ref.name),
+        )?;
+
+        // Generate data source block
+        hcl.push_str(&format!("data \"terraform_remote_state\" \"{}\" {{\n", data_source_name));
+        hcl.push_str(&format!("  backend = \"{}\"\n", backend_type));
+
+        if !backend_config_hcl.is_empty() {
+            hcl.push_str("  config = {\n");
+            hcl.push_str(&backend_config_hcl);
+            hcl.push_str("  }\n");
+        }
+
+        hcl.push_str("}\n\n");
+    }
+
+    Ok(hcl)
+}
+
 /// Generate backend configuration as a map (for data source config blocks)
 /// Returns the config map content (without wrapping config = {})
 fn generate_backend_config_map(

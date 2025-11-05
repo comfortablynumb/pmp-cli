@@ -28,7 +28,7 @@ spec:
       description: Container port for the http-echo service
 
     text:
-      default: "Hello from minikube!"
+      default: "Hello from Kubernetes!"
       description: Text message to be echoed by the service
 
     service_type:

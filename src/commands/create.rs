@@ -215,6 +215,127 @@ impl CreateCommand {
             (template, config)
         };
 
+        // Step 6.5: Handle template reference projects (if template requires them)
+        let mut template_reference_projects = Vec::new();
+
+        if !selected_template.resource.spec.dependencies.is_empty() {
+            ctx.output.subsection("Template Reference Projects");
+            ctx.output.dimmed("This template requires reference projects to be selected.");
+            output::blank();
+
+            // Discover all projects in the collection
+            let projects = CollectionDiscovery::discover_projects(&*ctx.fs, &*ctx.output, &infrastructure_root)?;
+
+            for (ref_index, dep) in selected_template.resource.spec.dependencies.iter().enumerate() {
+                let template_ref = &dep.project;
+                let ref_number = ref_index + 1;
+                let total_refs = selected_template.resource.spec.dependencies.len();
+
+                ctx.output.dimmed(&format!(
+                    "Reference {} of {}: {} (Kind: {})",
+                    ref_number, total_refs,
+                    template_ref.remote_state.as_ref().map(|rs| rs.data_source_name.as_str()).unwrap_or("unknown"),
+                    template_ref.kind
+                ));
+                output::blank();
+
+                // Filter projects by required apiVersion and kind
+                let mut compatible_projects = Vec::new();
+                for project in &projects {
+                    let project_path = infrastructure_root.join(&project.path);
+                    let environments_dir = project_path.join("environments");
+
+                    if let Ok(env_entries) = ctx.fs.read_dir(&environments_dir) {
+                        for env_path in env_entries {
+                            let env_file = env_path.join(".pmp.environment.yaml");
+                            if ctx.fs.exists(&env_file) {
+                                if let Ok(env_resource) = crate::template::metadata::DynamicProjectEnvironmentResource::from_file(&*ctx.fs, &env_file) {
+                                    if env_resource.api_version == template_ref.api_version
+                                        && env_resource.kind == template_ref.kind {
+                                        compatible_projects.push((project.clone(), project_path.clone()));
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if compatible_projects.is_empty() {
+                    anyhow::bail!(
+                        "No compatible projects found for template reference.\n\nRequired: {} (Kind: {})",
+                        template_ref.api_version, template_ref.kind
+                    );
+                }
+
+                // Sort projects by name for consistent display
+                compatible_projects.sort_by(|a, b| a.0.name.cmp(&b.0.name));
+                compatible_projects.dedup_by(|a, b| a.0.name == b.0.name);
+
+                let project_options: Vec<String> = compatible_projects.iter()
+                    .map(|(proj, _)| format!("{} ({})", proj.name, template_ref.kind))
+                    .collect();
+
+                let selected_project_display = ctx.input.select(
+                    &format!("Select reference project ({}):", template_ref.kind),
+                    project_options.clone()
+                ).context("Failed to select reference project")?;
+
+                let project_index = project_options.iter()
+                    .position(|opt| opt == &selected_project_display)
+                    .context("Project not found")?;
+
+                let (selected_project, selected_project_path) = &compatible_projects[project_index];
+
+                output::blank();
+                ctx.output.key_value_highlight("Reference Project", &selected_project.name);
+                ctx.output.key_value("Resource Kind", &template_ref.kind);
+
+                // Discover environments from the selected reference project
+                let reference_environments = CollectionDiscovery::discover_environments(&*ctx.fs, &selected_project_path)?;
+
+                if reference_environments.is_empty() {
+                    anyhow::bail!("No environments found in reference project: {}", selected_project.name);
+                }
+
+                let reference_env_name = if reference_environments.len() == 1 {
+                    reference_environments[0].clone()
+                } else {
+                    ctx.input.select("Select reference environment:", reference_environments.clone())
+                        .context("Failed to select reference environment")?
+                };
+
+                output::blank();
+                ctx.output.key_value("Reference Environment", &reference_env_name);
+
+                // Load reference project's environment resource to get its details
+                let reference_env_path = selected_project_path.join("environments").join(&reference_env_name);
+                let reference_env_file = reference_env_path.join(".pmp.environment.yaml");
+
+                if !ctx.fs.exists(&reference_env_file) {
+                    anyhow::bail!("Reference environment file not found: {:?}", reference_env_file);
+                }
+
+                let loaded_env_resource = crate::template::metadata::DynamicProjectEnvironmentResource::from_file(&*ctx.fs, &reference_env_file)
+                    .context("Failed to load reference environment resource")?;
+
+                // Store the template reference project
+                let data_source_name = template_ref.remote_state.as_ref()
+                    .map(|rs| rs.data_source_name.clone())
+                    .unwrap_or_else(|| format!("ref_{}", ref_index));
+
+                template_reference_projects.push(crate::template::metadata::TemplateReferenceProject {
+                    api_version: loaded_env_resource.api_version.clone(),
+                    kind: loaded_env_resource.kind.clone(),
+                    name: loaded_env_resource.metadata.name.clone(),
+                    environment: reference_env_name,
+                    data_source_name,
+                });
+
+                output::blank();
+            }
+        }
+
         // Step 7: Select environment from Infrastructure
         let selected_environment = if infrastructure.spec.environments.is_empty() {
             anyhow::bail!("Infrastructure must define at least one environment");
@@ -413,6 +534,7 @@ impl CreateCommand {
                         &executor_config.config,
                         &metadata,
                         None, // No plugins on initial project creation
+                        &template_reference_projects,
                     ).context("Failed to generate common file")?;
                 }
             }
@@ -438,6 +560,7 @@ impl CreateCommand {
             &inputs,
             &selected_pack.resource.metadata.name,
             &selected_template.resource.metadata.name,
+            &template_reference_projects,
         ).context("Failed to generate .pmp.environment.yaml file")?;
 
         ctx.output.blank();
@@ -617,6 +740,7 @@ impl CreateCommand {
         inputs: &std::collections::HashMap<String, serde_json::Value>,
         template_pack_name: &str,
         template_name: &str,
+        template_reference_projects: &[crate::template::metadata::TemplateReferenceProject],
     ) -> Result<()> {
         use crate::template::metadata::{
             DynamicProjectEnvironmentResource, DynamicProjectEnvironmentMetadata, ProjectSpec, ResourceDefinition,
@@ -652,6 +776,7 @@ impl CreateCommand {
                 environment: Some(EnvironmentReference {
                     name: environment_name.to_string(),
                 }),
+                template_reference_projects: template_reference_projects.to_vec(),
             },
         };
 
