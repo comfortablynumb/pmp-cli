@@ -10,7 +10,7 @@ mod traits;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use commands::{ApplyCommand, CreateCommand, FindCommand, InitCommand, PreviewCommand, UpdateCommand};
+use commands::{ApplyCommand, CreateCommand, FindCommand, GenerateCommand, InitCommand, PreviewCommand, UpdateCommand};
 
 #[derive(Parser)]
 #[command(name = "pmp")]
@@ -48,6 +48,26 @@ enum Commands {
 
         /// Additional template packs directories to search (colon-separated)
         #[arg(short, long)]
+        template_packs_paths: Option<String>,
+    },
+
+    /// Generate files from a template without creating a project structure
+    #[command(long_about = "Generate files from a template without creating a project structure or requiring an infrastructure\n\nThis command allows you to quickly generate files from any template without the need for an infrastructure configuration.\nAll templates are available without filtering, and files are generated directly to the specified output directory.\n\nExamples:\n  pmp generate\n  pmp generate --template-pack my-pack --template my-template\n  pmp generate --output-dir ./output\n  pmp generate -p my-pack -t my-template -o ./output\n  pmp generate --template-packs-paths /custom/packs1:/custom/packs2")]
+    Generate {
+        /// Template pack name (optional, will prompt if not specified)
+        #[arg(short = 'p', long)]
+        template_pack: Option<String>,
+
+        /// Template name (optional, will prompt if not specified)
+        #[arg(short = 't', long)]
+        template: Option<String>,
+
+        /// Output directory (defaults to current directory)
+        #[arg(short = 'o', long)]
+        output_dir: Option<String>,
+
+        /// Additional template packs directories to search (colon-separated)
+        #[arg(long)]
         template_packs_paths: Option<String>,
     },
 
@@ -102,6 +122,9 @@ fn main() -> Result<()> {
         }
         Commands::Create { output, template_packs_paths } => {
             CreateCommand::execute(&ctx, output.as_deref(), template_packs_paths.as_deref())?;
+        }
+        Commands::Generate { template_pack, template, output_dir, template_packs_paths } => {
+            GenerateCommand::execute(&ctx, template_pack.as_deref(), template.as_deref(), output_dir.as_deref(), template_packs_paths.as_deref())?;
         }
         Commands::Preview { path } => {
             PreviewCommand::execute(&ctx, path.as_deref())?;
