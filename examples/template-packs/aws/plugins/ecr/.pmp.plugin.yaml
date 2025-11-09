@@ -8,9 +8,9 @@ spec:
   role: container-registry
 
   inputs:
-    # Name Override
-    repository_name_override:
-      description: Override ECR repository name (default uses project name)
+    # Project Metadata
+    project_name:
+      description: ECR repository name (defaults to project name)
       default: ""
 
     # Basic Settings

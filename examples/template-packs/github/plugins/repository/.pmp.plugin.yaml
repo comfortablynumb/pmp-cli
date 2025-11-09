@@ -8,13 +8,13 @@ spec:
   role: source-control
 
   inputs:
-    # Name Override
-    repository_name_override:
-      description: Override repository name (default uses project name)
+    # Project Metadata
+    project_name:
+      description: Repository name (defaults to project name)
       default: ""
 
-    description_override:
-      description: Override repository description (default uses project description)
+    project_description:
+      description: Repository description (defaults to project description)
       default: ""
 
     # Basic Settings

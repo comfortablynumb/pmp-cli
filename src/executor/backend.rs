@@ -272,9 +272,20 @@ pub fn generate_module_blocks(plugins: &[AddedPlugin]) -> String {
     hcl.push_str("\n# Plugin modules\n");
 
     for plugin in plugins {
-        // Include reference project name for uniqueness
-        let module_name = format!("{}_{}_{}", plugin.template_pack_name, plugin.name, plugin.project.name);
-        let source_path = format!("./modules/{}/{}/{}", plugin.template_pack_name, plugin.name, plugin.project.name);
+        // Construct module name and source path based on whether plugin has a reference project
+        let (module_name, source_path) = if let Some(ref_project) = &plugin.reference_project {
+            // Plugin references another project - use reference project name in path
+            (
+                format!("{}_{}_{}", plugin.template_pack_name, plugin.name, ref_project.name),
+                format!("./modules/{}/{}/{}", plugin.template_pack_name, plugin.name, ref_project.name)
+            )
+        } else {
+            // Plugin has no reference - no project name suffix needed
+            (
+                format!("{}_{}", plugin.template_pack_name, plugin.name),
+                format!("./modules/{}/{}", plugin.template_pack_name, plugin.name)
+            )
+        };
 
         hcl.push_str(&format!("module \"{}\" {{\n", module_name));
         hcl.push_str(&format!("  source = \"{}\"\n", source_path));

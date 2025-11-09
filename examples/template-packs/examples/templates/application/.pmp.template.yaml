@@ -1,0 +1,105 @@
+apiVersion: pmp.io/v1
+kind: Template
+metadata:
+  name: application
+  description: Production-ready application deployment with auto-provisioned GitHub repository and ECR registry
+
+spec:
+  apiVersion: pmp.io/v1
+  kind: KubernetesWorkload
+  executor: opentofu
+
+  plugins:
+    # Optional plugins users can manually add
+    allowed:
+      - template_pack_name: postgres
+        plugin_name: access
+        inputs:
+          k8s_secret_namespace:
+            default: ""
+            description: Kubernetes namespace for credential secret (defaults to project namespace)
+      - template_pack_name: vault
+        plugin_name: secret
+        inputs:
+          vault_path:
+            default: ""
+            description: Path in Vault to store/retrieve secrets
+
+    # Plugins automatically installed during project creation
+    installed:
+      - template_pack_name: github
+        plugin_name: repository
+        inputs:
+          gitignore_template:
+            default: Terraform
+            description: Gitignore template to use
+          license_template:
+            default: apache-2.0
+            description: License template to use
+          visibility:
+            default: private
+            description: Repository visibility level
+          enable_branch_protection:
+            default: "true"
+            description: Enable branch protection for main branch
+          required_approving_review_count:
+            default: 2
+            description: Number of approving reviews required before merging
+          has_issues:
+            default: "true"
+            description: Enable issues for this repository
+          has_wiki:
+            default: "false"
+            description: Enable wiki for this repository
+
+      - template_pack_name: aws
+        plugin_name: ecr
+        inputs:
+          image_tag_mutability:
+            default: IMMUTABLE
+            description: Tag mutability setting for the repository
+          encryption_type:
+            default: KMS
+            description: Encryption type for images at rest
+          scan_on_push:
+            default: "true"
+            description: Enable automatic image scanning when images are pushed
+          keep_image_count:
+            default: 20
+            description: Number of images to retain (lifecycle policy)
+
+  inputs:
+    # Application configuration
+    docker_image_version:
+      description: Docker image tag/version (e.g., latest, v1.2.3)
+      default: latest
+
+    replicas:
+      description: Number of pod replicas to deploy
+      default: 3
+
+    namespace:
+      description: Kubernetes namespace for deployment
+      default: default
+
+    container_port:
+      description: Container port to expose
+      default: 8080
+
+    cpu_request:
+      description: CPU request (e.g., 100m, 1)
+      default: 100m
+
+    memory_request:
+      description: Memory request (e.g., 128Mi, 1Gi)
+      default: 256Mi
+
+    cpu_limit:
+      description: CPU limit (e.g., 500m, 2)
+      default: 500m
+
+    memory_limit:
+      description: Memory limit (e.g., 512Mi, 2Gi)
+      default: 512Mi
+
+  environments: {}

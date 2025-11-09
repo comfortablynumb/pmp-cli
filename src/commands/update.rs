@@ -89,6 +89,7 @@ impl UpdateCommand {
             }
             if has_plugins {
                 options.push("Remove Plugin".to_string());
+                options.push("Update Plugin Inputs".to_string());
             }
 
             let action = ctx.input.select("What would you like to do?", options)
@@ -113,6 +114,20 @@ impl UpdateCommand {
             if action == "Remove Plugin" {
                 // Remove plugin flow
                 return Self::remove_plugin_interactive(
+                    ctx,
+                    &collection_root,
+                    &collection,
+                    &env_path,
+                    &project_name,
+                    &env_name,
+                    current_env_resource,
+                    template_packs_paths,
+                );
+            }
+
+            if action == "Update Plugin Inputs" {
+                // Update plugin inputs flow
+                return Self::update_plugin_inputs_interactive(
                     ctx,
                     &collection_root,
                     &collection,
@@ -950,6 +965,217 @@ impl UpdateCommand {
         Ok(())
     }
 
+    /// Update inputs for an existing plugin
+    fn update_plugin_inputs_interactive(
+        ctx: &crate::context::Context,
+        _collection_root: &Path,
+        collection: &InfrastructureResource,
+        env_path: &Path,
+        project_name: &str,
+        env_name: &str,
+        mut env_resource: DynamicProjectEnvironmentResource,
+        template_packs_paths: Option<&str>,
+    ) -> Result<()> {
+        output::section("Update Plugin Inputs");
+
+        // Check if there are any plugins to update
+        let plugins = match &env_resource.spec.plugins {
+            Some(p) if !p.added.is_empty() => &p.added,
+            _ => {
+                output::warning("No plugins are currently added to this environment.");
+                return Ok(());
+            }
+        };
+
+        // Create display options for the user
+        let plugin_options: Vec<String> = plugins
+            .iter()
+            .map(|p| {
+                if let Some(ref_project) = &p.reference_project {
+                    format!("{}/{} (referencing: {})", p.template_pack_name, p.name, ref_project.name)
+                } else {
+                    format!("{}/{} (self-referencing)", p.template_pack_name, p.name)
+                }
+            })
+            .collect();
+
+        output::subsection("Select Plugin to Update");
+        let selected_display = ctx.input.select("Which plugin would you like to update?", plugin_options.clone())
+            .context("Failed to select plugin")?;
+
+        let plugin_index = plugin_options.iter()
+            .position(|opt| opt == &selected_display)
+            .context("Plugin not found")?;
+
+        // Clone plugin info to avoid borrowing issues
+        let plugin_to_update = plugins[plugin_index].clone();
+        let plugin_name = plugin_to_update.name.clone();
+        let plugin_pack = plugin_to_update.template_pack_name.clone();
+        let current_inputs = plugin_to_update.inputs.clone();
+
+        output::blank();
+        output::key_value_highlight("Plugin", &plugin_name);
+        output::key_value("Pack", &plugin_pack);
+
+        // Discover template packs to reload the plugin spec
+        output::blank();
+        output::subsection("Loading Plugin Specification");
+
+        // Build paths for discovery
+        let mut all_paths: Vec<String> = vec![];
+
+        // Add flag paths if provided
+        if let Some(paths) = template_packs_paths {
+            all_paths.extend(paths.split(':').map(|s| s.to_string()));
+        }
+
+        // Add environment variable paths
+        if let Ok(env_paths_str) = std::env::var("PMP_TEMPLATE_PACKS_PATHS") {
+            let env_paths: Vec<String> = env_paths_str.split(':').map(|s| s.to_string()).collect();
+            all_paths.extend(env_paths);
+        }
+
+        // Convert to Vec<&str> for the discovery function
+        let custom_paths: Vec<&str> = all_paths.iter().map(|s| s.as_str()).collect();
+
+        let template_packs = TemplateDiscovery::discover_template_packs_with_custom_paths(&*ctx.fs, &*ctx.output, &custom_paths)
+            .context("Failed to discover template packs")?;
+
+        // Find the plugin in the discovered packs
+        let mut plugin_info_found: Option<crate::template::PluginInfo> = None;
+
+        for pack in &template_packs {
+            if pack.resource.metadata.name == plugin_pack {
+                // Discover plugins in this pack
+                let plugins = TemplateDiscovery::discover_plugins_in_pack(
+                    &*ctx.fs,
+                    &*ctx.output,
+                    &pack.path,
+                    &pack.resource.metadata.name,
+                )?;
+
+                // Find the specific plugin
+                plugin_info_found = plugins.into_iter()
+                    .find(|p| p.resource.metadata.name == plugin_name);
+                break;
+            }
+        }
+
+        let plugin_info = plugin_info_found
+            .context(format!("Plugin '{}' from pack '{}' not found in template packs", plugin_name, plugin_pack))?;
+
+        output::dimmed(&format!("  Loaded plugin specification: {}/{}", plugin_pack, plugin_name));
+
+        // Collect new inputs with current values as defaults
+        output::blank();
+        output::subsection("Update Plugin Inputs");
+        output::dimmed("Current values shown as defaults. Press Enter to keep current value.");
+        output::blank();
+
+        let new_inputs = Self::collect_plugin_inputs_with_defaults(
+            ctx,
+            &plugin_info.resource.spec.inputs,
+            &current_inputs,
+            project_name,
+        )?;
+
+        // Confirm update
+        output::blank();
+        let confirm = ctx.input.confirm("Update plugin with these new inputs?", true)
+            .context("Failed to get confirmation")?;
+
+        if !confirm {
+            output::dimmed("Plugin update cancelled.");
+            return Ok(());
+        }
+
+        output::blank();
+        output::subsection("Updating Plugin");
+
+        // Determine plugin path (with or without reference project subdirectory)
+        let mut plugin_path = env_path
+            .join("modules")
+            .join(&plugin_pack)
+            .join(&plugin_name);
+
+        if let Some(ref_project) = &plugin_to_update.reference_project {
+            plugin_path = plugin_path.join(&ref_project.name);
+        }
+
+        // Re-render plugin files with new inputs
+        let renderer = crate::template::TemplateRenderer::new();
+        let plugin_context = Some((plugin_pack.as_str(), plugin_name.as_str()));
+
+        let generated_files = renderer.render_template(
+            ctx,
+            &plugin_info.path,
+            &plugin_path,
+            &new_inputs,
+            plugin_context,
+        ).context("Failed to re-render plugin files")?;
+
+        output::dimmed(&format!("  Regenerated {} file(s) in: {}", generated_files.len(), plugin_path.display()));
+
+        // Update plugin in environment resource
+        if let Some(plugins) = &mut env_resource.spec.plugins {
+            plugins.added[plugin_index].inputs = new_inputs;
+            plugins.added[plugin_index].files = generated_files;
+            output::dimmed("  Updated plugin metadata in environment");
+        }
+
+        // Save updated environment file
+        let env_file = env_path.join(".pmp.environment.yaml");
+        let yaml_content = serde_yaml::to_string(&env_resource)
+            .context("Failed to serialize environment resource to YAML")?;
+        ctx.fs.write(&env_file, &yaml_content)
+            .with_context(|| format!("Failed to write environment file: {:?}", env_file))?;
+        output::dimmed(&format!("  Updated: {}", env_file.display()));
+
+        // Regenerate common file with updated plugin
+        if let Some(executor_config) = &collection.spec.executor {
+            if !executor_config.config.is_empty() {
+                let executor: Box<dyn crate::executor::Executor> = match executor_config.name.as_str() {
+                    "opentofu" => Box::new(crate::executor::OpenTofuExecutor::new()),
+                    _ => anyhow::bail!("Unknown executor: {}", executor_config.name),
+                };
+
+                if executor.supports_backend() {
+                    output::dimmed("  Regenerating common file...");
+                    let plugins = env_resource.spec.plugins.as_ref()
+                        .map(|p| p.added.as_slice());
+                    let template_reference_projects = &env_resource.spec.template_reference_projects;
+                    let metadata = crate::executor::ProjectMetadata {
+                        api_version: &env_resource.api_version,
+                        kind: &env_resource.kind,
+                        environment: env_name,
+                        project_name,
+                    };
+                    executor.generate_common_file(
+                        env_path,
+                        &executor_config.config,
+                        &metadata,
+                        plugins,
+                        template_reference_projects,
+                    ).context("Failed to regenerate common file")?;
+                }
+            }
+        }
+
+        output::blank();
+        output::success(&format!("Plugin '{}' updated successfully!", plugin_name));
+
+        output::subsection("Next Steps");
+        output::dimmed("The plugin inputs have been updated for:");
+        output::key_value("Project", project_name);
+        output::key_value("Environment", env_name);
+        output::blank();
+        output::dimmed("To apply the changes:");
+        output::dimmed("  1. Run 'pmp preview' to see what will be changed");
+        output::dimmed("  2. Run 'pmp apply' to apply the infrastructure changes");
+
+        Ok(())
+    }
+
     /// Detect context and select project/environment
     /// Returns: (environment_path, project_name, environment_name)
     fn detect_and_select_environment(ctx: &crate::context::Context, work_dir: &Path) -> Result<(PathBuf, String, String)> {
@@ -1354,6 +1580,141 @@ impl UpdateCommand {
             };
 
             inputs.insert(input_name.clone(), value);
+        }
+
+        // Auto-populate project_name if empty
+        if let Some(Value::String(s)) = inputs.get("project_name") {
+            if s.is_empty() {
+                inputs.insert("project_name".to_string(), Value::String(project_name.to_string()));
+            }
+        }
+
+        // Auto-populate project_description if empty
+        if let Some(Value::String(s)) = inputs.get("project_description") {
+            if s.is_empty() {
+                inputs.insert("project_description".to_string(), Value::String(String::new()));
+            }
+        }
+
+        Ok(inputs)
+    }
+
+    /// Collect plugin inputs from user with current values as defaults
+    fn collect_plugin_inputs_with_defaults(
+        ctx: &crate::context::Context,
+        inputs_spec: &HashMap<String, crate::template::metadata::InputSpec>,
+        current_inputs: &HashMap<String, Value>,
+        project_name: &str,
+    ) -> Result<HashMap<String, Value>> {
+        let mut inputs = HashMap::new();
+
+        // Always add name
+        inputs.insert("name".to_string(), Value::String(project_name.to_string()));
+
+        // Collect each input defined in the plugin
+        for (input_name, input_spec) in inputs_spec {
+            // Skip if it's the 'name' field (already added)
+            if input_name == "name" {
+                continue;
+            }
+
+            let description = input_spec.description.as_deref().unwrap_or(input_name.as_str());
+
+            // Get the current value for this input
+            let current_value = current_inputs.get(input_name);
+
+            let value = if let Some(enum_values) = &input_spec.enum_values {
+                // This is a select input
+                // Sort enum values alphabetically for display
+                let mut sorted_enum_values = enum_values.clone();
+                sorted_enum_values.sort();
+
+                let _default_str = current_value
+                    .and_then(|v| v.as_str())
+                    .or_else(|| input_spec.default.as_ref().and_then(|v| v.as_str()))
+                    .or_else(|| sorted_enum_values.first().map(|s| s.as_str()));
+
+                // Note: The starting cursor feature (pre-selecting the default) is not supported by the trait
+                let selected = ctx.input.select(description, sorted_enum_values)
+                    .context("Failed to get input")?;
+
+                Value::String(selected)
+            } else {
+                // Determine the default value (prefer current value over template default)
+                let default_value = current_value.or(input_spec.default.as_ref());
+
+                match default_value {
+                    Some(Value::Bool(b)) => {
+                        let answer = ctx.input.confirm(description, *b)
+                            .context("Failed to get input")?;
+                        Value::Bool(answer)
+                    }
+                    Some(Value::Number(n)) => {
+                        let prompt_text = format!("{} (current: {})", description, n);
+                        let answer = ctx.input.text(&prompt_text, Some(&n.to_string()))
+                            .context("Failed to get input")?;
+
+                        // Try to parse as number
+                        if let Ok(num) = answer.parse::<i64>() {
+                            Value::Number(num.into())
+                        } else if let Ok(num) = answer.parse::<f64>() {
+                            Value::Number(serde_json::Number::from_f64(num).unwrap())
+                        } else {
+                            Value::String(answer)
+                        }
+                    }
+                    Some(Value::String(s)) => {
+                        let prompt_text = if !s.is_empty() {
+                            format!("{} (current: {})", description, s)
+                        } else {
+                            description.to_string()
+                        };
+                        let answer = ctx.input.text(&prompt_text, Some(s))
+                            .context("Failed to get input")?;
+                        Value::String(answer)
+                    }
+                    Some(Value::Array(_arr)) => {
+                        // For arrays, use the default value directly
+                        default_value.unwrap().clone()
+                    }
+                    Some(_) => {
+                        // Fallback to string input for other types
+                        let current_str = current_value
+                            .and_then(|v| serde_json::to_string(v).ok())
+                            .unwrap_or_default();
+                        let prompt_text = if !current_str.is_empty() {
+                            format!("{} (current: {})", description, current_str)
+                        } else {
+                            description.to_string()
+                        };
+                        let answer = ctx.input.text(&prompt_text, Some(&current_str))
+                            .context("Failed to get input")?;
+                        Value::String(answer)
+                    }
+                    None => {
+                        // No current or default value, prompt for string
+                        let answer = ctx.input.text(description, None)
+                            .context("Failed to get input")?;
+                        Value::String(answer)
+                    }
+                }
+            };
+
+            inputs.insert(input_name.clone(), value);
+        }
+
+        // Auto-populate project_name if empty
+        if let Some(Value::String(s)) = inputs.get("project_name") {
+            if s.is_empty() {
+                inputs.insert("project_name".to_string(), Value::String(project_name.to_string()));
+            }
+        }
+
+        // Auto-populate project_description if empty
+        if let Some(Value::String(s)) = inputs.get("project_description") {
+            if s.is_empty() {
+                inputs.insert("project_description".to_string(), Value::String(String::new()));
+            }
         }
 
         Ok(inputs)

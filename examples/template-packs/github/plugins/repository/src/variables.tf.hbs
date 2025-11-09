@@ -1,26 +1,14 @@
-# Project metadata variables (injected by PMP)
+# Project metadata variables
 variable "project_name" {
   type        = string
-  description = "Project name (injected by PMP)"
+  description = "Repository name"
+  default     = "{{project_name}}"
 }
 
 variable "project_description" {
   type        = string
-  description = "Project description (injected by PMP)"
-  default     = ""
-}
-
-# Override Variables
-variable "repository_name_override" {
-  type        = string
-  description = "Override repository name (default uses project name)"
-  default     = "{{repository_name_override}}"
-}
-
-variable "description_override" {
-  type        = string
-  description = "Override repository description (default uses project description)"
-  default     = "{{description_override}}"
+  description = "Repository description"
+  default     = "{{project_description}}"
 }
 
 # Basic Settings

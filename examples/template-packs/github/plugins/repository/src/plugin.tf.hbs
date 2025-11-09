@@ -9,16 +9,10 @@ terraform {
   }
 }
 
-# Local variables for naming
-locals {
-  repository_name = var.repository_name_override != "" ? var.repository_name_override : var.project_name
-  description     = var.description_override != "" ? var.description_override : var.project_description
-}
-
 # GitHub repository resource
 resource "github_repository" "plugin_repo" {
-  name        = local.repository_name
-  description = local.description
+  name        = var.project_name
+  description = var.project_description
   visibility  = var.visibility
 
   # Repository features (opinionated defaults for app repositories)

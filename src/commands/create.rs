@@ -250,6 +250,21 @@ impl CreateCommand {
             }
         }
 
+        // Auto-populate project_name if empty
+        if let Some(Value::String(s)) = inputs.get("project_name") {
+            if s.is_empty() {
+                inputs.insert("project_name".to_string(), Value::String(project_name.to_string()));
+            }
+        }
+
+        // Auto-populate project_description if empty (currently no source for description, so leave empty)
+        if let Some(Value::String(s)) = inputs.get("project_description") {
+            if s.is_empty() {
+                // Leave empty for now - description would need to be passed as a parameter
+                inputs.insert("project_description".to_string(), Value::String(String::new()));
+            }
+        }
+
         Ok(inputs)
     }
 
@@ -333,6 +348,20 @@ impl CreateCommand {
             };
 
             inputs.insert(input_name.clone(), value);
+        }
+
+        // Auto-populate project_name if empty
+        if let Some(Value::String(s)) = inputs.get("project_name") {
+            if s.is_empty() {
+                inputs.insert("project_name".to_string(), Value::String(project_name.to_string()));
+            }
+        }
+
+        // Auto-populate project_description if empty
+        if let Some(Value::String(s)) = inputs.get("project_description") {
+            if s.is_empty() {
+                inputs.insert("project_description".to_string(), Value::String(String::new()));
+            }
         }
 
         Ok(inputs)
@@ -1248,7 +1277,7 @@ spec:
         fs.write(&template_dir.join(".pmp.template.yaml"), &template_yaml).unwrap();
 
         // Create src/ subdirectory with a simple template file
-        // Templates must have a src/ subdirectory according to the renderer
+        // Templates can optionally have a src/ subdirectory (required if not using plugin-only templates)
         fs.write(&template_dir.join("src/main.tf.hbs"), "# Test template").unwrap();
 
         pack_path

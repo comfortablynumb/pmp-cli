@@ -51,11 +51,13 @@ impl TemplateRenderer {
         // Walk through all files in the template/plugin src directory
         let src_dir = template_src_dir.join("src");
 
+        // Check if src/ exists - if not, skip rendering (for plugin-only templates)
         if !ctx.fs.exists(&src_dir) {
-            anyhow::bail!(
-                "Source directory not found: {}. Templates and plugins must have a 'src/' subdirectory.",
-                src_dir.display()
-            );
+            ctx.output.dimmed(&format!(
+                "  No src/ directory found in {} - skipping file generation (plugin-only template)",
+                template_src_dir.display()
+            ));
+            return Ok(Vec::new()); // Return empty file list
         }
 
         let entries = ctx.fs.walk_dir(&src_dir, 100)?;

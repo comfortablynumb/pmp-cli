@@ -1,14 +1,8 @@
-# Project metadata variables (injected by PMP)
+# Project metadata variables
 variable "project_name" {
   type        = string
-  description = "Project name (injected by PMP)"
-}
-
-# Override Variables
-variable "repository_name_override" {
-  type        = string
-  description = "Override ECR repository name (default uses project name)"
-  default     = "{{repository_name_override}}"
+  description = "ECR repository name"
+  default     = "{{project_name}}"
 }
 
 # Basic Settings

@@ -9,34 +9,29 @@ terraform {
   }
 }
 
-# Local variables for naming
-locals {
-  repository_name = var.repository_name_override != "" ? var.repository_name_override : var.project_name
-}
-
 {{#if (eq encryption_type "KMS")}}
 # KMS key for ECR encryption (auto-created for app containers)
 resource "aws_kms_key" "plugin_ecr" {
-  description             = "KMS key for ECR repository: ${local.repository_name}"
+  description             = "KMS key for ECR repository: ${var.project_name}"
   deletion_window_in_days = 10
   enable_key_rotation     = var.enable_kms_key_rotation
 
   tags = {
-    Name      = "ecr-${local.repository_name}"
+    Name      = "ecr-${var.project_name}"
     ManagedBy = "pmp"
     Plugin    = "aws/ecr"
   }
 }
 
 resource "aws_kms_alias" "plugin_ecr" {
-  name          = "alias/ecr-${local.repository_name}"
+  name          = "alias/ecr-${var.project_name}"
   target_key_id = aws_kms_key.plugin_ecr.key_id
 }
 {{/if}}
 
 # ECR Repository
 resource "aws_ecr_repository" "plugin_repo" {
-  name                 = local.repository_name
+  name                 = var.project_name
   image_tag_mutability = var.image_tag_mutability
   force_delete         = false
 
@@ -54,7 +49,7 @@ resource "aws_ecr_repository" "plugin_repo" {
   }
 
   tags = {
-    Name      = local.repository_name
+    Name      = var.project_name
     ManagedBy = "pmp"
     Plugin    = "aws/ecr"
   }
