@@ -1,0 +1,41 @@
+{{#if (eq enable_lifecycle_policy "true")}}
+# ECR Lifecycle Policy for automatic image cleanup (opinionated for app containers)
+resource "aws_ecr_lifecycle_policy" "plugin_policy" {
+  repository = aws_ecr_repository.plugin_repo.name
+
+  policy = jsonencode({
+    rules = [
+      # Keep recent tagged images
+      {
+        rulePriority = 1
+        description  = "Keep only {{keep_image_count}} most recent tagged images"
+        selection = {
+          tagStatus   = "tagged"
+          tagPrefixList = ["v", "prod", "staging", "dev"]
+          countType   = "imageCountMoreThan"
+          countNumber = {{keep_image_count}}
+        }
+        action = {
+          type = "expire"
+        }
+      },
+      # Clean up untagged images
+      {
+        rulePriority = 2
+        description  = "Expire untagged images after {{expire_untagged_after_days}} days"
+        selection = {
+          tagStatus   = "untagged"
+          countType   = "sinceImagePushed"
+          countUnit   = "days"
+          countNumber = {{expire_untagged_after_days}}
+        }
+        action = {
+          type = "expire"
+        }
+      }
+    ]
+  })
+
+  depends_on = [aws_ecr_repository.plugin_repo]
+}
+{{/if}}

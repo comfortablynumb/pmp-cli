@@ -1,0 +1,63 @@
+apiVersion: pmp.io/v1
+kind: Plugin
+metadata:
+  name: ecr
+  description: Create an AWS ECR repository for your application containers with opinionated defaults
+
+spec:
+  role: container-registry
+
+  inputs:
+    # Name Override
+    repository_name_override:
+      description: Override ECR repository name (default uses project name)
+      default: ""
+
+    # Basic Settings
+    image_tag_mutability:
+      description: Tag mutability setting for the repository
+      enum_values:
+        - MUTABLE
+        - IMMUTABLE
+      default: MUTABLE
+
+    # Encryption Settings
+    encryption_type:
+      description: Encryption type for images at rest
+      enum_values:
+        - AES256
+        - KMS
+      default: AES256
+
+    enable_kms_key_rotation:
+      description: Enable automatic key rotation for KMS keys (only when encryption_type is KMS)
+      default: "true"
+
+    # Image Scanning
+    scan_on_push:
+      description: Enable automatic image scanning when images are pushed
+      default: "true"
+
+    # Lifecycle Policy Settings
+    enable_lifecycle_policy:
+      description: Enable lifecycle policy to automatically clean up old images
+      default: "true"
+
+    keep_image_count:
+      description: Number of tagged images to retain (for lifecycle policy)
+      enum_values:
+        - 5
+        - 10
+        - 15
+        - 20
+        - 30
+      default: 10
+
+    expire_untagged_after_days:
+      description: Number of days to keep untagged images before expiring them
+      enum_values:
+        - 1
+        - 3
+        - 7
+        - 14
+      default: 7

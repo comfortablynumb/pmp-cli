@@ -37,11 +37,13 @@ Your GitHub token needs the following scopes:
 
 ## Templates
 
-### Repository
+### Repository Template
 
 Create and manage a GitHub repository with comprehensive configuration options.
 
 **Resource Kind:** `CodeRepository`
+
+**Use When:** You need a standalone repository with full control over all configuration options.
 
 **Key Features:**
 
@@ -53,6 +55,44 @@ Create and manage a GitHub repository with comprehensive configuration options.
 - **Access Management**: Team and collaborator permissions
 - **Security**: Vulnerability alerts and security features
 - **Topics**: Repository categorization with topics/tags
+
+## Plugins
+
+### Repository Plugin
+
+Add a GitHub repository to your application project with opinionated defaults.
+
+**Role:** `source-control`
+
+**Use When:** You want to add source control to an existing project (like a Kubernetes workload or container application).
+
+**Key Features:**
+
+- **Convention over Configuration**: Automatically uses project name and description
+- **Simplified Setup**: Fewer configuration options, sensible defaults
+- **Branch Protection**: Optional PR review requirements (1-3 approvals)
+- **Quick Integration**: Minimal prompts for faster setup
+
+**Key Differences from Template:**
+
+| Feature | Template | Plugin |
+|---------|----------|--------|
+| Repository Name | Manually specified | Auto-uses project name (override available) |
+| Description | Manually specified | Auto-uses project description (override available) |
+| Configuration Options | 30+ options | 12 simplified options |
+| Use Case | Standalone repository | Attached to application project |
+| Branch Protection | Fully configurable | Simplified with sensible defaults |
+
+**Example Plugin Configuration:**
+
+```yaml
+# Minimal configuration - uses project name and description
+visibility: private
+enable_branch_protection: true
+required_approving_review_count: 2
+gitignore_template: Node
+license_template: mit
+```
 
 ## Usage Example
 

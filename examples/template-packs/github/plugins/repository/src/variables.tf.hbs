@@ -1,0 +1,112 @@
+# Project metadata variables (injected by PMP)
+variable "project_name" {
+  type        = string
+  description = "Project name (injected by PMP)"
+}
+
+variable "project_description" {
+  type        = string
+  description = "Project description (injected by PMP)"
+  default     = ""
+}
+
+# Override Variables
+variable "repository_name_override" {
+  type        = string
+  description = "Override repository name (default uses project name)"
+  default     = "{{repository_name_override}}"
+}
+
+variable "description_override" {
+  type        = string
+  description = "Override repository description (default uses project description)"
+  default     = "{{description_override}}"
+}
+
+# Basic Settings
+variable "visibility" {
+  type        = string
+  description = "Repository visibility level"
+  default     = "{{visibility}}"
+
+  validation {
+    condition     = contains(["public", "private", "internal"], var.visibility)
+    error_message = "Visibility must be public, private, or internal."
+  }
+}
+
+# Repository Features
+variable "has_issues" {
+  type        = bool
+  description = "Enable issues for this repository"
+  default     = {{bool has_issues}}
+}
+
+variable "has_wiki" {
+  type        = bool
+  description = "Enable wiki for this repository"
+  default     = {{bool has_wiki}}
+}
+
+variable "has_projects" {
+  type        = bool
+  description = "Enable projects for this repository"
+  default     = {{bool has_projects}}
+}
+
+# Initialization Options
+variable "gitignore_template" {
+  type        = string
+  description = ".gitignore template to use"
+  default     = "{{gitignore_template}}"
+}
+
+variable "license_template" {
+  type        = string
+  description = "License template to use"
+  default     = "{{license_template}}"
+}
+
+variable "default_branch" {
+  type        = string
+  description = "Default branch name"
+  default     = "{{default_branch}}"
+}
+
+# Merge Settings
+variable "delete_branch_on_merge" {
+  type        = bool
+  description = "Automatically delete head branches after pull requests are merged"
+  default     = {{bool delete_branch_on_merge}}
+}
+
+# Branch Protection
+variable "enable_branch_protection" {
+  type        = bool
+  description = "Enable branch protection rules for the default branch"
+  default     = {{bool enable_branch_protection}}
+}
+
+variable "required_approving_review_count" {
+  type        = number
+  description = "Number of required approving reviews"
+  default     = {{required_approving_review_count}}
+
+  validation {
+    condition     = var.required_approving_review_count >= 0 && var.required_approving_review_count <= 6
+    error_message = "Required approving review count must be between 0 and 6."
+  }
+}
+
+# Access Management
+variable "enable_team_access" {
+  type        = bool
+  description = "Enable team-based access management"
+  default     = {{bool enable_team_access}}
+}
+
+variable "teams" {
+  type        = string
+  description = "Team access configuration (format: team-name:permission,another-team:permission)"
+  default     = "{{teams}}"
+}

@@ -1,0 +1,95 @@
+apiVersion: pmp.io/v1
+kind: Plugin
+metadata:
+  name: repository
+  description: Create a GitHub repository for your application with opinionated defaults
+
+spec:
+  role: source-control
+
+  inputs:
+    # Name Override
+    repository_name_override:
+      description: Override repository name (default uses project name)
+      default: ""
+
+    description_override:
+      description: Override repository description (default uses project description)
+      default: ""
+
+    # Basic Settings
+    visibility:
+      description: Repository visibility level
+      enum_values:
+        - public
+        - private
+        - internal
+      default: private
+
+    # Repository Features
+    has_issues:
+      description: Enable issues for this repository
+      default: "true"
+
+    has_wiki:
+      description: Enable wiki for this repository
+      default: "false"
+
+    has_projects:
+      description: Enable projects for this repository
+      default: "false"
+
+    # Initialization
+    gitignore_template:
+      description: .gitignore template to use
+      enum_values:
+        - ""
+        - Node
+        - Python
+        - Go
+        - Rust
+        - Java
+        - Ruby
+        - Terraform
+      default: ""
+
+    license_template:
+      description: License template to use
+      enum_values:
+        - ""
+        - mit
+        - apache-2.0
+        - gpl-3.0
+        - bsd-3-clause
+      default: mit
+
+    default_branch:
+      description: Default branch name
+      default: main
+
+    # Merge Settings
+    delete_branch_on_merge:
+      description: Automatically delete head branches after pull requests are merged
+      default: "true"
+
+    # Branch Protection
+    enable_branch_protection:
+      description: Enable branch protection rules for the default branch
+      default: "true"
+
+    required_approving_review_count:
+      description: Number of required approving reviews
+      enum_values:
+        - 1
+        - 2
+        - 3
+      default: 1
+
+    # Access Management
+    enable_team_access:
+      description: Enable team-based access management
+      default: "false"
+
+    teams:
+      description: Team access configuration (format - team-name:permission,another-team:permission)
+      default: ""

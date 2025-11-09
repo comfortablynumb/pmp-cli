@@ -43,11 +43,13 @@ Your AWS credentials need appropriate permissions based on the template you're u
 
 ## Templates
 
-### ECR (Elastic Container Registry)
+### ECR Template (Elastic Container Registry)
 
 Create and manage AWS ECR repositories for storing Docker container images.
 
 **Resource Kind:** `ContainerRegistry`
+
+**Use When:** You need a standalone ECR repository with full control over all configuration options.
 
 **Key Features:**
 
@@ -58,6 +60,44 @@ Create and manage AWS ECR repositories for storing Docker container images.
 - **Tag Mutability**: Control whether tags can be overwritten (MUTABLE/IMMUTABLE)
 - **Cross-Account Access**: Configure repository policies for multi-account access
 - **Security Best Practices**: Scanning enabled, encryption by default
+
+## Plugins
+
+### ECR Plugin
+
+Add an AWS ECR repository to your application project with opinionated defaults.
+
+**Role:** `container-registry`
+
+**Use When:** You want to add container image storage to an existing project (like a Kubernetes workload or ECS service).
+
+**Key Features:**
+
+- **Convention over Configuration**: Automatically uses project name for repository
+- **Simplified Setup**: Fewer configuration options, sensible defaults for apps
+- **Security-First**: Scanning enabled, encryption by default
+- **Auto-Cleanup**: Lifecycle policies pre-configured for app images
+- **Quick Integration**: Minimal prompts for faster setup
+
+**Key Differences from Template:**
+
+| Feature | Template | Plugin |
+|---------|----------|--------|
+| Repository Name | Manually specified | Auto-uses project name (override available) |
+| Configuration Options | 18 options | 8 simplified options |
+| Use Case | Standalone repository | Attached to application project |
+| Repository Policies | Configurable cross-account access | Disabled (app-focused) |
+| Lifecycle Rules | Fully customizable | Opinionated for app containers (v*, prod*, staging*, dev*) |
+
+**Example Plugin Configuration:**
+
+```yaml
+# Minimal configuration - uses project name
+image_tag_mutability: IMMUTABLE
+encryption_type: KMS
+scan_on_push: true
+keep_image_count: 20
+```
 
 ## Usage Example
 

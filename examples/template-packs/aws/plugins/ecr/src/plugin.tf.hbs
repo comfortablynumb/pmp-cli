@@ -1,0 +1,65 @@
+terraform {
+  required_version = ">= 1.0"
+
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+  }
+}
+
+# Local variables for naming
+locals {
+  repository_name = var.repository_name_override != "" ? var.repository_name_override : var.project_name
+}
+
+{{#if (eq encryption_type "KMS")}}
+# KMS key for ECR encryption (auto-created for app containers)
+resource "aws_kms_key" "plugin_ecr" {
+  description             = "KMS key for ECR repository: ${local.repository_name}"
+  deletion_window_in_days = 10
+  enable_key_rotation     = var.enable_kms_key_rotation
+
+  tags = {
+    Name      = "ecr-${local.repository_name}"
+    ManagedBy = "pmp"
+    Plugin    = "aws/ecr"
+  }
+}
+
+resource "aws_kms_alias" "plugin_ecr" {
+  name          = "alias/ecr-${local.repository_name}"
+  target_key_id = aws_kms_key.plugin_ecr.key_id
+}
+{{/if}}
+
+# ECR Repository
+resource "aws_ecr_repository" "plugin_repo" {
+  name                 = local.repository_name
+  image_tag_mutability = var.image_tag_mutability
+  force_delete         = false
+
+  # Encryption configuration
+  encryption_configuration {
+    encryption_type = var.encryption_type
+    {{#if (eq encryption_type "KMS")}}
+    kms_key = aws_kms_key.plugin_ecr.arn
+    {{/if}}
+  }
+
+  # Image scanning configuration (enabled by default for security)
+  image_scanning_configuration {
+    scan_on_push = var.scan_on_push
+  }
+
+  tags = {
+    Name      = local.repository_name
+    ManagedBy = "pmp"
+    Plugin    = "aws/ecr"
+  }
+
+  lifecycle {
+    prevent_destroy = false
+  }
+}
