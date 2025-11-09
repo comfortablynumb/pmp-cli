@@ -1,0 +1,70 @@
+{{#if (eq enable_repository_policy "true")}}
+# ECR Repository Policy for access control
+resource "aws_ecr_repository_policy" "policy" {
+  repository = aws_ecr_repository.repo.name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = concat(
+      {{#if allowed_aws_account_ids}}
+      # Allow cross-account access
+      [
+        {
+          Sid    = "AllowCrossAccountPull"
+          Effect = "Allow"
+          Principal = {
+            AWS = [
+              for account_id in split(",", var.allowed_aws_account_ids) :
+              "arn:aws:iam::${trimspace(account_id)}:root"
+              if trimspace(account_id) != ""
+            ]
+          }
+          Action = [
+            "ecr:GetDownloadUrlForLayer",
+            "ecr:BatchGetImage",
+            "ecr:BatchCheckLayerAvailability",
+            "ecr:DescribeRepositories",
+            "ecr:GetRepositoryPolicy",
+            "ecr:ListImages"
+          ]
+        }
+      ],
+      {{else}}
+      [],
+      {{/if}}
+      {{#if allowed_iam_arns}}
+      # Allow specific IAM ARNs
+      [
+        {
+          Sid    = "AllowIAMAccess"
+          Effect = "Allow"
+          Principal = {
+            AWS = [
+              for arn in split(",", var.allowed_iam_arns) :
+              trimspace(arn)
+              if trimspace(arn) != ""
+            ]
+          }
+          Action = [
+            "ecr:GetDownloadUrlForLayer",
+            "ecr:BatchGetImage",
+            "ecr:BatchCheckLayerAvailability",
+            "ecr:PutImage",
+            "ecr:InitiateLayerUpload",
+            "ecr:UploadLayerPart",
+            "ecr:CompleteLayerUpload",
+            "ecr:DescribeRepositories",
+            "ecr:GetRepositoryPolicy",
+            "ecr:ListImages"
+          ]
+        }
+      ]
+      {{else}}
+      []
+      {{/if}}
+    )
+  })
+
+  depends_on = [aws_ecr_repository.repo]
+}
+{{/if}}

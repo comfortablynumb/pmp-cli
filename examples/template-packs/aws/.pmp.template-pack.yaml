@@ -1,0 +1,6 @@
+apiVersion: pmp.io/v1
+kind: TemplatePack
+metadata:
+  name: aws
+  description: AWS infrastructure templates for common services and resources
+spec: {}

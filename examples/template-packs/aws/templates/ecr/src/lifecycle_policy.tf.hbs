@@ -1,0 +1,53 @@
+{{#if (eq enable_lifecycle_policy "true")}}
+# ECR Lifecycle Policy for automatic image cleanup
+resource "aws_ecr_lifecycle_policy" "policy" {
+  repository = aws_ecr_repository.repo.name
+
+  policy = jsonencode({
+    rules = concat(
+      # Rule for tagged images
+      {{#if (or (eq lifecycle_tag_status "tagged") (eq lifecycle_tag_status "any"))}}
+      [
+        {
+          rulePriority = 1
+          description  = "Keep only {{keep_image_count}} tagged images with prefix '{{lifecycle_tag_prefix}}'"
+          selection = {
+            tagStatus     = "tagged"
+            tagPrefixList = ["{{lifecycle_tag_prefix}}"]
+            countType     = "imageCountMoreThan"
+            countNumber   = {{keep_image_count}}
+          }
+          action = {
+            type = "expire"
+          }
+        }
+      ],
+      {{else}}
+      [],
+      {{/if}}
+      # Rule for untagged images
+      {{#if (or (eq lifecycle_tag_status "untagged") (eq lifecycle_tag_status "any"))}}
+      [
+        {
+          rulePriority = 2
+          description  = "Expire untagged images after {{expire_untagged_after_days}} days"
+          selection = {
+            tagStatus   = "untagged"
+            countType   = "sinceImagePushed"
+            countUnit   = "days"
+            countNumber = {{expire_untagged_after_days}}
+          }
+          action = {
+            type = "expire"
+          }
+        }
+      ]
+      {{else}}
+      []
+      {{/if}}
+    )
+  })
+
+  depends_on = [aws_ecr_repository.repo]
+}
+{{/if}}

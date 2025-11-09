@@ -1,0 +1,199 @@
+apiVersion: pmp.io/v1
+kind: Template
+metadata:
+  name: repository
+  description: Create and manage a GitHub repository with comprehensive configuration options
+
+spec:
+  apiVersion: pmp.io/v1
+  kind: CodeRepository
+  executor: opentofu
+
+  inputs:
+    # Basic Settings
+    repository_name:
+      description: Repository name (must be unique within your organization/account)
+
+    description:
+      description: Repository description
+      default: ""
+
+    visibility:
+      description: Repository visibility level
+      enum_values:
+        - public
+        - private
+        - internal
+      default: private
+
+    homepage_url:
+      description: Repository homepage URL
+      default: ""
+
+    # Repository Features
+    has_issues:
+      description: Enable issues for this repository
+      default: "true"
+
+    has_wiki:
+      description: Enable wiki for this repository
+      default: "false"
+
+    has_projects:
+      description: Enable projects for this repository
+      default: "false"
+
+    has_discussions:
+      description: Enable discussions for this repository
+      default: "false"
+
+    has_downloads:
+      description: Enable downloads feature for this repository
+      default: "true"
+
+    # Initialization Options
+    auto_init:
+      description: Initialize repository with README file
+      default: "true"
+
+    gitignore_template:
+      description: .gitignore template to use
+      enum_values:
+        - ""
+        - Node
+        - Python
+        - Go
+        - Rust
+        - Java
+        - Ruby
+        - Terraform
+        - VisualStudio
+        - VisualStudioCode
+        - JetBrains
+        - Vim
+      default: ""
+
+    license_template:
+      description: License template to use
+      enum_values:
+        - ""
+        - mit
+        - apache-2.0
+        - gpl-3.0
+        - bsd-2-clause
+        - bsd-3-clause
+        - mpl-2.0
+        - lgpl-3.0
+        - agpl-3.0
+        - unlicense
+      default: ""
+
+    default_branch:
+      description: Default branch name
+      default: main
+
+    # Merge Settings
+    allow_merge_commit:
+      description: Allow merge commits
+      default: "true"
+
+    allow_squash_merge:
+      description: Allow squash merging
+      default: "true"
+
+    allow_rebase_merge:
+      description: Allow rebase merging
+      default: "true"
+
+    allow_auto_merge:
+      description: Allow auto-merge on pull requests
+      default: "false"
+
+    delete_branch_on_merge:
+      description: Automatically delete head branches after pull requests are merged
+      default: "true"
+
+    # Topics and Metadata
+    topics:
+      description: Repository topics (comma-separated, lowercase, use hyphens)
+      default: ""
+
+    is_template:
+      description: Mark this repository as a template repository
+      default: "false"
+
+    archived:
+      description: Archive this repository (read-only)
+      default: "false"
+
+    # Security Settings
+    vulnerability_alerts:
+      description: Enable security vulnerability alerts
+      default: "true"
+
+    # Branch Protection
+    enable_branch_protection:
+      description: Enable branch protection rules for the default branch
+      default: "false"
+
+    require_pull_request_reviews:
+      description: Require pull request reviews before merging
+      default: "true"
+
+    required_approving_review_count:
+      description: Number of required approving reviews
+      enum_values:
+        - 1
+        - 2
+        - 3
+        - 4
+        - 5
+        - 6
+      default: 1
+
+    require_code_owner_reviews:
+      description: Require review from code owners
+      default: "false"
+
+    dismiss_stale_reviews:
+      description: Dismiss stale pull request reviews when new commits are pushed
+      default: "true"
+
+    require_status_checks:
+      description: Require status checks to pass before merging
+      default: "false"
+
+    status_check_contexts:
+      description: Required status check contexts (comma-separated)
+      default: ""
+
+    enforce_admins:
+      description: Enforce branch protection rules for administrators
+      default: "false"
+
+    require_signed_commits:
+      description: Require signed commits
+      default: "false"
+
+    require_linear_history:
+      description: Require linear history (no merge commits)
+      default: "false"
+
+    # Access Management
+    enable_team_access:
+      description: Enable team-based access management
+      default: "false"
+
+    teams:
+      description: Team access configuration (format - team-name:permission,another-team:permission)
+      default: ""
+
+    enable_collaborator_access:
+      description: Enable individual collaborator access management
+      default: "false"
+
+    collaborators:
+      description: Collaborator access configuration (format - username:permission,another-user:permission)
+      default: ""
+
+  environments: {}

@@ -1,0 +1,105 @@
+apiVersion: pmp.io/v1
+kind: Template
+metadata:
+  name: ecr
+  description: Create and manage AWS ECR (Elastic Container Registry) repositories for Docker images
+
+spec:
+  apiVersion: pmp.io/v1
+  kind: ContainerRegistry
+  executor: opentofu
+
+  inputs:
+    # Basic Settings
+    repository_name:
+      description: ECR repository name (must be unique within AWS account and region)
+
+    image_tag_mutability:
+      description: Tag mutability setting for the repository
+      enum_values:
+        - MUTABLE
+        - IMMUTABLE
+      default: MUTABLE
+
+    force_delete:
+      description: Allow repository deletion even if it contains images
+      default: "false"
+
+    # Encryption Settings
+    encryption_type:
+      description: Encryption type for images at rest
+      enum_values:
+        - AES256
+        - KMS
+      default: AES256
+
+    kms_key_arn:
+      description: ARN of KMS key for encryption (only used when encryption_type is KMS)
+      default: ""
+
+    enable_kms_key_rotation:
+      description: Enable automatic key rotation for KMS keys (only when no custom KMS key is provided)
+      default: "true"
+
+    # Image Scanning
+    scan_on_push:
+      description: Enable automatic image scanning when images are pushed
+      default: "true"
+
+    # Lifecycle Policy Settings
+    enable_lifecycle_policy:
+      description: Enable lifecycle policy to automatically clean up old images
+      default: "true"
+
+    keep_image_count:
+      description: Number of tagged images to retain (for lifecycle policy)
+      enum_values:
+        - 5
+        - 10
+        - 15
+        - 20
+        - 30
+        - 50
+      default: 10
+
+    lifecycle_tag_prefix:
+      description: Tag prefix for lifecycle policy rules (e.g., 'v' for v1.0.0, v1.1.0)
+      default: v
+
+    lifecycle_tag_status:
+      description: Apply lifecycle rules to which tag types
+      enum_values:
+        - tagged
+        - untagged
+        - any
+      default: tagged
+
+    expire_untagged_after_days:
+      description: Number of days to keep untagged images before expiring them
+      enum_values:
+        - 1
+        - 3
+        - 7
+        - 14
+        - 30
+      default: 7
+
+    # Repository Policy Settings
+    enable_repository_policy:
+      description: Enable repository policy for cross-account or IAM-based access
+      default: "false"
+
+    allowed_aws_account_ids:
+      description: Comma-separated list of AWS account IDs allowed to pull images (requires enable_repository_policy)
+      default: ""
+
+    allowed_iam_arns:
+      description: Comma-separated list of IAM ARNs allowed to access repository (requires enable_repository_policy)
+      default: ""
+
+    # Tagging
+    repository_tags:
+      description: Repository tags as comma-separated key:value pairs (e.g., Environment:prod,Team:platform)
+      default: ""
+
+  environments: {}

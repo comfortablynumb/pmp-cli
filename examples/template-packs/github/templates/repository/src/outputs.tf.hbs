@@ -1,0 +1,151 @@
+# Repository Information
+output "repository_name" {
+  description = "The name of the repository"
+  value       = github_repository.repo.name
+}
+
+output "repository_full_name" {
+  description = "The full name of the repository (owner/repo)"
+  value       = github_repository.repo.full_name
+}
+
+output "repository_id" {
+  description = "The repository ID"
+  value       = github_repository.repo.repo_id
+}
+
+output "repository_node_id" {
+  description = "The repository node ID"
+  value       = github_repository.repo.node_id
+}
+
+# URLs
+output "html_url" {
+  description = "The URL to the repository on GitHub"
+  value       = github_repository.repo.html_url
+}
+
+output "ssh_clone_url" {
+  description = "The SSH clone URL"
+  value       = github_repository.repo.ssh_clone_url
+}
+
+output "http_clone_url" {
+  description = "The HTTPS clone URL"
+  value       = github_repository.repo.http_clone_url
+}
+
+output "git_clone_url" {
+  description = "The git:// clone URL"
+  value       = github_repository.repo.git_clone_url
+}
+
+# Configuration
+output "default_branch" {
+  description = "The default branch name"
+  value       = github_repository.repo.default_branch
+}
+
+output "visibility" {
+  description = "Repository visibility"
+  value       = github_repository.repo.visibility
+}
+
+{{#if topics}}
+output "topics" {
+  description = "Repository topics"
+  value       = github_repository.repo.topics
+}
+{{/if}}
+
+# Useful Commands
+output "clone_commands" {
+  description = "Clone commands for this repository"
+  value = <<-EOT
+    # Clone via SSH
+    git clone ${github_repository.repo.ssh_clone_url}
+
+    # Clone via HTTPS
+    git clone ${github_repository.repo.http_clone_url}
+
+    # Clone using GitHub CLI
+    gh repo clone ${github_repository.repo.full_name}
+  EOT
+}
+
+output "gh_cli_commands" {
+  description = "Useful GitHub CLI commands for managing this repository"
+  value = <<-EOT
+    # View repository details
+    gh repo view ${github_repository.repo.full_name}
+
+    # Open repository in browser
+    gh repo view ${github_repository.repo.full_name} --web
+
+    # List pull requests
+    gh pr list --repo ${github_repository.repo.full_name}
+
+    # List issues
+    gh issue list --repo ${github_repository.repo.full_name}
+
+    {{#if (eq enable_branch_protection "true")}}
+    # View branch protection rules
+    gh api repos/${github_repository.repo.full_name}/branches/{{default_branch}}/protection
+    {{/if}}
+
+    # Edit repository settings
+    gh repo edit ${github_repository.repo.full_name}
+
+    # Archive repository
+    gh repo archive ${github_repository.repo.full_name}
+
+    # Delete repository (use with caution!)
+    gh repo delete ${github_repository.repo.full_name}
+  EOT
+}
+
+output "repository_settings" {
+  description = "Current repository settings"
+  value = {
+    name                   = github_repository.repo.name
+    visibility             = github_repository.repo.visibility
+    has_issues             = github_repository.repo.has_issues
+    has_wiki               = github_repository.repo.has_wiki
+    has_projects           = github_repository.repo.has_projects
+    has_discussions        = github_repository.repo.has_discussions
+    has_downloads          = github_repository.repo.has_downloads
+    allow_merge_commit     = github_repository.repo.allow_merge_commit
+    allow_squash_merge     = github_repository.repo.allow_squash_merge
+    allow_rebase_merge     = github_repository.repo.allow_rebase_merge
+    allow_auto_merge       = github_repository.repo.allow_auto_merge
+    delete_branch_on_merge = github_repository.repo.delete_branch_on_merge
+    is_template            = github_repository.repo.is_template
+    archived               = github_repository.repo.archived
+    vulnerability_alerts   = github_repository.repo.vulnerability_alerts
+  }
+}
+
+{{#if (eq enable_branch_protection "true")}}
+output "branch_protection_enabled" {
+  description = "Branch protection is enabled for the default branch"
+  value       = true
+}
+{{/if}}
+
+{{#if (eq enable_team_access "true")}}
+{{#if teams}}
+output "team_access_configured" {
+  description = "Teams with access to this repository"
+  value       = "Team access has been configured as specified"
+}
+{{/if}}
+{{/if}}
+
+{{#if (eq enable_collaborator_access "true")}}
+{{#if collaborators}}
+output "collaborator_access_configured" {
+  description = "Collaborators with access to this repository"
+  value       = "Collaborator access has been configured as specified"
+}
+{{/if}}
+{{/if}}

@@ -1,0 +1,45 @@
+{{#if (eq enable_team_access "true")}}
+{{#if teams}}
+# Team access management
+locals {
+  team_access = {
+    for entry in split(",", var.teams) :
+    split(":", trimspace(entry))[0] => split(":", trimspace(entry))[1]
+    if trimspace(entry) != "" && length(split(":", trimspace(entry))) == 2
+  }
+}
+
+resource "github_team_repository" "team_access" {
+  for_each = local.team_access
+
+  team_id    = each.key
+  repository = github_repository.repo.name
+  permission = each.value
+
+  depends_on = [github_repository.repo]
+}
+{{/if}}
+{{/if}}
+
+{{#if (eq enable_collaborator_access "true")}}
+{{#if collaborators}}
+# Individual collaborator access management
+locals {
+  collaborator_access = {
+    for entry in split(",", var.collaborators) :
+    split(":", trimspace(entry))[0] => split(":", trimspace(entry))[1]
+    if trimspace(entry) != "" && length(split(":", trimspace(entry))) == 2
+  }
+}
+
+resource "github_repository_collaborator" "collaborator_access" {
+  for_each = local.collaborator_access
+
+  repository = github_repository.repo.name
+  username   = each.key
+  permission = each.value
+
+  depends_on = [github_repository.repo]
+}
+{{/if}}
+{{/if}}
