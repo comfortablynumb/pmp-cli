@@ -1,0 +1,134 @@
+variable "project_name" {
+  description = "S3 bucket name prefix"
+  type        = string
+}
+
+variable "force_destroy" {
+  description = "Allow deletion of non-empty bucket"
+  type        = bool
+}
+
+variable "enable_versioning" {
+  description = "Enable bucket versioning"
+  type        = bool
+}
+
+variable "encryption_type" {
+  description = "Server-side encryption type"
+  type        = string
+}
+
+variable "enable_bucket_key" {
+  description = "Use S3 Bucket Keys"
+  type        = bool
+}
+
+variable "block_public_acls" {
+  description = "Block public ACLs"
+  type        = bool
+}
+
+variable "block_public_policy" {
+  description = "Block public bucket policies"
+  type        = bool
+}
+
+variable "ignore_public_acls" {
+  description = "Ignore public ACLs"
+  type        = bool
+}
+
+variable "restrict_public_buckets" {
+  description = "Restrict public bucket access"
+  type        = bool
+}
+
+variable "enable_lifecycle_rules" {
+  description = "Enable lifecycle rules"
+  type        = bool
+}
+
+variable "transition_to_ia_days" {
+  description = "Days before transitioning to IA"
+  type        = number
+}
+
+variable "transition_to_glacier_days" {
+  description = "Days before transitioning to Glacier"
+  type        = number
+}
+
+variable "transition_to_deep_archive_days" {
+  description = "Days before transitioning to Deep Archive"
+  type        = number
+}
+
+variable "expire_noncurrent_versions_days" {
+  description = "Days before expiring noncurrent versions"
+  type        = number
+}
+
+variable "expire_delete_markers" {
+  description = "Remove expired delete markers"
+  type        = bool
+}
+
+variable "enable_access_logging" {
+  description = "Enable access logging"
+  type        = bool
+}
+
+variable "log_bucket_name" {
+  description = "Target bucket for access logs"
+  type        = string
+}
+
+variable "enable_cors" {
+  description = "Enable CORS configuration"
+  type        = bool
+}
+
+variable "cors_allowed_origins" {
+  description = "Comma-separated allowed origins"
+  type        = string
+}
+
+variable "cors_allowed_methods" {
+  description = "Comma-separated allowed methods"
+  type        = string
+}
+
+variable "cors_max_age_seconds" {
+  description = "Cache preflight response time"
+  type        = number
+}
+
+variable "enable_intelligent_tiering" {
+  description = "Enable Intelligent-Tiering"
+  type        = bool
+}
+
+variable "enable_object_lock" {
+  description = "Enable Object Lock"
+  type        = bool
+}
+
+variable "enable_acceleration" {
+  description = "Enable Transfer Acceleration"
+  type        = bool
+}
+
+variable "enable_replication" {
+  description = "Enable cross-region replication"
+  type        = bool
+}
+
+variable "replication_destination_bucket" {
+  description = "Destination bucket ARN for replication"
+  type        = string
+}
+
+variable "replication_destination_region" {
+  description = "Destination region for replication"
+  type        = string
+}

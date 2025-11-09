@@ -1,0 +1,375 @@
+{{#if (eq resource_type "knowledge-base")}}
+output "knowledge_base_id" {
+  description = "Bedrock Knowledge Base ID"
+  value       = aws_bedrockagent_knowledge_base.plugin_bedrock.id
+}
+
+output "knowledge_base_arn" {
+  description = "ARN of the Knowledge Base"
+  value       = aws_bedrockagent_knowledge_base.plugin_bedrock.arn
+}
+
+output "data_source_id" {
+  description = "Data source ID"
+  value       = aws_bedrockagent_data_source.plugin_bedrock.id
+}
+
+{{#if (eq vector_store_type "opensearch-serverless")}}
+output "opensearch_collection_id" {
+  description = "OpenSearch Serverless collection ID"
+  value       = aws_opensearchserverless_collection.plugin_bedrock.id
+}
+
+output "opensearch_collection_endpoint" {
+  description = "OpenSearch Serverless collection endpoint"
+  value       = aws_opensearchserverless_collection.plugin_bedrock.collection_endpoint
+}
+{{/if}}
+
+output "kb_role_arn" {
+  description = "IAM role ARN for Knowledge Base"
+  value       = aws_iam_role.plugin_bedrock_kb.arn
+}
+
+{{else if (eq resource_type "agent")}}
+output "agent_id" {
+  description = "Bedrock Agent ID"
+  value       = aws_bedrockagent_agent.plugin_bedrock.id
+}
+
+output "agent_arn" {
+  description = "ARN of the Bedrock Agent"
+  value       = aws_bedrockagent_agent.plugin_bedrock.agent_arn
+}
+
+output "agent_role_arn" {
+  description = "IAM role ARN for Agent"
+  value       = aws_iam_role.plugin_bedrock_agent.arn
+}
+
+{{else if (eq resource_type "guardrails")}}
+output "guardrail_id" {
+  description = "Bedrock Guardrail ID"
+  value       = aws_bedrock_guardrail.plugin_bedrock.id
+}
+
+output "guardrail_arn" {
+  description = "ARN of the Bedrock Guardrail"
+  value       = aws_bedrock_guardrail.plugin_bedrock.guardrail_arn
+}
+
+output "guardrail_version" {
+  description = "Guardrail version"
+  value       = aws_bedrock_guardrail.plugin_bedrock.version
+}
+{{/if}}
+
+output "foundation_model" {
+  description = "Foundation model being used"
+  value       = var.foundation_model
+}
+
+{{#if enable_cloudwatch_logs}}
+output "log_group_name" {
+  description = "CloudWatch Log Group name"
+  value       = aws_cloudwatch_log_group.plugin_bedrock.name
+}
+{{/if}}
+
+# Connection information
+output "connection_info" {
+  description = "How to use this Bedrock resource"
+  value = <<-EOT
+    Bedrock Resource: ${var.project_name}
+    Type: ${var.resource_type}
+    Region: ${data.aws_region.current.name}
+    Foundation Model: ${var.foundation_model}
+
+    {{#if (eq resource_type "knowledge-base")}}
+    # Knowledge Base
+    ID: ${aws_bedrockagent_knowledge_base.plugin_bedrock.id}
+    ARN: ${aws_bedrockagent_knowledge_base.plugin_bedrock.arn}
+
+    # Query the knowledge base:
+    import boto3
+
+    bedrock_agent = boto3.client('bedrock-agent-runtime', region_name='${data.aws_region.current.name}')
+
+    response = bedrock_agent.retrieve(
+        knowledgeBaseId='${aws_bedrockagent_knowledge_base.plugin_bedrock.id}',
+        retrievalQuery={
+            'text': 'Your question here'
+        }
+    )
+
+    # Retrieve and generate (RAG):
+    response = bedrock_agent.retrieve_and_generate(
+        input={
+            'text': 'Your question here'
+        },
+        retrieveAndGenerateConfiguration={
+            'type': 'KNOWLEDGE_BASE',
+            'knowledgeBaseConfiguration': {
+                'knowledgeBaseId': '${aws_bedrockagent_knowledge_base.plugin_bedrock.id}',
+                'modelArn': 'arn:aws:bedrock:${data.aws_region.current.name}::foundation-model/${var.foundation_model}'
+            }
+        }
+    )
+
+    # Sync data source:
+    aws bedrock-agent start-ingestion-job \
+      --knowledge-base-id ${aws_bedrockagent_knowledge_base.plugin_bedrock.id} \
+      --data-source-id ${aws_bedrockagent_data_source.plugin_bedrock.id}
+
+    {{#if (eq vector_store_type "opensearch-serverless")}}
+    # OpenSearch Collection:
+    Endpoint: ${aws_opensearchserverless_collection.plugin_bedrock.collection_endpoint}
+    Dashboard: ${aws_opensearchserverless_collection.plugin_bedrock.dashboard_endpoint}
+    {{/if}}
+
+    {{else if (eq resource_type "agent")}}
+    # Bedrock Agent
+    ID: ${aws_bedrockagent_agent.plugin_bedrock.id}
+    ARN: ${aws_bedrockagent_agent.plugin_bedrock.agent_arn}
+
+    # Invoke the agent:
+    import boto3
+
+    bedrock_agent = boto3.client('bedrock-agent-runtime', region_name='${data.aws_region.current.name}')
+
+    response = bedrock_agent.invoke_agent(
+        agentId='${aws_bedrockagent_agent.plugin_bedrock.id}',
+        agentAliasId='TSTALIASID',  # Use actual alias ID
+        sessionId='session-123',
+        inputText='Your question or command here'
+    )
+
+    # Process response
+    for event in response['completion']:
+        if 'chunk' in event:
+            print(event['chunk']['bytes'].decode())
+
+    # AWS CLI - Invoke agent:
+    aws bedrock-agent-runtime invoke-agent \
+      --agent-id ${aws_bedrockagent_agent.plugin_bedrock.id} \
+      --agent-alias-id TSTALIASID \
+      --session-id session-123 \
+      --input-text "Your question here"
+
+    {{else if (eq resource_type "guardrails")}}
+    # Bedrock Guardrails
+    ID: ${aws_bedrock_guardrail.plugin_bedrock.id}
+    ARN: ${aws_bedrock_guardrail.plugin_bedrock.guardrail_arn}
+    Version: ${aws_bedrock_guardrail.plugin_bedrock.version}
+
+    # Use guardrails with Bedrock models:
+    import boto3
+
+    bedrock_runtime = boto3.client('bedrock-runtime', region_name='${data.aws_region.current.name}')
+
+    response = bedrock_runtime.invoke_model(
+        modelId='${var.foundation_model}',
+        body=json.dumps({
+            'prompt': 'Your prompt here',
+            'max_tokens': 500
+        }),
+        guardrailIdentifier='${aws_bedrock_guardrail.plugin_bedrock.guardrail_arn}',
+        guardrailVersion='${aws_bedrock_guardrail.plugin_bedrock.version}'
+    )
+    {{/if}}
+
+    # Console:
+    https://console.aws.amazon.com/bedrock/home?region=${data.aws_region.current.name}
+  EOT
+}
+
+# SDK usage examples
+output "usage_examples" {
+  description = "Code examples for using Bedrock"
+  value = <<-EOT
+    {{#if (eq resource_type "knowledge-base")}}
+    # Python SDK - Complete RAG example:
+    import boto3
+    import json
+
+    bedrock_agent = boto3.client('bedrock-agent-runtime', region_name='${data.aws_region.current.name}')
+
+    def query_knowledge_base(question):
+        response = bedrock_agent.retrieve_and_generate(
+            input={'text': question},
+            retrieveAndGenerateConfiguration={
+                'type': 'KNOWLEDGE_BASE',
+                'knowledgeBaseConfiguration': {
+                    'knowledgeBaseId': '${aws_bedrockagent_knowledge_base.plugin_bedrock.id}',
+                    'modelArn': 'arn:aws:bedrock:${data.aws_region.current.name}::foundation-model/${var.foundation_model}'
+                }
+            }
+        )
+        return response['output']['text']
+
+    # Example usage
+    answer = query_knowledge_base("What is the main topic of the documents?")
+    print(answer)
+
+    # Node.js SDK:
+    const { BedrockAgentRuntimeClient, RetrieveAndGenerateCommand } = require("@aws-sdk/client-bedrock-agent-runtime");
+
+    const client = new BedrockAgentRuntimeClient({ region: "${data.aws_region.current.name}" });
+
+    const command = new RetrieveAndGenerateCommand({
+      input: { text: "Your question here" },
+      retrieveAndGenerateConfiguration: {
+        type: "KNOWLEDGE_BASE",
+        knowledgeBaseConfiguration: {
+          knowledgeBaseId: "${aws_bedrockagent_knowledge_base.plugin_bedrock.id}",
+          modelArn: "arn:aws:bedrock:${data.aws_region.current.name}::foundation-model/${var.foundation_model}"
+        }
+      }
+    });
+
+    const response = await client.send(command);
+    console.log(response.output.text);
+
+    {{else if (eq resource_type "agent")}}
+    # Python SDK - Agent invocation:
+    import boto3
+    import json
+
+    bedrock_agent = boto3.client('bedrock-agent-runtime', region_name='${data.aws_region.current.name}')
+
+    def invoke_agent(prompt, session_id='default-session'):
+        response = bedrock_agent.invoke_agent(
+            agentId='${aws_bedrockagent_agent.plugin_bedrock.id}',
+            agentAliasId='TSTALIASID',
+            sessionId=session_id,
+            inputText=prompt
+        )
+
+        completion = ""
+        for event in response.get('completion', []):
+            chunk = event.get('chunk')
+            if chunk:
+                completion += chunk.get('bytes', b'').decode()
+
+        return completion
+
+    # Multi-turn conversation
+    session_id = "user-123-session"
+    response1 = invoke_agent("What can you help me with?", session_id)
+    response2 = invoke_agent("Tell me more about that", session_id)
+
+    {{else if (eq resource_type "guardrails")}}
+    # Python SDK - Using guardrails:
+    import boto3
+    import json
+
+    bedrock_runtime = boto3.client('bedrock-runtime', region_name='${data.aws_region.current.name}')
+
+    def invoke_with_guardrails(prompt):
+        body = json.dumps({
+            'anthropic_version': 'bedrock-2023-05-31',
+            'max_tokens': 1000,
+            'messages': [
+                {
+                    'role': 'user',
+                    'content': prompt
+                }
+            ]
+        })
+
+        response = bedrock_runtime.invoke_model(
+            modelId='${var.foundation_model}',
+            body=body,
+            guardrailIdentifier='${aws_bedrock_guardrail.plugin_bedrock.guardrail_arn}',
+            guardrailVersion='${aws_bedrock_guardrail.plugin_bedrock.version}'
+        )
+
+        result = json.loads(response['body'].read())
+        return result['content'][0]['text']
+
+    # Test with various prompts
+    safe_response = invoke_with_guardrails("Explain quantum computing")
+    {{/if}}
+  EOT
+}
+
+# Best practices and tips
+output "best_practices" {
+  description = "Best practices for using Bedrock"
+  value = <<-EOT
+    Best Practices:
+
+    {{#if (eq resource_type "knowledge-base")}}
+    1. Data Preparation:
+       - Use clear, well-structured documents
+       - Keep documents focused and concise
+       - Include metadata for better retrieval
+
+    2. Chunking Strategy:
+       - Default chunk size: 300 tokens
+       - Consider overlap between chunks
+       - Test different chunking strategies
+
+    3. Sync Data Source:
+       # Regular sync to keep knowledge base updated
+       aws bedrock-agent start-ingestion-job \
+         --knowledge-base-id ${aws_bedrockagent_knowledge_base.plugin_bedrock.id} \
+         --data-source-id ${aws_bedrockagent_data_source.plugin_bedrock.id}
+
+    4. Monitor Performance:
+       - Track retrieval accuracy
+       - Monitor latency and costs
+       - Optimize based on query patterns
+
+    {{else if (eq resource_type "agent")}}
+    1. Instruction Design:
+       - Be specific and clear
+       - Define agent's role and capabilities
+       - Include examples of desired behavior
+
+    2. Session Management:
+       - Use consistent session IDs for conversations
+       - Session TTL: ${var.agent_idle_session_ttl} seconds
+       - Clean up old sessions
+
+    3. Error Handling:
+       - Implement retry logic
+       - Handle streaming responses properly
+       - Validate agent responses
+
+    {{else if (eq resource_type "guardrails")}}
+    1. Content Filtering:
+       - Current strength: ${var.content_filter_strength}
+       - Test with various inputs
+       - Balance safety vs functionality
+
+    2. PII Protection:
+       {{#if enable_pii_detection}}
+       - Blocking: ${var.pii_entities_to_block}
+       - Review logs for false positives
+       {{/if}}
+
+    3. Testing:
+       - Test guardrails with edge cases
+       - Monitor blocked content
+       - Adjust filters based on use case
+    {{/if}}
+
+    4. Cost Optimization:
+       {{#if enable_provisioned_throughput}}
+       - Using provisioned throughput
+       - Monitor utilization
+       {{else}}
+       - Using on-demand pricing
+       - Consider provisioned for consistent workloads
+       {{/if}}
+
+    5. Monitoring:
+       {{#if enable_cloudwatch_logs}}
+       - CloudWatch logs enabled
+       - Review logs: /aws/bedrock/${local.resource_name}
+       {{/if}}
+       - Track token usage and costs
+       - Monitor error rates
+  EOT
+}

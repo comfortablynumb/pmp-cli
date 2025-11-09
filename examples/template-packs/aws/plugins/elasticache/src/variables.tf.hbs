@@ -1,0 +1,79 @@
+variable "project_name" {
+  description = "ElastiCache cluster name"
+  type        = string
+}
+
+variable "engine" {
+  description = "Cache engine type (redis or memcached)"
+  type        = string
+}
+
+variable "engine_version" {
+  description = "Engine version"
+  type        = string
+}
+
+variable "node_type" {
+  description = "Node instance type"
+  type        = string
+}
+
+variable "num_cache_nodes" {
+  description = "Number of cache nodes"
+  type        = number
+}
+
+variable "parameter_group_family" {
+  description = "Parameter group family"
+  type        = string
+}
+
+variable "port" {
+  description = "Port number"
+  type        = number
+}
+
+variable "at_rest_encryption_enabled" {
+  description = "Enable encryption at rest"
+  type        = bool
+}
+
+variable "transit_encryption_enabled" {
+  description = "Enable encryption in transit"
+  type        = bool
+}
+
+variable "auth_token_enabled" {
+  description = "Enable Redis AUTH token"
+  type        = bool
+}
+
+variable "snapshot_retention_limit" {
+  description = "Number of days to retain snapshots"
+  type        = number
+}
+
+variable "snapshot_window" {
+  description = "Daily snapshot time range"
+  type        = string
+}
+
+variable "maintenance_window" {
+  description = "Weekly maintenance time range"
+  type        = string
+}
+
+variable "auto_minor_version_upgrade" {
+  description = "Enable automatic minor version upgrades"
+  type        = bool
+}
+
+variable "subnet_ids" {
+  description = "Comma-separated subnet IDs"
+  type        = string
+}
+
+variable "security_group_ids" {
+  description = "Comma-separated security group IDs"
+  type        = string
+}

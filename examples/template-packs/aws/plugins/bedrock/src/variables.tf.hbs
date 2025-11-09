@@ -1,0 +1,139 @@
+variable "project_name" {
+  description = "Bedrock resource name prefix"
+  type        = string
+}
+
+variable "resource_type" {
+  description = "Type of Bedrock resource"
+  type        = string
+}
+
+variable "foundation_model" {
+  description = "Foundation model ID"
+  type        = string
+}
+
+variable "kb_embedding_model" {
+  description = "Embedding model for knowledge base"
+  type        = string
+}
+
+variable "kb_vector_dimensions" {
+  description = "Vector dimensions"
+  type        = number
+}
+
+variable "kb_data_source_type" {
+  description = "Data source type"
+  type        = string
+}
+
+variable "kb_s3_bucket_name" {
+  description = "S3 bucket name"
+  type        = string
+}
+
+variable "kb_s3_prefix" {
+  description = "S3 prefix"
+  type        = string
+}
+
+variable "vector_store_type" {
+  description = "Vector store type"
+  type        = string
+}
+
+variable "opensearch_collection_name" {
+  description = "OpenSearch collection name"
+  type        = string
+}
+
+variable "opensearch_index_name" {
+  description = "OpenSearch index name"
+  type        = string
+}
+
+variable "agent_instruction" {
+  description = "Agent instructions"
+  type        = string
+}
+
+variable "agent_idle_session_ttl" {
+  description = "Agent session TTL"
+  type        = number
+}
+
+variable "enable_agent_action_groups" {
+  description = "Enable action groups"
+  type        = bool
+}
+
+variable "guardrail_blocked_messaging" {
+  description = "Blocked message"
+  type        = string
+}
+
+variable "enable_content_filters" {
+  description = "Enable content filters"
+  type        = bool
+}
+
+variable "content_filter_strength" {
+  description = "Filter strength"
+  type        = string
+}
+
+variable "enable_pii_detection" {
+  description = "Enable PII detection"
+  type        = bool
+}
+
+variable "pii_entities_to_block" {
+  description = "PII entities to block"
+  type        = string
+}
+
+variable "enable_topic_filters" {
+  description = "Enable topic filters"
+  type        = bool
+}
+
+variable "blocked_topics" {
+  description = "Blocked topics"
+  type        = string
+}
+
+variable "enable_cloudwatch_logs" {
+  description = "Enable CloudWatch logs"
+  type        = bool
+}
+
+variable "log_retention_days" {
+  description = "Log retention days"
+  type        = number
+}
+
+variable "enable_model_invocation_logging" {
+  description = "Enable model invocation logging"
+  type        = bool
+}
+
+variable "enable_provisioned_throughput" {
+  description = "Enable provisioned throughput"
+  type        = bool
+}
+
+variable "provisioned_model_units" {
+  description = "Provisioned model units"
+  type        = number
+}
+
+variable "environment" {
+  description = "Environment name"
+  type        = string
+}
+
+variable "application" {
+  description = "Application name"
+  type        = string
+}

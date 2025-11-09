@@ -1,0 +1,266 @@
+terraform {
+  required_version = ">= 1.0"
+
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+  }
+}
+
+data "aws_region" "current" {}
+
+locals {
+  distribution_id = var.project_name
+
+  # Parse domain names
+  domain_names_list = var.domain_names != "" ? split(",", var.domain_names) : []
+
+  # Parse geo restriction locations
+  geo_locations_list = var.geo_restriction_locations != "" ? split(",", var.geo_restriction_locations) : []
+
+  # Managed cache policy IDs
+  cache_policy_ids = {
+    "CachingOptimized"                           = "658327ea-f89d-4fab-a63d-7e88639e58f6"
+    "CachingDisabled"                            = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad"
+    "CachingOptimizedForUncompressedObjects"     = "b2884449-e4de-46a7-ac36-70bc7f1ddd6d"
+    "Elemental-MediaPackage"                     = "08627262-05a9-4f76-9ded-b50ca2e3a84f"
+  }
+
+  # Origin ID
+  origin_id = "${var.project_name}-origin"
+
+  # S3 bucket domain format
+  s3_origin_domain = var.origin_type == "s3" ? "${var.origin_domain_name}.s3.amazonaws.com" : var.origin_domain_name
+}
+
+{{#if (eq origin_type "s3")}}
+{{#if s3_origin_access_control}}
+# Origin Access Control for S3
+resource "aws_cloudfront_origin_access_control" "plugin_cloudfront" {
+  name                              = "${var.project_name}-oac"
+  description                       = "Origin Access Control for ${var.project_name}"
+  origin_access_control_origin_type = "s3"
+  signing_behavior                  = "always"
+  signing_protocol                  = "sigv4"
+}
+{{/if}}
+{{/if}}
+
+# CloudFront Distribution
+resource "aws_cloudfront_distribution" "plugin_cloudfront" {
+  enabled             = true
+  is_ipv6_enabled     = var.enable_ipv6
+  comment             = "CloudFront distribution for ${var.project_name}"
+  default_root_object = var.default_root_object
+  price_class         = var.price_class
+  http_version        = var.http_version
+
+  {{#if enable_custom_domain}}
+  aliases = local.domain_names_list
+  {{/if}}
+
+  {{#if enable_waf}}
+  web_acl_id = var.waf_acl_id
+  {{/if}}
+
+  # Origin configuration
+  origin {
+    domain_name = local.s3_origin_domain
+    origin_id   = local.origin_id
+    origin_path = var.origin_path
+
+    {{#if (eq origin_type "s3")}}
+    {{#if s3_origin_access_control}}
+    origin_access_control_id = aws_cloudfront_origin_access_control.plugin_cloudfront.id
+    {{/if}}
+    {{else}}
+    # Custom origin configuration
+    custom_origin_config {
+      http_port                = 80
+      https_port               = 443
+      origin_protocol_policy   = var.origin_protocol_policy
+      origin_ssl_protocols     = ["TLSv1.2"]
+      origin_keepalive_timeout = 5
+      origin_read_timeout      = 30
+    }
+    {{/if}}
+  }
+
+  # Default cache behavior
+  default_cache_behavior {
+    allowed_methods  = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]
+    cached_methods   = ["GET", "HEAD", "OPTIONS"]
+    target_origin_id = local.origin_id
+
+    viewer_protocol_policy = var.viewer_protocol_policy
+    compress               = var.compress
+
+    {{#if (eq cache_policy "custom")}}
+    # Custom cache settings
+    min_ttl     = var.min_ttl
+    default_ttl = var.default_ttl
+    max_ttl     = var.max_ttl
+
+    forwarded_values {
+      query_string = false
+      cookies {
+        forward = "none"
+      }
+    }
+    {{else}}
+    # Use AWS managed cache policy
+    cache_policy_id = local.cache_policy_ids[var.cache_policy]
+    {{/if}}
+  }
+
+  {{#if enable_geo_restriction}}
+  # Geographic restrictions
+  restrictions {
+    geo_restriction {
+      restriction_type = var.geo_restriction_type
+      locations        = local.geo_locations_list
+    }
+  }
+  {{else}}
+  # No geographic restrictions
+  restrictions {
+    geo_restriction {
+      restriction_type = "none"
+    }
+  }
+  {{/if}}
+
+  # SSL/TLS configuration
+  viewer_certificate {
+    {{#if enable_custom_domain}}
+    acm_certificate_arn      = var.acm_certificate_arn
+    ssl_support_method       = var.ssl_support_method
+    minimum_protocol_version = var.minimum_protocol_version
+    {{else}}
+    cloudfront_default_certificate = true
+    {{/if}}
+  }
+
+  {{#if enable_custom_error_responses}}
+  # Custom error responses
+  custom_error_response {
+    error_code            = 404
+    response_code         = var.error_response_code
+    response_page_path    = var.error_404_response_page
+    error_caching_min_ttl = 300
+  }
+
+  custom_error_response {
+    error_code            = 403
+    response_code         = var.error_response_code
+    response_page_path    = var.error_403_response_page
+    error_caching_min_ttl = 300
+  }
+  {{/if}}
+
+  {{#if enable_logging}}
+  # Access logging
+  logging_config {
+    include_cookies = var.log_include_cookies
+    bucket          = "${var.log_bucket_name}.s3.amazonaws.com"
+    prefix          = var.log_prefix
+  }
+  {{/if}}
+
+  tags = {
+    Name      = var.project_name
+    ManagedBy = "pmp"
+    Plugin    = "aws/cloudfront"
+  }
+}
+
+{{#if (eq origin_type "s3")}}
+{{#if s3_origin_access_control}}
+# S3 bucket policy to allow CloudFront access
+data "aws_s3_bucket" "plugin_cloudfront_origin" {
+  bucket = var.origin_domain_name
+}
+
+data "aws_iam_policy_document" "plugin_cloudfront_s3_policy" {
+  statement {
+    sid    = "AllowCloudFrontServicePrincipal"
+    effect = "Allow"
+
+    principals {
+      type        = "Service"
+      identifiers = ["cloudfront.amazonaws.com"]
+    }
+
+    actions = [
+      "s3:GetObject"
+    ]
+
+    resources = [
+      "${data.aws_s3_bucket.plugin_cloudfront_origin.arn}/*"
+    ]
+
+    condition {
+      test     = "StringEquals"
+      variable = "AWS:SourceArn"
+      values   = [aws_cloudfront_distribution.plugin_cloudfront.arn]
+    }
+  }
+}
+
+resource "aws_s3_bucket_policy" "plugin_cloudfront_origin" {
+  bucket = data.aws_s3_bucket.plugin_cloudfront_origin.id
+  policy = data.aws_iam_policy_document.plugin_cloudfront_s3_policy.json
+}
+{{/if}}
+{{/if}}
+
+# CloudWatch alarms for monitoring
+resource "aws_cloudwatch_metric_alarm" "plugin_cloudfront_5xx_errors" {
+  alarm_name          = "${var.project_name}-cloudfront-5xx-errors"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 2
+  metric_name         = "5xxErrorRate"
+  namespace           = "AWS/CloudFront"
+  period              = 300
+  statistic           = "Average"
+  threshold           = 5
+  alarm_description   = "This metric monitors CloudFront 5xx error rate"
+  treat_missing_data  = "notBreaching"
+
+  dimensions = {
+    DistributionId = aws_cloudfront_distribution.plugin_cloudfront.id
+    Region         = "Global"
+  }
+
+  tags = {
+    Name      = "${var.project_name}-5xx-errors"
+    ManagedBy = "pmp"
+    Plugin    = "aws/cloudfront"
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "plugin_cloudfront_4xx_errors" {
+  alarm_name          = "${var.project_name}-cloudfront-4xx-errors"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 2
+  metric_name         = "4xxErrorRate"
+  namespace           = "AWS/CloudFront"
+  period              = 300
+  statistic           = "Average"
+  threshold           = 10
+  alarm_description   = "This metric monitors CloudFront 4xx error rate"
+  treat_missing_data  = "notBreaching"
+
+  dimensions = {
+    DistributionId = aws_cloudfront_distribution.plugin_cloudfront.id
+    Region         = "Global"
+  }
+
+  tags = {
+    Name      = "${var.project_name}-4xx-errors"
+    ManagedBy = "pmp"
+    Plugin    = "aws/cloudfront"
+  }
+}

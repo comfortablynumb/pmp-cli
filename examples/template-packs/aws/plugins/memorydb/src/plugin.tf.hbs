@@ -1,0 +1,179 @@
+terraform {
+  required_version = ">= 1.0"
+
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.0"
+    }
+  }
+}
+
+locals {
+  subnet_ids_list = var.subnet_ids != "" ? split(",", var.subnet_ids) : []
+  security_group_ids_list = var.security_group_ids != "" ? split(",", var.security_group_ids) : []
+
+  # Generate a unique cluster identifier
+  cluster_name = replace(lower(var.project_name), "_", "-")
+
+  # Use custom ACL or create default
+  acl_name = var.acl_name != "" ? var.acl_name : aws_memorydb_acl.plugin_memorydb[0].name
+}
+
+{{#if create_admin_user}}
+# Random password for admin user
+resource "random_password" "plugin_memorydb_admin_password" {
+  length  = 32
+  special = true
+  override_special = "!&#$^<>-"
+}
+{{/if}}
+
+# Subnet group for MemoryDB
+resource "aws_memorydb_subnet_group" "plugin_memorydb" {
+  count       = length(local.subnet_ids_list) > 0 ? 1 : 0
+  name        = "${local.cluster_name}-subnet-group"
+  subnet_ids  = local.subnet_ids_list
+  description = "Subnet group for ${var.project_name} MemoryDB cluster"
+
+  tags = {
+    Name      = "${var.project_name}-subnet-group"
+    ManagedBy = "pmp"
+    Plugin    = "aws/memorydb"
+  }
+}
+
+# Parameter group for MemoryDB configuration
+resource "aws_memorydb_parameter_group" "plugin_memorydb" {
+  name   = "${local.cluster_name}-params"
+  family = "memorydb_redis${var.engine_version}"
+
+  # Redis parameters
+  parameter {
+    name  = "maxmemory-policy"
+    value = "allkeys-lru"
+  }
+
+  parameter {
+    name  = "activedefrag"
+    value = "yes"
+  }
+
+  tags = {
+    Name      = "${var.project_name}-params"
+    ManagedBy = "pmp"
+    Plugin    = "aws/memorydb"
+  }
+}
+
+{{#unless acl_name}}
+# Create default ACL if not provided
+resource "aws_memorydb_acl" "plugin_memorydb" {
+  count = 1
+  name  = "${local.cluster_name}-acl"
+
+  {{#if create_admin_user}}
+  user_names = [aws_memorydb_user.plugin_memorydb_admin[0].user_name]
+  {{else}}
+  user_names = ["default"]
+  {{/if}}
+
+  tags = {
+    Name      = "${var.project_name}-acl"
+    ManagedBy = "pmp"
+    Plugin    = "aws/memorydb"
+  }
+}
+{{/unless}}
+
+{{#if create_admin_user}}
+# Admin user with full Redis permissions
+resource "aws_memorydb_user" "plugin_memorydb_admin" {
+  count        = 1
+  user_name    = var.admin_username
+  access_string = "on ~* &* +@all"
+
+  authentication_mode {
+    type      = "password"
+    passwords = [random_password.plugin_memorydb_admin_password.result]
+  }
+
+  tags = {
+    Name      = "${var.project_name}-admin-user"
+    ManagedBy = "pmp"
+    Plugin    = "aws/memorydb"
+  }
+}
+{{/if}}
+
+# MemoryDB Cluster
+resource "aws_memorydb_cluster" "plugin_memorydb" {
+  name        = local.cluster_name
+  description = "MemoryDB cluster for ${var.project_name}"
+
+  # Cluster configuration
+  node_type              = var.node_type
+  num_shards             = var.num_shards
+  num_replicas_per_shard = var.num_replicas_per_shard
+
+  # Engine
+  engine_version = var.engine_version
+  port           = var.port
+
+  # Parameter and ACL
+  parameter_group_name = aws_memorydb_parameter_group.plugin_memorydb.name
+  acl_name            = local.acl_name
+
+  # Security
+  subnet_group_name  = length(local.subnet_ids_list) > 0 ? aws_memorydb_subnet_group.plugin_memorydb[0].name : null
+  security_group_ids = local.security_group_ids_list
+  tls_enabled        = var.tls_enabled
+
+  # Snapshots
+  snapshot_retention_limit = var.snapshot_retention_limit
+  snapshot_window          = var.snapshot_window
+
+  # Maintenance
+  maintenance_window = var.maintenance_window
+  auto_minor_version_upgrade = var.auto_minor_version_upgrade
+
+  # Performance
+  data_tiering = var.data_tiering
+
+  # Logging to CloudWatch
+  {{#if tls_enabled}}
+  # Enable slow log when TLS is enabled
+  {{/if}}
+
+  tags = {
+    Name      = var.project_name
+    ManagedBy = "pmp"
+    Plugin    = "aws/memorydb"
+  }
+
+  lifecycle {
+    prevent_destroy = false
+  }
+
+  {{#if create_admin_user}}
+  depends_on = [
+    aws_memorydb_user.plugin_memorydb_admin
+  ]
+  {{/if}}
+}
+
+# CloudWatch Log Group for MemoryDB
+resource "aws_cloudwatch_log_group" "plugin_memorydb" {
+  name              = "/aws/memorydb/${local.cluster_name}"
+  retention_in_days = 7
+
+  tags = {
+    Name      = "${var.project_name}-logs"
+    ManagedBy = "pmp"
+    Plugin    = "aws/memorydb"
+  }
+}

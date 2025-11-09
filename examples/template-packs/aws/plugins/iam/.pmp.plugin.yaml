@@ -1,0 +1,245 @@
+apiVersion: pmp.io/v1
+kind: Plugin
+metadata:
+  name: iam
+  description: Create AWS IAM roles, policies, and service accounts with fine-grained permissions for secure access control
+
+spec:
+  role: identity-access-management
+
+  inputs:
+    # Project Metadata
+    project_name:
+      type: string
+      description: IAM role name prefix (defaults to project name)
+      default: ""
+
+    # Role Configuration
+    role_type:
+      type: select
+      options:
+        - label: "Service Role (For AWS services like Lambda, ECS, etc.)"
+          value: "service"
+        - label: "EC2 Instance Role"
+          value: "ec2"
+        - label: "Cross-Account Role"
+          value: "cross-account"
+        - label: "OIDC Federated Role (GitHub Actions, etc.)"
+          value: "oidc"
+        - label: "User Role (For IAM users)"
+          value: "user"
+      default: "service"
+      description: Type of IAM role to create
+
+    # Service Principal (for service roles)
+    service_principal:
+      type: select
+      options:
+        - label: "Lambda"
+          value: "lambda.amazonaws.com"
+        - label: "ECS Task"
+          value: "ecs-tasks.amazonaws.com"
+        - label: "EC2"
+          value: "ec2.amazonaws.com"
+        - label: "API Gateway"
+          value: "apigateway.amazonaws.com"
+        - label: "CloudFormation"
+          value: "cloudformation.amazonaws.com"
+        - label: "CodeBuild"
+          value: "codebuild.amazonaws.com"
+        - label: "CodePipeline"
+          value: "codepipeline.amazonaws.com"
+        - label: "Events (EventBridge)"
+          value: "events.amazonaws.com"
+        - label: "States (Step Functions)"
+          value: "states.amazonaws.com"
+        - label: "Glue"
+          value: "glue.amazonaws.com"
+        - label: "Custom"
+          value: "custom"
+      default: "lambda.amazonaws.com"
+      description: AWS service principal (only for service role type)
+
+    custom_service_principal:
+      type: string
+      description: Custom service principal (e.g., custom-service.amazonaws.com)
+      default: ""
+
+    # Cross-Account Configuration
+    trusted_account_ids:
+      type: string
+      description: Comma-separated AWS account IDs to trust (for cross-account roles)
+      default: ""
+
+    require_mfa:
+      type: boolean
+      description: Require MFA for cross-account role assumption
+      default: false
+
+    # OIDC Configuration
+    oidc_provider_arn:
+      type: string
+      description: ARN of OIDC provider (for OIDC federated roles)
+      default: ""
+
+    oidc_subject:
+      type: string
+      description: OIDC subject claim pattern (e.g., repo:org/repo:* for GitHub)
+      default: ""
+
+    # IAM User Configuration
+    trusted_user_arns:
+      type: string
+      description: Comma-separated IAM user ARNs to trust (for user roles)
+      default: ""
+
+    # AWS Managed Policies
+    attach_readonly_policy:
+      type: boolean
+      description: Attach ReadOnlyAccess managed policy
+      default: false
+
+    attach_poweruser_policy:
+      type: boolean
+      description: Attach PowerUserAccess managed policy
+      default: false
+
+    # S3 Permissions
+    enable_s3_access:
+      type: boolean
+      description: Enable S3 access permissions
+      default: false
+
+    s3_bucket_arns:
+      type: string
+      description: Comma-separated S3 bucket ARNs to grant access to
+      default: ""
+
+    s3_access_level:
+      type: select
+      options:
+        - label: "Read Only"
+          value: "read"
+        - label: "Read/Write"
+          value: "readwrite"
+        - label: "Full Control"
+          value: "full"
+      default: "read"
+      description: Level of S3 access
+
+    # DynamoDB Permissions
+    enable_dynamodb_access:
+      type: boolean
+      description: Enable DynamoDB access permissions
+      default: false
+
+    dynamodb_table_arns:
+      type: string
+      description: Comma-separated DynamoDB table ARNs
+      default: ""
+
+    dynamodb_access_level:
+      type: select
+      options:
+        - label: "Read Only"
+          value: "read"
+        - label: "Read/Write"
+          value: "readwrite"
+      default: "read"
+      description: Level of DynamoDB access
+
+    # Secrets Manager Permissions
+    enable_secrets_manager_access:
+      type: boolean
+      description: Enable Secrets Manager access
+      default: false
+
+    secrets_manager_secret_arns:
+      type: string
+      description: Comma-separated Secrets Manager secret ARNs
+      default: ""
+
+    # CloudWatch Logs Permissions
+    enable_cloudwatch_logs:
+      type: boolean
+      description: Enable CloudWatch Logs permissions
+      default: true
+
+    log_group_arns:
+      type: string
+      description: Comma-separated CloudWatch Log Group ARNs (leave empty for all)
+      default: ""
+
+    # SQS Permissions
+    enable_sqs_access:
+      type: boolean
+      description: Enable SQS access permissions
+      default: false
+
+    sqs_queue_arns:
+      type: string
+      description: Comma-separated SQS queue ARNs
+      default: ""
+
+    # SNS Permissions
+    enable_sns_access:
+      type: boolean
+      description: Enable SNS access permissions
+      default: false
+
+    sns_topic_arns:
+      type: string
+      description: Comma-separated SNS topic ARNs
+      default: ""
+
+    # KMS Permissions
+    enable_kms_access:
+      type: boolean
+      description: Enable KMS encryption/decryption permissions
+      default: false
+
+    kms_key_arns:
+      type: string
+      description: Comma-separated KMS key ARNs
+      default: ""
+
+    # Custom Inline Policy
+    enable_custom_policy:
+      type: boolean
+      description: Enable custom inline policy
+      default: false
+
+    custom_policy_json:
+      type: string
+      description: Custom IAM policy JSON (must be valid JSON)
+      default: ""
+
+    # Role Settings
+    max_session_duration:
+      type: number
+      description: Maximum session duration in seconds (3600-43200)
+      default: 3600
+      min: 3600
+      max: 43200
+
+    path:
+      type: string
+      description: IAM path for the role (e.g., /service-role/)
+      default: "/"
+
+    # Instance Profile (for EC2)
+    create_instance_profile:
+      type: boolean
+      description: Create instance profile for EC2 (automatic for ec2 role type)
+      default: false
+
+    # Tags
+    environment:
+      type: string
+      description: Environment name (dev, staging, prod)
+      default: ""
+
+    application:
+      type: string
+      description: Application name
+      default: ""

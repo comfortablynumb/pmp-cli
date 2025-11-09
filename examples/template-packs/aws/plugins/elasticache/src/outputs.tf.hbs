@@ -1,0 +1,98 @@
+output "elasticache_cluster_id" {
+  description = "ElastiCache cluster identifier"
+  value       = aws_elasticache_cluster.plugin_elasticache.cluster_id
+}
+
+output "elasticache_cluster_address" {
+  description = "DNS name of the cache cluster (Memcached) or primary endpoint (Redis)"
+  value       = aws_elasticache_cluster.plugin_elasticache.cache_nodes[0].address
+}
+
+output "elasticache_cluster_port" {
+  description = "Port number the cache cluster accepts connections on"
+  value       = aws_elasticache_cluster.plugin_elasticache.cache_nodes[0].port
+}
+
+output "elasticache_endpoint" {
+  description = "Full endpoint connection string"
+  value       = "${aws_elasticache_cluster.plugin_elasticache.cache_nodes[0].address}:${aws_elasticache_cluster.plugin_elasticache.cache_nodes[0].port}"
+}
+
+{{#if (eq engine "redis")}}
+output "elasticache_configuration_endpoint" {
+  description = "Configuration endpoint (Redis cluster mode)"
+  value       = try(aws_elasticache_cluster.plugin_elasticache.configuration_endpoint, "")
+}
+{{/if}}
+
+{{#if auth_token_enabled}}
+output "elasticache_auth_token" {
+  description = "Redis AUTH token for authentication"
+  value       = random_password.plugin_elasticache_auth_token.result
+  sensitive   = true
+}
+{{/if}}
+
+output "elasticache_engine" {
+  description = "Cache engine type"
+  value       = var.engine
+}
+
+output "elasticache_engine_version" {
+  description = "Cache engine version"
+  value       = aws_elasticache_cluster.plugin_elasticache.engine_version_actual
+}
+
+output "elasticache_parameter_group" {
+  description = "Parameter group name"
+  value       = aws_elasticache_parameter_group.plugin_elasticache.name
+}
+
+output "elasticache_subnet_group" {
+  description = "Subnet group name"
+  value       = length(local.subnet_ids_list) > 0 ? aws_elasticache_subnet_group.plugin_elasticache[0].name : ""
+}
+
+output "elasticache_arn" {
+  description = "ARN of the ElastiCache cluster"
+  value       = aws_elasticache_cluster.plugin_elasticache.arn
+}
+
+{{#if (eq engine "redis")}}
+output "elasticache_slow_log_group" {
+  description = "CloudWatch Log Group for slow queries"
+  value       = aws_cloudwatch_log_group.plugin_elasticache_slow_log.name
+}
+
+output "elasticache_engine_log_group" {
+  description = "CloudWatch Log Group for engine logs"
+  value       = aws_cloudwatch_log_group.plugin_elasticache_engine_log.name
+}
+{{/if}}
+
+# Connection information
+output "connection_info" {
+  description = "How to connect to this ElastiCache cluster"
+  value = <<-EOT
+    ElastiCache Cluster: ${var.project_name}
+    Engine: ${var.engine} ${aws_elasticache_cluster.plugin_elasticache.engine_version_actual}
+    Endpoint: ${aws_elasticache_cluster.plugin_elasticache.cache_nodes[0].address}:${aws_elasticache_cluster.plugin_elasticache.cache_nodes[0].port}
+
+    {{#if (eq engine "redis")}}
+    # Connect using redis-cli:
+    {{#if transit_encryption_enabled}}
+    redis-cli -h ${aws_elasticache_cluster.plugin_elasticache.cache_nodes[0].address} -p ${aws_elasticache_cluster.plugin_elasticache.cache_nodes[0].port} --tls{{#if auth_token_enabled}} -a <AUTH_TOKEN>{{/if}}
+    {{else}}
+    redis-cli -h ${aws_elasticache_cluster.plugin_elasticache.cache_nodes[0].address} -p ${aws_elasticache_cluster.plugin_elasticache.cache_nodes[0].port}{{#if auth_token_enabled}} -a <AUTH_TOKEN>{{/if}}
+    {{/if}}
+
+    {{#if auth_token_enabled}}
+    # Get auth token:
+    terraform output -raw elasticache_auth_token
+    {{/if}}
+    {{else}}
+    # Connect using telnet:
+    telnet ${aws_elasticache_cluster.plugin_elasticache.cache_nodes[0].address} ${aws_elasticache_cluster.plugin_elasticache.cache_nodes[0].port}
+    {{/if}}
+  EOT
+}

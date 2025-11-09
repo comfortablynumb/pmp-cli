@@ -1,0 +1,223 @@
+apiVersion: pmp.io/v1
+kind: Plugin
+metadata:
+  name: bedrock
+  description: Create AWS Bedrock AI resources including knowledge bases, agents, and guardrails for building generative AI applications with foundation models
+
+spec:
+  role: ai-ml
+
+  inputs:
+    # Project Metadata
+    project_name:
+      type: string
+      description: Bedrock resource name prefix (defaults to project name)
+      default: ""
+
+    # Resource Type
+    resource_type:
+      type: select
+      options:
+        - label: "Knowledge Base (RAG with vector search)"
+          value: "knowledge-base"
+        - label: "Agent (Autonomous AI assistant)"
+          value: "agent"
+        - label: "Guardrails (Content filtering)"
+          value: "guardrails"
+      default: "knowledge-base"
+      description: Type of Bedrock resource to create
+
+    # Foundation Model Selection
+    foundation_model:
+      type: select
+      options:
+        - label: "Claude 3 Sonnet (Anthropic)"
+          value: "anthropic.claude-3-sonnet-20240229-v1:0"
+        - label: "Claude 3 Haiku (Anthropic - Fast & Cost-effective)"
+          value: "anthropic.claude-3-haiku-20240307-v1:0"
+        - label: "Claude 3 Opus (Anthropic - Most capable)"
+          value: "anthropic.claude-3-opus-20240229-v1:0"
+        - label: "Claude 2.1 (Anthropic)"
+          value: "anthropic.claude-v2:1"
+        - label: "Titan Text G1 - Express (Amazon)"
+          value: "amazon.titan-text-express-v1"
+        - label: "Titan Embeddings G1 - Text (Amazon)"
+          value: "amazon.titan-embed-text-v1"
+        - label: "Llama 2 70B (Meta)"
+          value: "meta.llama2-70b-chat-v1"
+      default: "anthropic.claude-3-haiku-20240307-v1:0"
+      description: Foundation model to use
+
+    # Knowledge Base Configuration
+    kb_embedding_model:
+      type: select
+      options:
+        - label: "Titan Embeddings G1"
+          value: "amazon.titan-embed-text-v1"
+        - label: "Cohere Embed English v3"
+          value: "cohere.embed-english-v3"
+        - label: "Cohere Embed Multilingual v3"
+          value: "cohere.embed-multilingual-v3"
+      default: "amazon.titan-embed-text-v1"
+      description: Embedding model for knowledge base (if resource_type is knowledge-base)
+
+    kb_vector_dimensions:
+      type: number
+      description: Vector embedding dimensions (1536 for Titan, 1024 for Cohere)
+      default: 1536
+      min: 384
+      max: 2048
+
+    # Data Source Configuration
+    kb_data_source_type:
+      type: select
+      options:
+        - label: "S3 Bucket"
+          value: "s3"
+        - label: "Web Crawler"
+          value: "web"
+        - label: "Confluence"
+          value: "confluence"
+        - label: "Salesforce"
+          value: "salesforce"
+        - label: "SharePoint"
+          value: "sharepoint"
+      default: "s3"
+      description: Data source type for knowledge base
+
+    kb_s3_bucket_name:
+      type: string
+      description: S3 bucket name containing knowledge base documents
+      default: ""
+
+    kb_s3_prefix:
+      type: string
+      description: S3 prefix for knowledge base documents
+      default: ""
+
+    # Vector Store Configuration
+    vector_store_type:
+      type: select
+      options:
+        - label: "Amazon OpenSearch Serverless"
+          value: "opensearch-serverless"
+        - label: "Amazon RDS Aurora PostgreSQL (pgvector)"
+          value: "rds-aurora"
+        - label: "Pinecone"
+          value: "pinecone"
+      default: "opensearch-serverless"
+      description: Vector database for knowledge base storage
+
+    # OpenSearch Serverless Configuration
+    opensearch_collection_name:
+      type: string
+      description: OpenSearch Serverless collection name (leave empty to create new)
+      default: ""
+
+    opensearch_index_name:
+      type: string
+      description: OpenSearch index name for vectors
+      default: "bedrock-knowledge-base-index"
+
+    # Agent Configuration
+    agent_instruction:
+      type: string
+      description: Instructions for the agent (if resource_type is agent)
+      default: "You are a helpful AI assistant. Answer questions accurately and concisely."
+
+    agent_idle_session_ttl:
+      type: number
+      description = "Session timeout in seconds (for agents)"
+      default: 600
+      min: 60
+      max: 3600
+
+    enable_agent_action_groups:
+      type: boolean
+      description: Enable action groups for agent to call APIs/Lambda functions
+      default: false
+
+    # Guardrails Configuration
+    guardrail_blocked_messaging:
+      type: string
+      description: Message to show when content is blocked by guardrails
+      default: "I'm sorry, but I cannot provide that information as it violates our content policy."
+
+    enable_content_filters:
+      type: boolean
+      description: Enable content filtering (profanity, hate speech, violence)
+      default: true
+
+    content_filter_strength:
+      type: select
+      options:
+        - label: "Low (Minimal filtering)"
+          value: "LOW"
+        - label: "Medium (Moderate filtering)"
+          value: "MEDIUM"
+        - label: "High (Strict filtering)"
+          value: "HIGH"
+      default: "MEDIUM"
+      description: Content filter strength
+
+    enable_pii_detection:
+      type: boolean
+      description: Enable PII (Personally Identifiable Information) detection
+      default: true
+
+    pii_entities_to_block:
+      type: string
+      description: Comma-separated PII entities to block (e.g., EMAIL,PHONE,SSN,CREDIT_CARD)
+      default: "EMAIL,PHONE,SSN,CREDIT_CARD,ADDRESS"
+
+    enable_topic_filters:
+      type: boolean
+      description: Enable topic-based filtering
+      default: false
+
+    blocked_topics:
+      type: string
+      description: Comma-separated topics to block (e.g., politics,religion)
+      default: ""
+
+    # Monitoring & Logging
+    enable_cloudwatch_logs:
+      type: boolean
+      description: Enable CloudWatch logging for model invocations
+      default: true
+
+    log_retention_days:
+      type: number
+      description: CloudWatch log retention in days
+      default: 7
+      min: 1
+      max: 3653
+
+    enable_model_invocation_logging:
+      type: boolean
+      description: Log model invocations for monitoring and debugging
+      default: true
+
+    # Cost Controls
+    enable_provisioned_throughput:
+      type: boolean
+      description: Use provisioned throughput (fixed cost, guaranteed capacity)
+      default: false
+
+    provisioned_model_units:
+      type: number
+      description: Number of provisioned model units
+      default: 1
+      min: 1
+      max: 10
+
+    # Tags
+    environment:
+      type: string
+      description: Environment name (dev, staging, prod)
+      default: ""
+
+    application:
+      type: string
+      description: Application name
+      default: ""

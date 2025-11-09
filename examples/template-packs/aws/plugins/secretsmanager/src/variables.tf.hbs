@@ -1,0 +1,114 @@
+variable "project_name" {
+  description = "Secret name prefix"
+  type        = string
+}
+
+variable "secret_description" {
+  description = "Description of the secret"
+  type        = string
+}
+
+variable "secret_type" {
+  description = "Type of secret"
+  type        = string
+}
+
+variable "password_length" {
+  description = "Length of auto-generated password"
+  type        = number
+}
+
+variable "exclude_characters" {
+  description = "Characters to exclude from password"
+  type        = string
+}
+
+variable "require_each_included_type" {
+  description = "Require each character type"
+  type        = bool
+}
+
+variable "kms_key_id" {
+  description = "KMS key ID for encryption"
+  type        = string
+}
+
+variable "enable_rotation" {
+  description = "Enable automatic rotation"
+  type        = bool
+}
+
+variable "rotation_days" {
+  description = "Days between rotations"
+  type        = number
+}
+
+variable "rotation_lambda_arn" {
+  description = "Lambda ARN for rotation"
+  type        = string
+}
+
+variable "recovery_window_days" {
+  description = "Recovery window in days"
+  type        = number
+}
+
+variable "enable_replication" {
+  description = "Enable cross-region replication"
+  type        = bool
+}
+
+variable "replica_regions" {
+  description = "Comma-separated replica regions"
+  type        = string
+}
+
+variable "application" {
+  description = "Application name"
+  type        = string
+}
+
+variable "environment" {
+  description = "Environment name"
+  type        = string
+}
+
+variable "create_database_secret" {
+  description = "Create database secret template"
+  type        = bool
+}
+
+variable "db_engine" {
+  description = "Database engine type"
+  type        = string
+}
+
+variable "db_host" {
+  description = "Database host"
+  type        = string
+}
+
+variable "db_port" {
+  description = "Database port"
+  type        = number
+}
+
+variable "db_name" {
+  description = "Database name"
+  type        = string
+}
+
+variable "db_username" {
+  description = "Database username"
+  type        = string
+}
+
+variable "create_api_key_secret" {
+  description = "Create API key secret template"
+  type        = bool
+}
+
+variable "api_key_name" {
+  description = "API key name"
+  type        = string
+}

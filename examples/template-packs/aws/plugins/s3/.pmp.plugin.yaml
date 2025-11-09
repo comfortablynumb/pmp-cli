@@ -1,0 +1,173 @@
+apiVersion: pmp.io/v1
+kind: Plugin
+metadata:
+  name: s3
+  description: Create an AWS S3 bucket with opinionated defaults for secure object storage, versioning, and lifecycle management
+
+spec:
+  role: object-storage
+
+  inputs:
+    # Project Metadata
+    project_name:
+      type: string
+      description: S3 bucket name prefix (defaults to project name, will be made globally unique)
+      default: ""
+
+    # Bucket Configuration
+    force_destroy:
+      type: boolean
+      description: Allow deletion of non-empty bucket (use with caution in production)
+      default: false
+
+    # Versioning
+    enable_versioning:
+      type: boolean
+      description: Enable bucket versioning for object history and recovery
+      default: true
+
+    # Encryption Settings
+    encryption_type:
+      type: select
+      options:
+        - label: "AES256 (AWS Managed)"
+          value: "AES256"
+        - label: "KMS (AWS Managed Key)"
+          value: "aws:kms"
+        - label: "KMS (Customer Managed Key)"
+          value: "aws:kms:cmk"
+      default: "AES256"
+      description: Server-side encryption type
+
+    enable_bucket_key:
+      type: boolean
+      description: Use S3 Bucket Keys to reduce KMS costs (KMS encryption only)
+      default: true
+
+    # Public Access Settings
+    block_public_acls:
+      type: boolean
+      description: Block public ACLs
+      default: true
+
+    block_public_policy:
+      type: boolean
+      description: Block public bucket policies
+      default: true
+
+    ignore_public_acls:
+      type: boolean
+      description = "Ignore public ACLs"
+      default: true
+
+    restrict_public_buckets:
+      type: boolean
+      description: Restrict public bucket access
+      default: true
+
+    # Lifecycle Rules
+    enable_lifecycle_rules:
+      type: boolean
+      description: Enable lifecycle rules for cost optimization
+      default: true
+
+    transition_to_ia_days:
+      type: number
+      description: Days before transitioning to Infrequent Access (0 to disable)
+      default: 30
+      min: 0
+      max: 365
+
+    transition_to_glacier_days:
+      type: number
+      description: Days before transitioning to Glacier (0 to disable)
+      default: 90
+      min: 0
+      max: 365
+
+    transition_to_deep_archive_days:
+      type: number
+      description: Days before transitioning to Deep Archive (0 to disable)
+      default: 180
+      min: 0
+      max: 3650
+
+    expire_noncurrent_versions_days:
+      type: number
+      description: Days before expiring noncurrent versions (0 to disable, requires versioning)
+      default: 90
+      min: 0
+      max: 3650
+
+    expire_delete_markers:
+      type: boolean
+      description: Automatically remove expired object delete markers
+      default: true
+
+    # Logging
+    enable_access_logging:
+      type: boolean
+      description: Enable S3 access logging
+      default: false
+
+    log_bucket_name:
+      type: string
+      description: Target bucket for access logs (leave empty to create one)
+      default: ""
+
+    # CORS Configuration
+    enable_cors:
+      type: boolean
+      description: Enable CORS configuration
+      default: false
+
+    cors_allowed_origins:
+      type: string
+      description: Comma-separated list of allowed origins (e.g., https://example.com)
+      default: "*"
+
+    cors_allowed_methods:
+      type: string
+      description: Comma-separated list of allowed methods (GET, PUT, POST, DELETE, HEAD)
+      default: "GET,PUT,POST,DELETE,HEAD"
+
+    cors_max_age_seconds:
+      type: number
+      description: Time in seconds for browser to cache preflight response
+      default: 3000
+      min: 0
+      max: 86400
+
+    # Intelligent Tiering
+    enable_intelligent_tiering:
+      type: boolean
+      description: Enable S3 Intelligent-Tiering for automatic cost optimization
+      default: false
+
+    # Object Lock
+    enable_object_lock:
+      type: boolean
+      description: Enable Object Lock for WORM (Write Once Read Many) compliance
+      default: false
+
+    # Transfer Acceleration
+    enable_acceleration:
+      type: boolean
+      description: Enable S3 Transfer Acceleration for faster uploads
+      default: false
+
+    # Replication
+    enable_replication:
+      type: boolean
+      description: Enable cross-region replication
+      default: false
+
+    replication_destination_bucket:
+      type: string
+      description: ARN of destination bucket for replication
+      default: ""
+
+    replication_destination_region:
+      type: string
+      description: Destination region for replication
+      default: "us-west-2"

@@ -1,0 +1,149 @@
+variable "project_name" {
+  description = "WAF Web ACL name"
+  type        = string
+}
+
+variable "scope" {
+  description = "WAF scope"
+  type        = string
+}
+
+variable "default_action" {
+  description = "Default action"
+  type        = string
+}
+
+variable "enable_core_rule_set" {
+  description = "Enable Core Rule Set"
+  type        = bool
+}
+
+variable "enable_known_bad_inputs" {
+  description = "Enable Known Bad Inputs"
+  type        = bool
+}
+
+variable "enable_sqli_protection" {
+  description = "Enable SQL Injection protection"
+  type        = bool
+}
+
+variable "enable_linux_protection" {
+  description = "Enable Linux protection"
+  type        = bool
+}
+
+variable "enable_posix_protection" {
+  description = "Enable POSIX protection"
+  type        = bool
+}
+
+variable "enable_windows_protection" {
+  description = "Enable Windows protection"
+  type        = bool
+}
+
+variable "enable_php_protection" {
+  description = "Enable PHP protection"
+  type        = bool
+}
+
+variable "enable_wordpress_protection" {
+  description = "Enable WordPress protection"
+  type        = bool
+}
+
+variable "enable_amazon_ip_reputation" {
+  description = "Enable Amazon IP reputation"
+  type        = bool
+}
+
+variable "enable_anonymous_ip_list" {
+  description = "Enable Anonymous IP list"
+  type        = bool
+}
+
+variable "enable_rate_limiting" {
+  description = "Enable rate limiting"
+  type        = bool
+}
+
+variable "rate_limit" {
+  description = "Rate limit per 5 minutes"
+  type        = number
+}
+
+variable "rate_limit_action" {
+  description = "Rate limit action"
+  type        = string
+}
+
+variable "enable_geo_blocking" {
+  description = "Enable geo blocking"
+  type        = bool
+}
+
+variable "blocked_countries" {
+  description = "Comma-separated blocked countries"
+  type        = string
+}
+
+variable "geo_block_action" {
+  description = "Geo block action"
+  type        = string
+}
+
+variable "enable_ip_allowlist" {
+  description = "Enable IP allowlist"
+  type        = bool
+}
+
+variable "allowed_ip_addresses" {
+  description = "Comma-separated allowed IPs"
+  type        = string
+}
+
+variable "enable_ip_blocklist" {
+  description = "Enable IP blocklist"
+  type        = bool
+}
+
+variable "blocked_ip_addresses" {
+  description = "Comma-separated blocked IPs"
+  type        = string
+}
+
+variable "enable_logging" {
+  description = "Enable WAF logging"
+  type        = bool
+}
+
+variable "log_destination_type" {
+  description = "Log destination type"
+  type        = string
+}
+
+variable "log_retention_days" {
+  description = "Log retention days"
+  type        = number
+}
+
+variable "sample_requests_enabled" {
+  description = "Enable sampled requests"
+  type        = bool
+}
+
+variable "add_custom_response_headers" {
+  description = "Add custom response headers"
+  type        = bool
+}
+
+variable "custom_response_header_name" {
+  description = "Custom header name"
+  type        = string
+}
+
+variable "custom_response_header_value" {
+  description = "Custom header value"
+  type        = string
+}

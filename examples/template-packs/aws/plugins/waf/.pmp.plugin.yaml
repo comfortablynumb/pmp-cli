@@ -1,0 +1,200 @@
+apiVersion: pmp.io/v1
+kind: Plugin
+metadata:
+  name: waf
+  description: Create AWS WAF Web ACL with managed rules, rate limiting, and geo-blocking to protect web applications from common threats
+
+spec:
+  role: web-application-firewall
+
+  inputs:
+    # Project Metadata
+    project_name:
+      type: string
+      description: WAF Web ACL name (defaults to project name)
+      default: ""
+
+    # Scope Configuration
+    scope:
+      type: select
+      options:
+        - label: "CloudFront (Global)"
+          value: "CLOUDFRONT"
+        - label: "Regional (ALB, API Gateway, AppSync)"
+          value: "REGIONAL"
+      default: "REGIONAL"
+      description: WAF scope - CloudFront requires us-east-1 provider
+
+    # Default Action
+    default_action:
+      type: select
+      options:
+        - label: "Allow (Block only matched rules)"
+          value: "allow"
+        - label: "Block (Allow only matched rules)"
+          value: "block"
+      default: "allow"
+      description: Default action for requests that don't match any rules
+
+    # AWS Managed Rule Groups
+    enable_core_rule_set:
+      type: boolean
+      description: Enable AWS Managed Core Rule Set (protects against OWASP Top 10)
+      default: true
+
+    enable_known_bad_inputs:
+      type: boolean
+      description: Enable Known Bad Inputs rule group
+      default: true
+
+    enable_sqli_protection:
+      type: boolean
+      description: Enable SQL Injection protection
+      default: true
+
+    enable_linux_protection:
+      type: boolean
+      description: Enable Linux operating system protection
+      default: false
+
+    enable_posix_protection:
+      type: boolean
+      description: Enable POSIX operating system protection
+      default: false
+
+    enable_windows_protection:
+      type: boolean
+      description: Enable Windows operating system protection
+      default: false
+
+    enable_php_protection:
+      type: boolean
+      description: Enable PHP application protection
+      default: false
+
+    enable_wordpress_protection:
+      type: boolean
+      description: Enable WordPress application protection
+      default: false
+
+    enable_amazon_ip_reputation:
+      type: boolean
+      description: Enable Amazon IP reputation list (blocks known malicious IPs)
+      default: true
+
+    enable_anonymous_ip_list:
+      type: boolean
+      description: Enable Anonymous IP list (blocks VPNs, proxies, Tor)
+      default: false
+
+    # Rate Limiting
+    enable_rate_limiting:
+      type: boolean
+      description: Enable rate limiting to prevent abuse
+      default: true
+
+    rate_limit:
+      type: number
+      description: Maximum requests per 5 minutes from a single IP
+      default: 2000
+      min: 100
+      max: 20000000
+
+    rate_limit_action:
+      type: select
+      options:
+        - label: "Block"
+          value: "block"
+        - label: "Count (Monitor only)"
+          value: "count"
+      default: "block"
+      description: Action to take when rate limit is exceeded
+
+    # Geo Blocking
+    enable_geo_blocking:
+      type: boolean
+      description: Enable geographic blocking
+      default: false
+
+    blocked_countries:
+      type: string
+      description: Comma-separated ISO 3166-1 alpha-2 country codes to block (e.g., CN,RU,KP)
+      default: ""
+
+    geo_block_action:
+      type: select
+      options:
+        - label: "Block"
+          value: "block"
+        - label: "Count (Monitor only)"
+          value: "count"
+      default: "block"
+      description: Action for requests from blocked countries
+
+    # IP Allowlist/Blocklist
+    enable_ip_allowlist:
+      type: boolean
+      description: Enable IP allowlist (allow only specific IPs)
+      default: false
+
+    allowed_ip_addresses:
+      type: string
+      description: Comma-separated IP addresses/CIDR blocks to allow (e.g., 203.0.113.0/24,198.51.100.0/24)
+      default: ""
+
+    enable_ip_blocklist:
+      type: boolean
+      description: Enable IP blocklist (block specific IPs)
+      default: false
+
+    blocked_ip_addresses:
+      type: string
+      description: Comma-separated IP addresses/CIDR blocks to block
+      default: ""
+
+    # Logging
+    enable_logging:
+      type: boolean
+      description: Enable WAF logging to CloudWatch or S3
+      default: true
+
+    log_destination_type:
+      type: select
+      options:
+        - label: "CloudWatch Logs"
+          value: "cloudwatch"
+        - label: "S3 Bucket"
+          value: "s3"
+        - label: "Kinesis Firehose"
+          value: "firehose"
+      default: "cloudwatch"
+      description: Destination for WAF logs
+
+    log_retention_days:
+      type: number
+      description: CloudWatch log retention in days
+      default: 7
+      min: 1
+      max: 3653
+
+    # Sampling
+    sample_requests_enabled:
+      type: boolean
+      description: Enable sampled requests for analysis
+      default: true
+
+    # Custom Headers
+    add_custom_response_headers:
+      type: boolean
+      description: Add custom headers to blocked responses
+      default: false
+
+    custom_response_header_name:
+      type: string
+      description: Custom response header name
+      default: "X-WAF-Block-Reason"
+
+    custom_response_header_value:
+      type: string
+      description: Custom response header value
+      default: "Request blocked by WAF"

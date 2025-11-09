@@ -1,0 +1,198 @@
+output "distribution_id" {
+  description = "CloudFront distribution ID"
+  value       = aws_cloudfront_distribution.plugin_cloudfront.id
+}
+
+output "distribution_arn" {
+  description = "ARN of the CloudFront distribution"
+  value       = aws_cloudfront_distribution.plugin_cloudfront.arn
+}
+
+output "distribution_domain_name" {
+  description = "CloudFront distribution domain name"
+  value       = aws_cloudfront_distribution.plugin_cloudfront.domain_name
+}
+
+output "distribution_hosted_zone_id" {
+  description = "CloudFront Route 53 hosted zone ID"
+  value       = aws_cloudfront_distribution.plugin_cloudfront.hosted_zone_id
+}
+
+output "distribution_status" {
+  description = "Current status of the distribution"
+  value       = aws_cloudfront_distribution.plugin_cloudfront.status
+}
+
+{{#if enable_custom_domain}}
+output "custom_domains" {
+  description = "Custom domain names configured"
+  value       = local.domain_names_list
+}
+{{/if}}
+
+{{#if (eq origin_type "s3")}}
+{{#if s3_origin_access_control}}
+output "origin_access_control_id" {
+  description = "Origin Access Control ID"
+  value       = aws_cloudfront_origin_access_control.plugin_cloudfront.id
+}
+{{/if}}
+{{/if}}
+
+output "cloudfront_url" {
+  description = "Full CloudFront URL"
+  value       = "https://${aws_cloudfront_distribution.plugin_cloudfront.domain_name}"
+}
+
+{{#if enable_custom_domain}}
+output "custom_domain_url" {
+  description = "Custom domain URL"
+  value       = "https://${local.domain_names_list[0]}"
+}
+{{/if}}
+
+# Connection information
+output "connection_info" {
+  description = "How to use this CloudFront distribution"
+  value = <<-EOT
+    CloudFront Distribution: ${var.project_name}
+    Distribution ID: ${aws_cloudfront_distribution.plugin_cloudfront.id}
+    Domain Name: ${aws_cloudfront_distribution.plugin_cloudfront.domain_name}
+    Status: ${aws_cloudfront_distribution.plugin_cloudfront.status}
+
+    # Access your content:
+    URL: https://${aws_cloudfront_distribution.plugin_cloudfront.domain_name}
+
+    {{#if enable_custom_domain}}
+    # Custom Domain:
+    {{#each domain_names_list}}
+    - https://{{this}}
+    {{/each}}
+
+    # DNS Configuration (Route 53):
+    {{#each domain_names_list}}
+    resource "aws_route53_record" "{{@index}}" {
+      zone_id = "<YOUR_HOSTED_ZONE_ID>"
+      name    = "{{this}}"
+      type    = "A"
+
+      alias {
+        name                   = "${aws_cloudfront_distribution.plugin_cloudfront.domain_name}"
+        zone_id                = "${aws_cloudfront_distribution.plugin_cloudfront.hosted_zone_id}"
+        evaluate_target_health = false
+      }
+    }
+    {{/each}}
+    {{/if}}
+
+    # AWS CLI - Invalidate cache:
+    aws cloudfront create-invalidation \
+      --distribution-id ${aws_cloudfront_distribution.plugin_cloudfront.id} \
+      --paths "/*"
+
+    # AWS CLI - Get distribution config:
+    aws cloudfront get-distribution-config \
+      --id ${aws_cloudfront_distribution.plugin_cloudfront.id}
+
+    # AWS CLI - List invalidations:
+    aws cloudfront list-invalidations \
+      --distribution-id ${aws_cloudfront_distribution.plugin_cloudfront.id}
+
+    {{#if enable_logging}}
+    # Access logs location:
+    s3://${var.log_bucket_name}/${var.log_prefix}
+    {{/if}}
+
+    # Configuration:
+    - Origin: {{#if (eq origin_type "s3")}}S3 Bucket{{else if (eq origin_type "alb")}}Application Load Balancer{{else}}Custom Origin{{/if}} (${var.origin_domain_name})
+    - HTTP Version: ${var.http_version}
+    - Compression: ${var.compress}
+    - IPv6: ${var.enable_ipv6}
+    - Price Class: ${var.price_class}
+    {{#if enable_waf}}- WAF: Enabled{{/if}}
+    {{#if enable_geo_restriction}}- Geo Restriction: ${var.geo_restriction_type} (${join(", ", local.geo_locations_list)}){{/if}}
+  EOT
+}
+
+# Monitoring information
+output "monitoring_info" {
+  description = "CloudWatch metrics and monitoring"
+  value = <<-EOT
+    CloudWatch Metrics:
+    Namespace: AWS/CloudFront
+    Distribution ID: ${aws_cloudfront_distribution.plugin_cloudfront.id}
+
+    Key Metrics:
+    - Requests: Total number of viewer requests
+    - BytesDownloaded: Total bytes downloaded by viewers
+    - BytesUploaded: Total bytes uploaded to origin
+    - 4xxErrorRate: Percentage of 4xx errors
+    - 5xxErrorRate: Percentage of 5xx errors
+    - TotalErrorRate: Percentage of all errors
+
+    # View metrics:
+    aws cloudwatch get-metric-statistics \
+      --namespace AWS/CloudFront \
+      --metric-name Requests \
+      --dimensions Name=DistributionId,Value=${aws_cloudfront_distribution.plugin_cloudfront.id} Name=Region,Value=Global \
+      --start-time $(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%S) \
+      --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
+      --period 300 \
+      --statistics Sum
+
+    # CloudFront Console:
+    https://console.aws.amazon.com/cloudfront/v3/home?#/distributions/${aws_cloudfront_distribution.plugin_cloudfront.id}
+
+    # Alarms Created:
+    - ${var.project_name}-cloudfront-5xx-errors: Monitors 5xx error rate
+    - ${var.project_name}-cloudfront-4xx-errors: Monitors 4xx error rate
+  EOT
+}
+
+# Cache invalidation helper
+output "cache_invalidation_command" {
+  description = "Command to invalidate CloudFront cache"
+  value       = "aws cloudfront create-invalidation --distribution-id ${aws_cloudfront_distribution.plugin_cloudfront.id} --paths '/*'"
+}
+
+# Performance tips
+output "performance_tips" {
+  description = "Tips for optimizing CloudFront performance"
+  value = <<-EOT
+    Performance Optimization Tips:
+
+    1. Cache Control Headers:
+       Set appropriate Cache-Control headers in your origin:
+       - Static assets: Cache-Control: public, max-age=31536000, immutable
+       - Dynamic content: Cache-Control: public, max-age=0, must-revalidate
+
+    2. File Compression:
+       {{#if compress}}
+       ✓ Compression is ENABLED - CloudFront will automatically compress eligible files
+       {{else}}
+       ✗ Compression is DISABLED - Enable for better performance
+       {{/if}}
+
+    3. HTTP/2 and HTTP/3:
+       Current setting: ${var.http_version}
+       Recommended: http2and3 for best performance
+
+    4. Origin Shield:
+       Consider enabling Origin Shield for additional caching layer:
+       aws cloudfront update-distribution --id ${aws_cloudfront_distribution.plugin_cloudfront.id} \
+         --origin-shield Enabled=true,OriginShieldRegion=${data.aws_region.current.name}
+
+    5. Edge Functions:
+       Use CloudFront Functions or Lambda@Edge for:
+       - URL rewrites
+       - Authentication
+       - A/B testing
+       - Personalization
+
+    6. Monitoring:
+       Monitor these metrics regularly:
+       - Cache Hit Rate (target: >85%)
+       - Origin Latency
+       - Error Rates (4xx, 5xx)
+  EOT
+}

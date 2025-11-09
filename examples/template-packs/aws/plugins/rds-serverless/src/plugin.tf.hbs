@@ -1,0 +1,289 @@
+terraform {
+  required_version = ">= 1.0"
+
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.0"
+    }
+  }
+}
+
+data "aws_region" "current" {}
+data "aws_caller_identity" "current" {}
+
+locals {
+  cluster_identifier = replace(lower(var.project_name), "_", "-")
+
+  # Parse lists
+  subnet_ids_list = var.subnet_ids != "" ? split(",", var.subnet_ids) : []
+  security_group_ids_list = var.security_group_ids != "" ? split(",", var.security_group_ids) : []
+  availability_zones_list = var.availability_zones != "" ? split(",", var.availability_zones) : []
+  cloudwatch_logs_list = var.enabled_cloudwatch_logs_exports != "" ? split(",", var.enabled_cloudwatch_logs_exports) : []
+
+  # Port mapping
+  port = var.engine == "aurora-postgresql" ? 5432 : 3306
+
+  # Engine mode
+  engine_mode = "provisioned" # Serverless v2 uses provisioned mode with serverless scaling
+
+  # Final snapshot identifier
+  final_snapshot_id = var.final_snapshot_identifier != "" ? var.final_snapshot_identifier : "${local.cluster_identifier}-final-snapshot-${formatdate("YYYY-MM-DD-hhmm", timestamp())}"
+
+  # Tags
+  common_tags = merge(
+    {
+      Name      = var.project_name
+      ManagedBy = "pmp"
+      Plugin    = "aws/rds-serverless"
+    },
+    var.environment != "" ? { Environment = var.environment } : {},
+    var.application != "" ? { Application = var.application } : {}
+  )
+}
+
+# Generate random password for master user
+resource "random_password" "plugin_rds_serverless_master_password" {
+  length  = 32
+  special = true
+  override_special = "!#$%&*()-_=+[]{}<>:?"
+}
+
+# DB Subnet Group
+resource "aws_db_subnet_group" "plugin_rds_serverless" {
+  count       = length(local.subnet_ids_list) > 0 ? 1 : 0
+  name        = "${local.cluster_identifier}-subnet-group"
+  subnet_ids  = local.subnet_ids_list
+  description = "Subnet group for ${var.project_name} Aurora Serverless cluster"
+
+  tags = local.common_tags
+}
+
+# DB Parameter Group
+resource "aws_db_parameter_group" "plugin_rds_serverless" {
+  name   = "${local.cluster_identifier}-params"
+  family = var.custom_parameter_group_family
+
+  {{#if (eq engine "aurora-postgresql")}}
+  parameter {
+    name  = "shared_preload_libraries"
+    value = "pg_stat_statements"
+  }
+
+  parameter {
+    name  = "log_statement"
+    value = "all"
+  }
+
+  parameter {
+    name  = "log_min_duration_statement"
+    value = "1000"
+  }
+  {{else}}
+  parameter {
+    name  = "slow_query_log"
+    value = "1"
+  }
+
+  parameter {
+    name  = "long_query_time"
+    value = "2"
+  }
+  {{/if}}
+
+  tags = local.common_tags
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+# RDS Cluster Parameter Group
+resource "aws_rds_cluster_parameter_group" "plugin_rds_serverless" {
+  name   = "${local.cluster_identifier}-cluster-params"
+  family = var.custom_parameter_group_family
+
+  {{#if (eq engine "aurora-postgresql")}}
+  parameter {
+    name  = "rds.force_ssl"
+    value = "1"
+  }
+  {{/if}}
+
+  tags = local.common_tags
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+{{#if monitoring_interval}}
+# IAM role for enhanced monitoring
+resource "aws_iam_role" "plugin_rds_serverless_monitoring" {
+  count = var.monitoring_interval > 0 ? 1 : 0
+  name  = "${local.cluster_identifier}-monitoring-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "monitoring.rds.amazonaws.com"
+        }
+      }
+    ]
+  })
+
+  managed_policy_arns = [
+    "arn:aws:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole"
+  ]
+
+  tags = local.common_tags
+}
+{{/if}}
+
+# Aurora Serverless v2 Cluster
+resource "aws_rds_cluster" "plugin_rds_serverless" {
+  cluster_identifier      = local.cluster_identifier
+  engine                  = var.engine
+  engine_version          = var.engine_version
+  engine_mode             = local.engine_mode
+  database_name           = var.database_name
+  master_username         = var.master_username
+  master_password         = random_password.plugin_rds_serverless_master_password.result
+  port                    = local.port
+
+  # Serverless v2 scaling configuration
+  serverlessv2_scaling_configuration {
+    min_capacity = var.serverless_min_capacity
+    max_capacity = var.serverless_max_capacity
+  }
+
+  # Network configuration
+  db_subnet_group_name   = length(local.subnet_ids_list) > 0 ? aws_db_subnet_group.plugin_rds_serverless[0].name : null
+  vpc_security_group_ids = local.security_group_ids_list
+  availability_zones     = length(local.availability_zones_list) > 0 ? local.availability_zones_list : null
+
+  # Backup configuration
+  backup_retention_period      = var.backup_retention_period
+  preferred_backup_window      = var.preferred_backup_window
+  preferred_maintenance_window = var.preferred_maintenance_window
+
+  # Encryption
+  storage_encrypted = var.storage_encrypted
+  kms_key_id        = var.kms_key_id != "" ? var.kms_key_id : null
+
+  # Logging
+  enabled_cloudwatch_logs_exports = local.cloudwatch_logs_list
+
+  # Parameter groups
+  db_cluster_parameter_group_name = aws_rds_cluster_parameter_group.plugin_rds_serverless.name
+
+  # Deletion protection
+  deletion_protection       = var.deletion_protection
+  skip_final_snapshot       = var.skip_final_snapshot
+  final_snapshot_identifier = var.skip_final_snapshot ? null : local.final_snapshot_id
+
+  # Data API
+  enable_http_endpoint = var.enable_http_endpoint
+
+  # Version upgrades
+  allow_major_version_upgrade = false
+  apply_immediately           = var.apply_immediately
+
+  # Copy tags to snapshots
+  copy_tags_to_snapshot = true
+
+  tags = local.common_tags
+
+  lifecycle {
+    ignore_changes = [
+      master_password,
+      availability_zones
+    ]
+  }
+}
+
+# Aurora Serverless v2 Instances
+resource "aws_rds_cluster_instance" "plugin_rds_serverless" {
+  count              = var.instance_count
+  identifier         = "${local.cluster_identifier}-instance-${count.index + 1}"
+  cluster_identifier = aws_rds_cluster.plugin_rds_serverless.id
+  instance_class     = "db.serverless"
+  engine             = aws_rds_cluster.plugin_rds_serverless.engine
+  engine_version     = aws_rds_cluster.plugin_rds_serverless.engine_version
+
+  # Network
+  publicly_accessible = var.publicly_accessible
+
+  # Monitoring
+  performance_insights_enabled          = var.performance_insights_enabled
+  performance_insights_retention_period = var.performance_insights_enabled ? var.performance_insights_retention_period : null
+  monitoring_interval                   = var.monitoring_interval
+  monitoring_role_arn                   = var.monitoring_interval > 0 ? aws_iam_role.plugin_rds_serverless_monitoring[0].arn : null
+
+  # Parameter group
+  db_parameter_group_name = aws_db_parameter_group.plugin_rds_serverless.name
+
+  # Version upgrades
+  auto_minor_version_upgrade = var.auto_minor_version_upgrade
+  apply_immediately          = var.apply_immediately
+
+  tags = merge(
+    local.common_tags,
+    {
+      Name = "${var.project_name}-instance-${count.index + 1}"
+    }
+  )
+}
+
+# CloudWatch Log Groups
+{{#if (eq engine "aurora-postgresql")}}
+resource "aws_cloudwatch_log_group" "plugin_rds_serverless_postgresql" {
+  name              = "/aws/rds/cluster/${local.cluster_identifier}/postgresql"
+  retention_in_days = 7
+
+  tags = local.common_tags
+}
+{{else}}
+resource "aws_cloudwatch_log_group" "plugin_rds_serverless_error" {
+  name              = "/aws/rds/cluster/${local.cluster_identifier}/error"
+  retention_in_days = 7
+
+  tags = local.common_tags
+}
+
+resource "aws_cloudwatch_log_group" "plugin_rds_serverless_slowquery" {
+  name              = "/aws/rds/cluster/${local.cluster_identifier}/slowquery"
+  retention_in_days = 7
+
+  tags = local.common_tags
+}
+{{/if}}
+
+# Secrets Manager secret for database credentials
+resource "aws_secretsmanager_secret" "plugin_rds_serverless_credentials" {
+  name        = "${local.cluster_identifier}-credentials"
+  description = "Database credentials for ${var.project_name} Aurora Serverless cluster"
+
+  tags = local.common_tags
+}
+
+resource "aws_secretsmanager_secret_version" "plugin_rds_serverless_credentials" {
+  secret_id = aws_secretsmanager_secret.plugin_rds_serverless_credentials.id
+
+  secret_string = jsonencode({
+    engine   = var.engine
+    host     = aws_rds_cluster.plugin_rds_serverless.endpoint
+    port     = aws_rds_cluster.plugin_rds_serverless.port
+    dbname   = aws_rds_cluster.plugin_rds_serverless.database_name
+    username = aws_rds_cluster.plugin_rds_serverless.master_username
+    password = random_password.plugin_rds_serverless_master_password.result
+  })
+}

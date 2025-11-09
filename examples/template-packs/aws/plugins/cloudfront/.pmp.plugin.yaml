@@ -1,0 +1,267 @@
+apiVersion: pmp.io/v1
+kind: Plugin
+metadata:
+  name: cloudfront
+  description: Create AWS CloudFront CDN distribution with custom domains, caching, compression, and security features for global content delivery
+
+spec:
+  role: cdn
+
+  inputs:
+    # Project Metadata
+    project_name:
+      type: string
+      description: CloudFront distribution identifier (defaults to project name)
+      default: ""
+
+    # Origin Configuration
+    origin_type:
+      type: select
+      options:
+        - label: "S3 Bucket"
+          value: "s3"
+        - label: "Application Load Balancer"
+          value: "alb"
+        - label: "Custom Origin (HTTP/HTTPS)"
+          value: "custom"
+      default: "s3"
+      description: Type of origin
+
+    origin_domain_name:
+      type: string
+      description: Origin domain name (S3 bucket name, ALB DNS, or custom domain)
+      default: ""
+
+    origin_path:
+      type: string
+      description: Optional path to append to origin requests (e.g., /production)
+      default: ""
+
+    origin_protocol_policy:
+      type: select
+      options:
+        - label: "HTTPS Only"
+          value: "https-only"
+        - label: "HTTP Only"
+          value: "http-only"
+        - label: "Match Viewer"
+          value: "match-viewer"
+      default: "https-only"
+      description: Protocol for connecting to custom origin
+
+    # S3 Origin Configuration
+    s3_origin_access_control:
+      type: boolean
+      description: Use Origin Access Control for S3 (recommended over OAI)
+      default: true
+
+    # Custom Domain Configuration
+    enable_custom_domain:
+      type: boolean
+      description: Enable custom domain with SSL certificate
+      default: false
+
+    domain_names:
+      type: string
+      description: Comma-separated custom domain names (e.g., example.com,www.example.com)
+      default: ""
+
+    acm_certificate_arn:
+      type: string
+      description: ARN of ACM certificate in us-east-1 (required for custom domain)
+      default: ""
+
+    ssl_support_method:
+      type: select
+      options:
+        - label: "SNI Only (Recommended)"
+          value: "sni-only"
+        - label: "VIP (Dedicated IP, additional cost)"
+          value: "vip"
+      default: "sni-only"
+      description: SSL certificate delivery method
+
+    minimum_protocol_version:
+      type: select
+      options:
+        - label: "TLSv1.2_2021"
+          value: "TLSv1.2_2021"
+        - label: "TLSv1.2_2019"
+          value: "TLSv1.2_2019"
+        - label: "TLSv1.2_2018"
+          value: "TLSv1.2_2018"
+        - label: "TLSv1"
+          value: "TLSv1"
+      default: "TLSv1.2_2021"
+      description: Minimum SSL/TLS protocol version
+
+    # Viewer Protocol Configuration
+    viewer_protocol_policy:
+      type: select
+      options:
+        - label: "Redirect HTTP to HTTPS"
+          value: "redirect-to-https"
+        - label: "HTTPS Only"
+          value: "https-only"
+        - label: "Allow All"
+          value: "allow-all"
+      default: "redirect-to-https"
+      description: Protocol for viewer requests
+
+    # Cache Configuration
+    default_ttl:
+      type: number
+      description: Default TTL in seconds (0 for no caching)
+      default: 86400
+      min: 0
+      max: 31536000
+
+    min_ttl:
+      type: number
+      description: Minimum TTL in seconds
+      default: 0
+      min: 0
+      max: 31536000
+
+    max_ttl:
+      type: number
+      description: Maximum TTL in seconds
+      default: 31536000
+      min: 0
+      max: 31536000
+
+    cache_policy:
+      type: select
+      options:
+        - label: "CachingOptimized (Recommended for static content)"
+          value: "CachingOptimized"
+        - label: "CachingDisabled (For dynamic content)"
+          value: "CachingDisabled"
+        - label: "CachingOptimizedForUncompressedObjects"
+          value: "CachingOptimizedForUncompressedObjects"
+        - label: "Elemental-MediaPackage"
+          value: "Elemental-MediaPackage"
+        - label: "Custom (Use TTL settings above)"
+          value: "custom"
+      default: "CachingOptimized"
+      description: Managed cache policy
+
+    # Compression
+    compress:
+      type: boolean
+      description: Enable automatic compression (gzip, brotli)
+      default: true
+
+    # HTTP Versions
+    http_version:
+      type: select
+      options:
+        - label: "HTTP/2 and HTTP/3"
+          value: "http2and3"
+        - label: "HTTP/2"
+          value: "http2"
+        - label: "HTTP/1.1"
+          value: "http1.1"
+      default: "http2and3"
+      description: Supported HTTP versions
+
+    # Price Class
+    price_class:
+      type: select
+      options:
+        - label: "All Edge Locations (Best Performance)"
+          value: "PriceClass_All"
+        - label: "North America, Europe, Asia, Middle East, Africa"
+          value: "PriceClass_200"
+        - label: "North America and Europe Only"
+          value: "PriceClass_100"
+      default: "PriceClass_All"
+      description: Edge location coverage
+
+    # Geographic Restrictions
+    enable_geo_restriction:
+      type: boolean
+      description: Enable geographic restrictions
+      default: false
+
+    geo_restriction_type:
+      type: select
+      options:
+        - label: "Whitelist (Allow only specific countries)"
+          value: "whitelist"
+        - label: "Blacklist (Block specific countries)"
+          value: "blacklist"
+      default: "blacklist"
+      description: Type of geographic restriction
+
+    geo_restriction_locations:
+      type: string
+      description: Comma-separated ISO 3166-1 alpha-2 country codes
+      default: ""
+
+    # WAF Integration
+    enable_waf:
+      type: boolean
+      description: Attach WAF Web ACL
+      default: false
+
+    waf_acl_id:
+      type: string
+      description: WAF Web ACL ID (must be in us-east-1 for CloudFront)
+      default: ""
+
+    # Custom Error Responses
+    enable_custom_error_responses:
+      type: boolean
+      description: Enable custom error responses
+      default: false
+
+    error_404_response_page:
+      type: string
+      description: Path to custom 404 error page
+      default: "/404.html"
+
+    error_403_response_page:
+      type: string
+      description: Path to custom 403 error page
+      default: "/403.html"
+
+    error_response_code:
+      type: number
+      description: HTTP response code for custom error pages
+      default: 404
+      min: 200
+      max: 599
+
+    # Logging
+    enable_logging:
+      type: boolean
+      description: Enable access logging to S3
+      default: false
+
+    log_bucket_name:
+      type: string
+      description: S3 bucket name for access logs
+      default: ""
+
+    log_prefix:
+      type: string
+      description: Log file prefix
+      default: "cloudfront/"
+
+    log_include_cookies:
+      type: boolean
+      description: Include cookies in access logs
+      default: false
+
+    # Default Root Object
+    default_root_object:
+      type: string
+      description: Default file for root URL requests
+      default: "index.html"
+
+    # IPv6
+    enable_ipv6:
+      type: boolean
+      description: Enable IPv6
+      default: true

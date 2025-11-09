@@ -1,0 +1,462 @@
+terraform {
+  required_version = ">= 1.0"
+
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+  }
+}
+
+data "aws_region" "current" {}
+
+locals {
+  web_acl_name = var.project_name
+
+  # Parse IP lists
+  allowed_ips_list = var.allowed_ip_addresses != "" ? split(",", var.allowed_ip_addresses) : []
+  blocked_ips_list = var.blocked_ip_addresses != "" ? split(",", var.blocked_ip_addresses) : []
+  blocked_countries_list = var.blocked_countries != "" ? split(",", var.blocked_countries) : []
+
+  # Rule priority counter (incremental)
+  priority_base = 0
+}
+
+{{#if enable_ip_allowlist}}
+# IP Set for allowlist
+resource "aws_wafv2_ip_set" "plugin_waf_allowlist" {
+  name               = "${local.web_acl_name}-allowlist"
+  scope              = var.scope
+  ip_address_version = "IPV4"
+  addresses          = local.allowed_ips_list
+
+  tags = {
+    Name      = "${var.project_name}-allowlist"
+    ManagedBy = "pmp"
+    Plugin    = "aws/waf"
+  }
+}
+{{/if}}
+
+{{#if enable_ip_blocklist}}
+# IP Set for blocklist
+resource "aws_wafv2_ip_set" "plugin_waf_blocklist" {
+  name               = "${local.web_acl_name}-blocklist"
+  scope              = var.scope
+  ip_address_version = "IPV4"
+  addresses          = local.blocked_ips_list
+
+  tags = {
+    Name      = "${var.project_name}-blocklist"
+    ManagedBy = "pmp"
+    Plugin    = "aws/waf"
+  }
+}
+{{/if}}
+
+# Web ACL
+resource "aws_wafv2_web_acl" "plugin_waf" {
+  name  = local.web_acl_name
+  scope = var.scope
+
+  default_action {
+    {{#if (eq default_action "allow")}}
+    allow {}
+    {{else}}
+    block {}
+    {{/if}}
+  }
+
+  {{#if enable_ip_allowlist}}
+  # IP Allowlist Rule (highest priority)
+  rule {
+    name     = "ip-allowlist"
+    priority = 0
+
+    action {
+      allow {}
+    }
+
+    statement {
+      ip_set_reference_statement {
+        arn = aws_wafv2_ip_set.plugin_waf_allowlist.arn
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${local.web_acl_name}-ip-allowlist"
+      sampled_requests_enabled   = var.sample_requests_enabled
+    }
+  }
+  {{/if}}
+
+  {{#if enable_ip_blocklist}}
+  # IP Blocklist Rule
+  rule {
+    name     = "ip-blocklist"
+    priority = {{#if enable_ip_allowlist}}1{{else}}0{{/if}}
+
+    action {
+      block {}
+    }
+
+    statement {
+      ip_set_reference_statement {
+        arn = aws_wafv2_ip_set.plugin_waf_blocklist.arn
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${local.web_acl_name}-ip-blocklist"
+      sampled_requests_enabled   = var.sample_requests_enabled
+    }
+  }
+  {{/if}}
+
+  {{#if enable_rate_limiting}}
+  # Rate Limiting Rule
+  rule {
+    name     = "rate-limiting"
+    priority = 10
+
+    action {
+      {{#if (eq rate_limit_action "block")}}
+      block {}
+      {{else}}
+      count {}
+      {{/if}}
+    }
+
+    statement {
+      rate_based_statement {
+        limit              = var.rate_limit
+        aggregate_key_type = "IP"
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${local.web_acl_name}-rate-limiting"
+      sampled_requests_enabled   = var.sample_requests_enabled
+    }
+  }
+  {{/if}}
+
+  {{#if enable_geo_blocking}}
+  # Geo Blocking Rule
+  rule {
+    name     = "geo-blocking"
+    priority = 20
+
+    action {
+      {{#if (eq geo_block_action "block")}}
+      block {}
+      {{else}}
+      count {}
+      {{/if}}
+    }
+
+    statement {
+      geo_match_statement {
+        country_codes = local.blocked_countries_list
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${local.web_acl_name}-geo-blocking"
+      sampled_requests_enabled   = var.sample_requests_enabled
+    }
+  }
+  {{/if}}
+
+  {{#if enable_core_rule_set}}
+  # AWS Managed Core Rule Set
+  rule {
+    name     = "aws-core-rule-set"
+    priority = 100
+
+    override_action {
+      none {}
+    }
+
+    statement {
+      managed_rule_group_statement {
+        vendor_name = "AWS"
+        name        = "AWSManagedRulesCommonRuleSet"
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${local.web_acl_name}-core-rules"
+      sampled_requests_enabled   = var.sample_requests_enabled
+    }
+  }
+  {{/if}}
+
+  {{#if enable_known_bad_inputs}}
+  # Known Bad Inputs Rule Group
+  rule {
+    name     = "aws-known-bad-inputs"
+    priority = 110
+
+    override_action {
+      none {}
+    }
+
+    statement {
+      managed_rule_group_statement {
+        vendor_name = "AWS"
+        name        = "AWSManagedRulesKnownBadInputsRuleSet"
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${local.web_acl_name}-known-bad-inputs"
+      sampled_requests_enabled   = var.sample_requests_enabled
+    }
+  }
+  {{/if}}
+
+  {{#if enable_sqli_protection}}
+  # SQL Injection Protection
+  rule {
+    name     = "aws-sqli-protection"
+    priority = 120
+
+    override_action {
+      none {}
+    }
+
+    statement {
+      managed_rule_group_statement {
+        vendor_name = "AWS"
+        name        = "AWSManagedRulesSQLiRuleSet"
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${local.web_acl_name}-sqli-protection"
+      sampled_requests_enabled   = var.sample_requests_enabled
+    }
+  }
+  {{/if}}
+
+  {{#if enable_amazon_ip_reputation}}
+  # Amazon IP Reputation List
+  rule {
+    name     = "aws-ip-reputation"
+    priority = 130
+
+    override_action {
+      none {}
+    }
+
+    statement {
+      managed_rule_group_statement {
+        vendor_name = "AWS"
+        name        = "AWSManagedRulesAmazonIpReputationList"
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${local.web_acl_name}-ip-reputation"
+      sampled_requests_enabled   = var.sample_requests_enabled
+    }
+  }
+  {{/if}}
+
+  {{#if enable_anonymous_ip_list}}
+  # Anonymous IP List
+  rule {
+    name     = "aws-anonymous-ip-list"
+    priority = 140
+
+    override_action {
+      none {}
+    }
+
+    statement {
+      managed_rule_group_statement {
+        vendor_name = "AWS"
+        name        = "AWSManagedRulesAnonymousIpList"
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${local.web_acl_name}-anonymous-ips"
+      sampled_requests_enabled   = var.sample_requests_enabled
+    }
+  }
+  {{/if}}
+
+  {{#if enable_linux_protection}}
+  # Linux Operating System Protection
+  rule {
+    name     = "aws-linux-protection"
+    priority = 150
+
+    override_action {
+      none {}
+    }
+
+    statement {
+      managed_rule_group_statement {
+        vendor_name = "AWS"
+        name        = "AWSManagedRulesLinuxRuleSet"
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${local.web_acl_name}-linux-protection"
+      sampled_requests_enabled   = var.sample_requests_enabled
+    }
+  }
+  {{/if}}
+
+  {{#if enable_posix_protection}}
+  # POSIX Operating System Protection
+  rule {
+    name     = "aws-posix-protection"
+    priority = 160
+
+    override_action {
+      none {}
+    }
+
+    statement {
+      managed_rule_group_statement {
+        vendor_name = "AWS"
+        name        = "AWSManagedRulesUnixRuleSet"
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${local.web_acl_name}-posix-protection"
+      sampled_requests_enabled   = var.sample_requests_enabled
+    }
+  }
+  {{/if}}
+
+  {{#if enable_windows_protection}}
+  # Windows Operating System Protection
+  rule {
+    name     = "aws-windows-protection"
+    priority = 170
+
+    override_action {
+      none {}
+    }
+
+    statement {
+      managed_rule_group_statement {
+        vendor_name = "AWS"
+        name        = "AWSManagedRulesWindowsRuleSet"
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${local.web_acl_name}-windows-protection"
+      sampled_requests_enabled   = var.sample_requests_enabled
+    }
+  }
+  {{/if}}
+
+  {{#if enable_php_protection}}
+  # PHP Application Protection
+  rule {
+    name     = "aws-php-protection"
+    priority = 180
+
+    override_action {
+      none {}
+    }
+
+    statement {
+      managed_rule_group_statement {
+        vendor_name = "AWS"
+        name        = "AWSManagedRulesPHPRuleSet"
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${local.web_acl_name}-php-protection"
+      sampled_requests_enabled   = var.sample_requests_enabled
+    }
+  }
+  {{/if}}
+
+  {{#if enable_wordpress_protection}}
+  # WordPress Application Protection
+  rule {
+    name     = "aws-wordpress-protection"
+    priority = 190
+
+    override_action {
+      none {}
+    }
+
+    statement {
+      managed_rule_group_statement {
+        vendor_name = "AWS"
+        name        = "AWSManagedRulesWordPressRuleSet"
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${local.web_acl_name}-wordpress-protection"
+      sampled_requests_enabled   = var.sample_requests_enabled
+    }
+  }
+  {{/if}}
+
+  visibility_config {
+    cloudwatch_metrics_enabled = true
+    metric_name                = local.web_acl_name
+    sampled_requests_enabled   = var.sample_requests_enabled
+  }
+
+  tags = {
+    Name      = var.project_name
+    ManagedBy = "pmp"
+    Plugin    = "aws/waf"
+  }
+}
+
+{{#if enable_logging}}
+{{#if (eq log_destination_type "cloudwatch")}}
+# CloudWatch Log Group for WAF
+resource "aws_cloudwatch_log_group" "plugin_waf" {
+  name              = "/aws/wafv2/${local.web_acl_name}"
+  retention_in_days = var.log_retention_days
+
+  tags = {
+    Name      = "${var.project_name}-waf-logs"
+    ManagedBy = "pmp"
+    Plugin    = "aws/waf"
+  }
+}
+
+# WAF Logging Configuration
+resource "aws_wafv2_web_acl_logging_configuration" "plugin_waf" {
+  resource_arn = aws_wafv2_web_acl.plugin_waf.arn
+
+  log_destination_configs = [
+    aws_cloudwatch_log_group.plugin_waf.arn
+  ]
+}
+{{/if}}
+{{/if}}

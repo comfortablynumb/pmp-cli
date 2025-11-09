@@ -1,0 +1,157 @@
+output "s3_bucket_id" {
+  description = "S3 bucket ID"
+  value       = aws_s3_bucket.plugin_s3.id
+}
+
+output "s3_bucket_name" {
+  description = "S3 bucket name"
+  value       = aws_s3_bucket.plugin_s3.bucket
+}
+
+output "s3_bucket_arn" {
+  description = "ARN of the S3 bucket"
+  value       = aws_s3_bucket.plugin_s3.arn
+}
+
+output "s3_bucket_region" {
+  description = "AWS region where bucket is located"
+  value       = aws_s3_bucket.plugin_s3.region
+}
+
+output "s3_bucket_domain_name" {
+  description = "Bucket domain name"
+  value       = aws_s3_bucket.plugin_s3.bucket_domain_name
+}
+
+output "s3_bucket_regional_domain_name" {
+  description = "Bucket regional domain name"
+  value       = aws_s3_bucket.plugin_s3.bucket_regional_domain_name
+}
+
+{{#if enable_acceleration}}
+output "s3_accelerate_endpoint" {
+  description = "S3 Transfer Acceleration endpoint"
+  value       = "${aws_s3_bucket.plugin_s3.bucket}.s3-accelerate.amazonaws.com"
+}
+{{/if}}
+
+output "s3_versioning_enabled" {
+  description = "Whether versioning is enabled"
+  value       = var.enable_versioning
+}
+
+output "s3_encryption_type" {
+  description = "Server-side encryption type"
+  value       = var.encryption_type
+}
+
+{{#if (eq encryption_type "aws:kms:cmk")}}
+output "s3_kms_key_id" {
+  description = "KMS key ID for encryption"
+  value       = aws_kms_key.plugin_s3.id
+}
+
+output "s3_kms_key_arn" {
+  description = "KMS key ARN for encryption"
+  value       = aws_kms_key.plugin_s3.arn
+}
+{{/if}}
+
+{{#if enable_access_logging}}
+output "s3_log_bucket" {
+  description = "S3 bucket for access logs"
+  value       = var.log_bucket_name != "" ? var.log_bucket_name : aws_s3_bucket.plugin_s3_logs[0].id
+}
+{{/if}}
+
+{{#if enable_replication}}
+output "s3_replication_role_arn" {
+  description = "IAM role ARN for replication"
+  value       = aws_iam_role.plugin_s3_replication.arn
+}
+
+output "s3_replication_destination" {
+  description = "Replication destination bucket ARN"
+  value       = var.replication_destination_bucket
+}
+{{/if}}
+
+# Connection information
+output "connection_info" {
+  description = "How to use this S3 bucket"
+  value = <<-EOT
+    S3 Bucket: ${var.project_name}
+    Region: ${data.aws_region.current.name}
+    Bucket Name: ${aws_s3_bucket.plugin_s3.bucket}
+
+    # AWS CLI Examples:
+
+    # Upload a file:
+    aws s3 cp myfile.txt s3://${aws_s3_bucket.plugin_s3.bucket}/
+
+    # List objects:
+    aws s3 ls s3://${aws_s3_bucket.plugin_s3.bucket}/
+
+    # Download a file:
+    aws s3 cp s3://${aws_s3_bucket.plugin_s3.bucket}/myfile.txt ./
+
+    # Sync a directory:
+    aws s3 sync ./mydir s3://${aws_s3_bucket.plugin_s3.bucket}/mydir/
+
+    {{#if enable_versioning}}
+    # List object versions:
+    aws s3api list-object-versions --bucket ${aws_s3_bucket.plugin_s3.bucket}
+
+    # Restore specific version:
+    aws s3api get-object --bucket ${aws_s3_bucket.plugin_s3.bucket} --key myfile.txt --version-id <VERSION_ID> myfile.txt
+    {{/if}}
+
+    {{#if enable_acceleration}}
+    # Using Transfer Acceleration:
+    aws s3 cp myfile.txt s3://${aws_s3_bucket.plugin_s3.bucket}/ --endpoint-url https://${aws_s3_bucket.plugin_s3.bucket}.s3-accelerate.amazonaws.com
+    {{/if}}
+
+    # SDK Configuration:
+    Bucket: ${aws_s3_bucket.plugin_s3.bucket}
+    Region: ${data.aws_region.current.name}
+    ARN: ${aws_s3_bucket.plugin_s3.arn}
+
+    Features Enabled:
+    - Versioning: ${var.enable_versioning}
+    - Encryption: ${var.encryption_type}
+    {{#if enable_lifecycle_rules}}- Lifecycle Rules: Yes{{/if}}
+    {{#if enable_cors}}- CORS: Yes{{/if}}
+    {{#if enable_intelligent_tiering}}- Intelligent-Tiering: Yes{{/if}}
+    {{#if enable_acceleration}}- Transfer Acceleration: Yes{{/if}}
+    {{#if enable_replication}}- Replication: Yes (to ${var.replication_destination_region}){{/if}}
+  EOT
+}
+
+# Usage examples for applications
+output "usage_examples" {
+  description = "Code examples for using this S3 bucket"
+  value = <<-EOT
+    # Python (boto3):
+    import boto3
+    s3 = boto3.client('s3', region_name='${data.aws_region.current.name}')
+    s3.upload_file('myfile.txt', '${aws_s3_bucket.plugin_s3.bucket}', 'myfile.txt')
+
+    # Node.js (AWS SDK v3):
+    import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+    const client = new S3Client({ region: "${data.aws_region.current.name}" });
+    await client.send(new PutObjectCommand({
+      Bucket: "${aws_s3_bucket.plugin_s3.bucket}",
+      Key: "myfile.txt",
+      Body: fileContent
+    }));
+
+    # Go:
+    import "github.com/aws/aws-sdk-go/service/s3"
+    svc := s3.New(sess, &aws.Config{Region: aws.String("${data.aws_region.current.name}")})
+    svc.PutObject(&s3.PutObjectInput{
+      Bucket: aws.String("${aws_s3_bucket.plugin_s3.bucket}"),
+      Key:    aws.String("myfile.txt"),
+      Body:   bytes.NewReader(data),
+    })
+  EOT
+}
