@@ -5,12 +5,12 @@ use crate::template::{ProjectResource, DynamicProjectEnvironmentResource};
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 
-/// Handles the 'apply' command - runs executor apply with hooks
-pub struct ApplyCommand;
+/// Handles the 'destroy' command - runs executor destroy with hooks
+pub struct DestroyCommand;
 
-impl ApplyCommand {
-    /// Execute the apply command
-    pub fn execute(ctx: &crate::context::Context, project_path: Option<&str>, extra_args: &[String]) -> Result<()> {
+impl DestroyCommand {
+    /// Execute the destroy command
+    pub fn execute(ctx: &crate::context::Context, project_path: Option<&str>, skip_confirmation: bool, extra_args: &[String]) -> Result<()> {
         // Determine working directory
         let work_dir = if let Some(path) = project_path {
             PathBuf::from(path)
@@ -30,7 +30,7 @@ impl ApplyCommand {
         let resource = DynamicProjectEnvironmentResource::from_file(&*ctx.fs, &env_file)
             .context("Failed to load environment resource")?;
 
-        ctx.output.section("Apply");
+        ctx.output.section("Destroy Infrastructure");
         ctx.output.key_value_highlight("Project", &project_name);
         ctx.output.environment_badge(&env_name);
 
@@ -39,6 +39,23 @@ impl ApplyCommand {
         }
 
         ctx.output.key_value("Kind", &resource.kind);
+
+        // Show confirmation prompt unless --yes flag is provided
+        if !skip_confirmation {
+            ctx.output.blank();
+            ctx.output.warning("WARNING: This will destroy all resources managed by this project!");
+            ctx.output.warning(&format!("Project: {} ({})", project_name, env_name));
+            ctx.output.blank();
+
+            let confirmation = ctx.input.text("Type 'yes' to confirm destruction:", None)
+                .context("Failed to get confirmation")?;
+
+            if confirmation.trim().to_lowercase() != "yes" {
+                ctx.output.blank();
+                ctx.output.info("Destruction cancelled");
+                return Ok(());
+            }
+        }
 
         // Get executor configuration
         let executor_config = resource.get_executor_config();
@@ -69,9 +86,9 @@ impl ApplyCommand {
         let env_dir_str = env_path.to_str()
             .context("Failed to convert environment path to string")?;
 
-        // Run pre-apply hooks
-        if !hooks.pre_apply.is_empty() {
-            HooksRunner::run_hooks(&hooks.pre_apply, env_dir_str, "pre-apply")?;
+        // Run pre-destroy hooks
+        if !hooks.pre_destroy.is_empty() {
+            HooksRunner::run_hooks(&hooks.pre_destroy, env_dir_str, "pre-destroy")?;
         }
 
         // Initialize executor
@@ -104,18 +121,18 @@ impl ApplyCommand {
             refresh_command: None,
         };
 
-        // Run apply
-        ctx.output.subsection("Running Apply");
-        ctx.output.dimmed(&format!("Executing {} apply...", executor.get_name()));
-        executor.apply(&execution_config, env_dir_str, extra_args)?;
+        // Run destroy
+        ctx.output.subsection("Running Destroy");
+        ctx.output.dimmed(&format!("Executing {} destroy...", executor.get_name()));
+        executor.destroy(&execution_config, env_dir_str, extra_args)?;
 
-        // Run post-apply hooks
-        if !hooks.post_apply.is_empty() {
-            HooksRunner::run_hooks(&hooks.post_apply, env_dir_str, "post-apply")?;
+        // Run post-destroy hooks
+        if !hooks.post_destroy.is_empty() {
+            HooksRunner::run_hooks(&hooks.post_destroy, env_dir_str, "post-destroy")?;
         }
 
         ctx.output.blank();
-        ctx.output.success("Apply completed successfully");
+        ctx.output.success("Infrastructure destroyed successfully");
 
         Ok(())
     }

@@ -1,15 +1,19 @@
 pub mod apply;
 pub mod create;
+pub mod destroy;
 pub mod find;
 pub mod generate;
 pub mod init;
 pub mod preview;
+pub mod refresh;
 pub mod update;
 
 pub use apply::ApplyCommand;
 pub use create::CreateCommand;
+pub use destroy::DestroyCommand;
 pub use find::FindCommand;
 pub use generate::GenerateCommand;
 pub use init::InitCommand;
 pub use preview::PreviewCommand;
+pub use refresh::RefreshCommand;
 pub use update::UpdateCommand;

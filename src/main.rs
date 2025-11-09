@@ -10,7 +10,7 @@ mod traits;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use commands::{ApplyCommand, CreateCommand, FindCommand, GenerateCommand, InitCommand, PreviewCommand, UpdateCommand};
+use commands::{ApplyCommand, CreateCommand, DestroyCommand, FindCommand, GenerateCommand, InitCommand, PreviewCommand, RefreshCommand, UpdateCommand};
 
 #[derive(Parser)]
 #[command(name = "pmp")]
@@ -72,19 +72,55 @@ enum Commands {
     },
 
     /// Preview changes (run IaC plan)
-    #[command(long_about = "Preview changes (run IaC plan)\n\nExamples:\n  pmp preview\n  pmp preview --path ./my-project")]
+    #[command(long_about = "Preview changes (run IaC plan)\n\nYou can pass additional executor options after --:\n\nExamples:\n  pmp preview\n  pmp preview --path ./my-project\n  pmp preview -- -no-color\n  pmp preview -- -var=environment=prod")]
     Preview {
         /// Path to the project directory (defaults to current directory)
         #[arg(short, long)]
         path: Option<String>,
+
+        /// Additional arguments to pass to the executor (after --)
+        #[arg(last = true)]
+        executor_args: Vec<String>,
     },
 
     /// Apply changes (run IaC apply)
-    #[command(long_about = "Apply changes (run IaC apply)\n\nExamples:\n  pmp apply\n  pmp apply --path ./my-project")]
+    #[command(long_about = "Apply changes (run IaC apply)\n\nYou can pass additional executor options after --:\n\nExamples:\n  pmp apply\n  pmp apply --path ./my-project\n  pmp apply -- -auto-approve\n  pmp apply -- -var=environment=prod -auto-approve")]
     Apply {
         /// Path to the project directory (defaults to current directory)
         #[arg(short, long)]
         path: Option<String>,
+
+        /// Additional arguments to pass to the executor (after --)
+        #[arg(last = true)]
+        executor_args: Vec<String>,
+    },
+
+    /// Destroy infrastructure (run IaC destroy)
+    #[command(long_about = "Destroy infrastructure (run IaC destroy)\n\nWARNING: This will destroy all resources managed by the project!\nYou will be prompted for confirmation unless --yes is specified.\n\nYou can pass additional executor options after --:\n\nExamples:\n  pmp destroy\n  pmp destroy --yes\n  pmp destroy --path ./my-project\n  pmp destroy -- -auto-approve\n  pmp destroy --yes -- -var=environment=prod")]
+    Destroy {
+        /// Path to the project directory (defaults to current directory)
+        #[arg(short, long)]
+        path: Option<String>,
+
+        /// Skip confirmation prompt
+        #[arg(short, long)]
+        yes: bool,
+
+        /// Additional arguments to pass to the executor (after --)
+        #[arg(last = true)]
+        executor_args: Vec<String>,
+    },
+
+    /// Refresh state (run IaC refresh)
+    #[command(long_about = "Refresh state (run IaC refresh)\n\nUpdates the state file with the real infrastructure status without modifying resources.\n\nYou can pass additional executor options after --:\n\nExamples:\n  pmp refresh\n  pmp refresh --path ./my-project\n  pmp refresh -- -var=environment=prod")]
+    Refresh {
+        /// Path to the project directory (defaults to current directory)
+        #[arg(short, long)]
+        path: Option<String>,
+
+        /// Additional arguments to pass to the executor (after --)
+        #[arg(last = true)]
+        executor_args: Vec<String>,
     },
 
     /// Find projects in an Infrastructure
@@ -126,11 +162,17 @@ fn main() -> Result<()> {
         Commands::Generate { template_pack, template, output_dir, template_packs_paths } => {
             GenerateCommand::execute(&ctx, template_pack.as_deref(), template.as_deref(), output_dir.as_deref(), template_packs_paths.as_deref())?;
         }
-        Commands::Preview { path } => {
-            PreviewCommand::execute(&ctx, path.as_deref())?;
+        Commands::Preview { path, executor_args } => {
+            PreviewCommand::execute(&ctx, path.as_deref(), &executor_args)?;
         }
-        Commands::Apply { path } => {
-            ApplyCommand::execute(&ctx, path.as_deref())?;
+        Commands::Apply { path, executor_args } => {
+            ApplyCommand::execute(&ctx, path.as_deref(), &executor_args)?;
+        }
+        Commands::Destroy { path, yes, executor_args } => {
+            DestroyCommand::execute(&ctx, path.as_deref(), yes, &executor_args)?;
+        }
+        Commands::Refresh { path, executor_args } => {
+            RefreshCommand::execute(&ctx, path.as_deref(), &executor_args)?;
         }
         Commands::Find { name, kind } => {
             FindCommand::execute(

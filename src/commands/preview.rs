@@ -10,7 +10,7 @@ pub struct PreviewCommand;
 
 impl PreviewCommand {
     /// Execute the preview command
-    pub fn execute(ctx: &crate::context::Context, project_path: Option<&str>) -> Result<()> {
+    pub fn execute(ctx: &crate::context::Context, project_path: Option<&str>, extra_args: &[String]) -> Result<()> {
         // Determine working directory
         let work_dir = if let Some(path) = project_path {
             PathBuf::from(path)
@@ -100,12 +100,14 @@ impl PreviewCommand {
         let execution_config = ExecutorConfig {
             plan_command: None,
             apply_command: None,
+            destroy_command: None,
+            refresh_command: None,
         };
 
         // Run plan
         ctx.output.subsection("Running Plan");
         ctx.output.dimmed(&format!("Executing {} plan...", executor.get_name()));
-        executor.plan(&execution_config, env_dir_str)?;
+        executor.plan(&execution_config, env_dir_str, extra_args)?;
 
         // Run post-preview hooks
         if !hooks.post_preview.is_empty() {

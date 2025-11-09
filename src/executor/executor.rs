@@ -10,6 +10,10 @@ pub struct ExecutorConfig {
     pub plan_command: Option<String>,
     /// Optional custom apply command (overrides default)
     pub apply_command: Option<String>,
+    /// Optional custom destroy command (overrides default)
+    pub destroy_command: Option<String>,
+    /// Optional custom refresh command (overrides default)
+    pub refresh_command: Option<String>,
 }
 
 /// Project metadata for backend table name generation
@@ -34,12 +38,26 @@ pub trait Executor: Send + Sync {
     /// Execute the plan command (preview changes)
     /// Uses custom command from config if provided, otherwise uses default
     /// Runs interactively with inherited stdio for user interaction
-    fn plan(&self, config: &ExecutorConfig, working_dir: &str) -> Result<()>;
+    /// Additional args can be passed via extra_args (e.g., from -- separator)
+    fn plan(&self, config: &ExecutorConfig, working_dir: &str, extra_args: &[String]) -> Result<()>;
 
     /// Execute the apply command (apply changes)
     /// Uses custom command from config if provided, otherwise uses default
     /// Runs interactively with inherited stdio for user interaction
-    fn apply(&self, config: &ExecutorConfig, working_dir: &str) -> Result<()>;
+    /// Additional args can be passed via extra_args (e.g., from -- separator)
+    fn apply(&self, config: &ExecutorConfig, working_dir: &str, extra_args: &[String]) -> Result<()>;
+
+    /// Execute the destroy command (destroy infrastructure)
+    /// Uses custom command from config if provided, otherwise uses default
+    /// Runs interactively with inherited stdio for user interaction
+    /// Additional args can be passed via extra_args (e.g., from -- separator)
+    fn destroy(&self, config: &ExecutorConfig, working_dir: &str, extra_args: &[String]) -> Result<()>;
+
+    /// Execute the refresh command (update state with real infrastructure)
+    /// Uses custom command from config if provided, otherwise uses default
+    /// Runs interactively with inherited stdio for user interaction
+    /// Additional args can be passed via extra_args (e.g., from -- separator)
+    fn refresh(&self, config: &ExecutorConfig, working_dir: &str, extra_args: &[String]) -> Result<()>;
 
     /// Get the name of this executor (e.g., "opentofu", "terraform")
     fn get_name(&self) -> &str;
@@ -49,6 +67,12 @@ pub trait Executor: Send + Sync {
 
     /// Get the default apply command for this executor
     fn default_apply_command(&self) -> &str;
+
+    /// Get the default destroy command for this executor
+    fn default_destroy_command(&self) -> &str;
+
+    /// Get the default refresh command for this executor
+    fn default_refresh_command(&self) -> &str;
 
     /// Generate common infrastructure file (e.g., _common.tf) with backend and module configuration
     /// Default implementation does nothing (for executors that don't support backends)

@@ -110,11 +110,19 @@ mod tests {
                 .context("Failed to execute test command")
         }
 
-        fn plan(&self, _config: &ExecutorConfig, _working_dir: &str) -> Result<()> {
+        fn plan(&self, _config: &ExecutorConfig, _working_dir: &str, _extra_args: &[String]) -> Result<()> {
             Ok(())
         }
 
-        fn apply(&self, _config: &ExecutorConfig, _working_dir: &str) -> Result<()> {
+        fn apply(&self, _config: &ExecutorConfig, _working_dir: &str, _extra_args: &[String]) -> Result<()> {
+            Ok(())
+        }
+
+        fn destroy(&self, _config: &ExecutorConfig, _working_dir: &str, _extra_args: &[String]) -> Result<()> {
+            Ok(())
+        }
+
+        fn refresh(&self, _config: &ExecutorConfig, _working_dir: &str, _extra_args: &[String]) -> Result<()> {
             Ok(())
         }
 
@@ -128,6 +136,14 @@ mod tests {
 
         fn default_apply_command(&self) -> &str {
             "mock apply"
+        }
+
+        fn default_destroy_command(&self) -> &str {
+            "mock destroy"
+        }
+
+        fn default_refresh_command(&self) -> &str {
+            "mock refresh"
         }
     }
 

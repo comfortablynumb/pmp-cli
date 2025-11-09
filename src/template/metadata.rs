@@ -641,6 +641,22 @@ pub struct HooksConfig {
     /// Commands to run after apply
     #[serde(default)]
     pub post_apply: Vec<String>,
+
+    /// Commands to run before destroy
+    #[serde(default)]
+    pub pre_destroy: Vec<String>,
+
+    /// Commands to run after destroy
+    #[serde(default)]
+    pub post_destroy: Vec<String>,
+
+    /// Commands to run before refresh
+    #[serde(default)]
+    pub pre_refresh: Vec<String>,
+
+    /// Commands to run after refresh
+    #[serde(default)]
+    pub post_refresh: Vec<String>,
 }
 
 /// Input override configuration for infrastructure-level input customization

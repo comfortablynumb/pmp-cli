@@ -109,7 +109,7 @@ impl Executor for OpenTofuExecutor {
         Ok(output)
     }
 
-    fn plan(&self, config: &ExecutorConfig, working_dir: &str) -> Result<()> {
+    fn plan(&self, config: &ExecutorConfig, working_dir: &str, extra_args: &[String]) -> Result<()> {
         let command = config
             .plan_command.as_deref()
             .unwrap_or(self.default_plan_command());
@@ -121,13 +121,18 @@ impl Executor for OpenTofuExecutor {
             anyhow::bail!("Empty command provided");
         }
 
+        // Combine command args with extra args
+        let mut all_args: Vec<&str> = parts[1..].to_vec();
+        let extra_args_refs: Vec<&str> = extra_args.iter().map(|s| s.as_str()).collect();
+        all_args.extend(extra_args_refs);
+
         // Execute with signal handling
-        self.execute_with_signal_handling(parts[0], &parts[1..], working_dir)?;
+        self.execute_with_signal_handling(parts[0], &all_args, working_dir)?;
 
         Ok(())
     }
 
-    fn apply(&self, config: &ExecutorConfig, working_dir: &str) -> Result<()> {
+    fn apply(&self, config: &ExecutorConfig, working_dir: &str, extra_args: &[String]) -> Result<()> {
         let command = config
             .apply_command.as_deref()
             .unwrap_or(self.default_apply_command());
@@ -139,8 +144,36 @@ impl Executor for OpenTofuExecutor {
             anyhow::bail!("Empty command provided");
         }
 
+        // Combine command args with extra args
+        let mut all_args: Vec<&str> = parts[1..].to_vec();
+        let extra_args_refs: Vec<&str> = extra_args.iter().map(|s| s.as_str()).collect();
+        all_args.extend(extra_args_refs);
+
         // Execute with signal handling
-        self.execute_with_signal_handling(parts[0], &parts[1..], working_dir)?;
+        self.execute_with_signal_handling(parts[0], &all_args, working_dir)?;
+
+        Ok(())
+    }
+
+    fn destroy(&self, config: &ExecutorConfig, working_dir: &str, extra_args: &[String]) -> Result<()> {
+        let command = config
+            .destroy_command.as_deref()
+            .unwrap_or(self.default_destroy_command());
+
+        // Parse the command string into command and args
+        let parts: Vec<&str> = command.split_whitespace().collect();
+
+        if parts.is_empty() {
+            anyhow::bail!("Empty command provided");
+        }
+
+        // Combine command args with extra args
+        let mut all_args: Vec<&str> = parts[1..].to_vec();
+        let extra_args_refs: Vec<&str> = extra_args.iter().map(|s| s.as_str()).collect();
+        all_args.extend(extra_args_refs);
+
+        // Execute with signal handling
+        self.execute_with_signal_handling(parts[0], &all_args, working_dir)?;
 
         Ok(())
     }
@@ -155,6 +188,37 @@ impl Executor for OpenTofuExecutor {
 
     fn default_apply_command(&self) -> &str {
         "tofu apply"
+    }
+
+    fn default_destroy_command(&self) -> &str {
+        "tofu destroy"
+    }
+
+    fn refresh(&self, config: &ExecutorConfig, working_dir: &str, extra_args: &[String]) -> Result<()> {
+        let command = config
+            .refresh_command.as_deref()
+            .unwrap_or(self.default_refresh_command());
+
+        // Parse the command string into command and args
+        let parts: Vec<&str> = command.split_whitespace().collect();
+
+        if parts.is_empty() {
+            anyhow::bail!("Empty command provided");
+        }
+
+        // Combine command args with extra args
+        let mut all_args: Vec<&str> = parts[1..].to_vec();
+        let extra_args_refs: Vec<&str> = extra_args.iter().map(|s| s.as_str()).collect();
+        all_args.extend(extra_args_refs);
+
+        // Execute with signal handling
+        self.execute_with_signal_handling(parts[0], &all_args, working_dir)?;
+
+        Ok(())
+    }
+
+    fn default_refresh_command(&self) -> &str {
+        "tofu refresh"
     }
 
     fn generate_common_file(

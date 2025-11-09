@@ -5,11 +5,11 @@ use crate::template::{ProjectResource, DynamicProjectEnvironmentResource};
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 
-/// Handles the 'apply' command - runs executor apply with hooks
-pub struct ApplyCommand;
+/// Handles the 'refresh' command - runs executor refresh with hooks
+pub struct RefreshCommand;
 
-impl ApplyCommand {
-    /// Execute the apply command
+impl RefreshCommand {
+    /// Execute the refresh command
     pub fn execute(ctx: &crate::context::Context, project_path: Option<&str>, extra_args: &[String]) -> Result<()> {
         // Determine working directory
         let work_dir = if let Some(path) = project_path {
@@ -30,7 +30,7 @@ impl ApplyCommand {
         let resource = DynamicProjectEnvironmentResource::from_file(&*ctx.fs, &env_file)
             .context("Failed to load environment resource")?;
 
-        ctx.output.section("Apply");
+        ctx.output.section("Refresh");
         ctx.output.key_value_highlight("Project", &project_name);
         ctx.output.environment_badge(&env_name);
 
@@ -69,9 +69,9 @@ impl ApplyCommand {
         let env_dir_str = env_path.to_str()
             .context("Failed to convert environment path to string")?;
 
-        // Run pre-apply hooks
-        if !hooks.pre_apply.is_empty() {
-            HooksRunner::run_hooks(&hooks.pre_apply, env_dir_str, "pre-apply")?;
+        // Run pre-refresh hooks
+        if !hooks.pre_refresh.is_empty() {
+            HooksRunner::run_hooks(&hooks.pre_refresh, env_dir_str, "pre-refresh")?;
         }
 
         // Initialize executor
@@ -104,18 +104,18 @@ impl ApplyCommand {
             refresh_command: None,
         };
 
-        // Run apply
-        ctx.output.subsection("Running Apply");
-        ctx.output.dimmed(&format!("Executing {} apply...", executor.get_name()));
-        executor.apply(&execution_config, env_dir_str, extra_args)?;
+        // Run refresh
+        ctx.output.subsection("Running Refresh");
+        ctx.output.dimmed(&format!("Executing {} refresh...", executor.get_name()));
+        executor.refresh(&execution_config, env_dir_str, extra_args)?;
 
-        // Run post-apply hooks
-        if !hooks.post_apply.is_empty() {
-            HooksRunner::run_hooks(&hooks.post_apply, env_dir_str, "post-apply")?;
+        // Run post-refresh hooks
+        if !hooks.post_refresh.is_empty() {
+            HooksRunner::run_hooks(&hooks.post_refresh, env_dir_str, "post-refresh")?;
         }
 
         ctx.output.blank();
-        ctx.output.success("Apply completed successfully");
+        ctx.output.success("Refresh completed successfully");
 
         Ok(())
     }
