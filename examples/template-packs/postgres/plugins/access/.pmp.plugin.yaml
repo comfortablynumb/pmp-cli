@@ -27,14 +27,17 @@ spec:
 
   inputs:
     role_name:
+      type: string
       description: Database role/user name to create
       # No default - required input
 
     role_password:
+      type: string
       description: Password for the role (auto-generated if not provided)
       default: ""
 
     database_name:
+      type: string
       description: Database to grant access to
       default: ""  # Inherited from parent template
 
@@ -43,33 +46,42 @@ spec:
       default: ["SELECT"]
 
     grant_option:
+      type: boolean
       description: Allow user to grant privileges to others
       default: false
 
     connection_limit:
+      type: number
+      min: -1
       description: Maximum concurrent connections (-1 for unlimited)
       default: -1
 
     valid_until:
+      type: string
       description: Password expiration timestamp (format YYYY-MM-DD HH:MM:SS)
       default: ""
 
     schema_name:
+      type: string
       description: Schema to grant privileges on
       default: "public"
 
     create_schema:
+      type: boolean
       description: Allow user to create schemas
       default: false
 
     superuser:
+      type: boolean
       description: Grant superuser privileges (WARNING - use with caution)
       default: false
 
     create_role:
+      type: boolean
       description: Allow user to create other roles
       default: false
 
     create_db:
+      type: boolean
       description: Allow user to create databases
       default: false

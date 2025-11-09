@@ -7,6 +7,7 @@ use std::sync::Mutex;
 #[allow(dead_code)]
 pub enum MockResponse {
     Select(String),
+    MultiSelect(Vec<String>),
     Text(String),
     Confirm(bool),
 }
@@ -15,6 +16,9 @@ pub enum MockResponse {
 pub trait UserInput: Send + Sync {
     /// Display a selection prompt with options
     fn select(&self, prompt: &str, options: Vec<String>) -> Result<String>;
+
+    /// Display a multi-selection prompt with options
+    fn multi_select(&self, prompt: &str, options: Vec<String>, defaults: Option<&[usize]>) -> Result<Vec<String>>;
 
     /// Display a text input prompt
     fn text(&self, prompt: &str, default: Option<&str>) -> Result<String>;
@@ -30,6 +34,16 @@ impl UserInput for InquireUserInput {
     fn select(&self, prompt: &str, options: Vec<String>) -> Result<String> {
         use inquire::Select;
         let answer = Select::new(prompt, options).prompt()?;
+        Ok(answer)
+    }
+
+    fn multi_select(&self, prompt: &str, options: Vec<String>, defaults: Option<&[usize]>) -> Result<Vec<String>> {
+        use inquire::MultiSelect;
+        let mut prompt_builder = MultiSelect::new(prompt, options);
+        if let Some(default_indices) = defaults {
+            prompt_builder = prompt_builder.with_default(default_indices);
+        }
+        let answer = prompt_builder.prompt()?;
         Ok(answer)
     }
 
@@ -111,6 +125,25 @@ impl UserInput for MockUserInput {
                 }
             }
             _ => anyhow::bail!("Expected Select response but got a different type"),
+        }
+    }
+
+    fn multi_select(&self, _prompt: &str, options: Vec<String>, _defaults: Option<&[usize]>) -> Result<Vec<String>> {
+        match self.next_response()? {
+            MockResponse::MultiSelect(answers) => {
+                // Verify all answers are in the options
+                for answer in &answers {
+                    if !options.contains(answer) {
+                        anyhow::bail!(
+                            "Mock response '{}' is not in the provided options: {:?}",
+                            answer,
+                            options
+                        )
+                    }
+                }
+                Ok(answers)
+            }
+            _ => anyhow::bail!("Expected MultiSelect response but got a different type"),
         }
     }
 

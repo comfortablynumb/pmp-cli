@@ -288,14 +288,48 @@ pub struct ResourceDefinition {
     pub kind: String,
 }
 
+/// Input type specification
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum InputType {
+    /// String input (default)
+    String,
+    /// Boolean (yes/no) input
+    Boolean,
+    /// Number input with optional min/max constraints
+    Number {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        min: Option<i64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        max: Option<i64>,
+    },
+    /// Select input with enum options
+    Select {
+        options: Vec<EnumOption>,
+    },
+}
+
+/// Enum option with display text and value
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EnumOption {
+    /// Display text shown to the user
+    pub label: String,
+    /// Actual value used in templates
+    pub value: String,
+}
+
 /// Input specification for a template input
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InputSpec {
-    /// Possible enum values for this input
-    #[serde(default)]
+    /// Input type specification
+    #[serde(flatten, skip_serializing_if = "Option::is_none")]
+    pub input_type: Option<InputType>,
+
+    /// Possible enum values for this input (deprecated, use input_type with Select)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enum_values: Option<Vec<String>>,
 
-    /// Default value
+    /// Default value (supports variable interpolation like ${var:_name})
     #[serde(default)]
     pub default: Option<Value>,
 

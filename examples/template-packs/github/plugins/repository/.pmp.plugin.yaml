@@ -10,86 +10,119 @@ spec:
   inputs:
     # Project Metadata
     project_name:
+      type: string
       description: Repository name (defaults to project name)
       default: ""
 
     project_description:
+      type: string
       description: Repository description (defaults to project description)
       default: ""
 
     # Basic Settings
     visibility:
+      type: select
+      options:
+        - label: "Public (Anyone can see)"
+          value: "public"
+        - label: "Private (Only you and collaborators)"
+          value: "private"
+        - label: "Internal (Organization members only)"
+          value: "internal"
+      default: "private"
       description: Repository visibility level
-      enum_values:
-        - public
-        - private
-        - internal
-      default: private
 
     # Repository Features
     has_issues:
+      type: boolean
       description: Enable issues for this repository
-      default: "true"
+      default: true
 
     has_wiki:
+      type: boolean
       description: Enable wiki for this repository
-      default: "false"
+      default: false
 
     has_projects:
+      type: boolean
       description: Enable projects for this repository
-      default: "false"
+      default: false
 
     # Initialization
     gitignore_template:
-      description: .gitignore template to use
-      enum_values:
-        - ""
-        - Node
-        - Python
-        - Go
-        - Rust
-        - Java
-        - Ruby
-        - Terraform
+      type: select
+      options:
+        - label: "None"
+          value: ""
+        - label: "Node.js"
+          value: "Node"
+        - label: "Python"
+          value: "Python"
+        - label: "Go"
+          value: "Go"
+        - label: "Rust"
+          value: "Rust"
+        - label: "Java"
+          value: "Java"
+        - label: "Ruby"
+          value: "Ruby"
+        - label: "Terraform"
+          value: "Terraform"
       default: ""
+      description: .gitignore template to use
 
     license_template:
+      type: select
+      options:
+        - label: "None"
+          value: ""
+        - label: "MIT License"
+          value: "mit"
+        - label: "Apache License 2.0"
+          value: "apache-2.0"
+        - label: "GNU GPL v3.0"
+          value: "gpl-3.0"
+        - label: "BSD 3-Clause License"
+          value: "bsd-3-clause"
+      default: "mit"
       description: License template to use
-      enum_values:
-        - ""
-        - mit
-        - apache-2.0
-        - gpl-3.0
-        - bsd-3-clause
-      default: mit
 
     default_branch:
+      type: string
       description: Default branch name
-      default: main
+      default: "main"
 
     # Merge Settings
     delete_branch_on_merge:
+      type: boolean
       description: Automatically delete head branches after pull requests are merged
-      default: "true"
+      default: true
 
     # Branch Protection
     enable_branch_protection:
+      type: boolean
       description: Enable branch protection rules for the default branch
-      default: "true"
+      default: true
 
     required_approving_review_count:
+      type: select
+      options:
+        - label: "1 Approval"
+          value: "1"
+        - label: "2 Approvals"
+          value: "2"
+        - label: "3 Approvals"
+          value: "3"
+      default: "1"
       description: Number of required approving reviews
-      enum_values:
-        - 1
-        - 2
-        - 3
-      default: 1
 
     # Access Management
     enable_team_access:
+      type: boolean
       description: Enable team-based access management
-      default: "false"
+      default: false
 
     teams:
+      type: string
       description: Team access configuration (format - team-name:permission,another-team:permission)
       default: ""
