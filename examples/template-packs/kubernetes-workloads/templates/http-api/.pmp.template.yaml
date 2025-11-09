@@ -20,6 +20,26 @@ spec:
       - template_pack_name: vault
         plugin_name: secret
 
+    # Example: Plugins that are automatically installed during project creation
+    # Uncomment to enable auto-provisioning of GitHub repository and ECR registry
+    # installed:
+    #   - template_pack_name: github
+    #     plugin_name: repository
+    #     inputs:
+    #       gitignore_template:
+    #         default: Terraform
+    #       license_template:
+    #         default: apache-2.0
+    #       visibility:
+    #         default: private
+    #   - template_pack_name: aws
+    #     plugin_name: ecr
+    #     inputs:
+    #       image_tag_mutability:
+    #         default: IMMUTABLE
+    #       scan_on_push:
+    #         default: "true"
+
   inputs:
     docker_image:
       description: Docker image name (e.g., nginx, myregistry.io/myapp)

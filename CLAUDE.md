@@ -136,6 +136,76 @@ spec:
 - `variables.tf.hbs` - Variable definitions
 - `outputs.tf.hbs` - Output definitions (connection info, secrets, usage instructions)
 
+### Installed Plugins in Templates
+
+Templates can define plugins that are automatically installed during project creation. These plugins cannot be removed and use the same structure as `spec.plugins.allowed`.
+
+**Configuration Location**: `spec.plugins.installed` (array of installed plugin configurations)
+
+**Installed Plugin Structure**:
+```yaml
+spec:
+  plugins:
+    installed:
+      - template_pack_name: github
+        plugin_name: repository
+        inputs:  # Optional input overrides/defaults
+          visibility:
+            default: private
+          enable_branch_protection:
+            default: "true"
+      - template_pack_name: aws
+        plugin_name: ecr
+```
+
+**Behavior During Project Creation**:
+1. User creates project with template
+2. Template inputs collected
+3. Installed plugins are processed automatically:
+   - User sees: "Installing plugin: {template_pack_name}/{plugin_name}"
+   - If plugin requires reference project: user selects from compatible projects
+   - User prompted: "Customize inputs for this plugin? (y/N)"
+   - If yes: collect all inputs (similar to update command)
+   - If no: use defaults from plugin spec + installed config overrides
+4. Plugins are rendered before template rendering
+5. Template can reference plugins via `{{#if plugins.added}}` blocks
+6. Plugins appear in `.pmp.environment.yaml` under `spec.plugins.added`
+
+**Use Cases**:
+- Auto-provision source control (GitHub repository) for applications
+- Auto-create container registries (ECR) for containerized workloads
+- Enforce organizational standards (e.g., all workloads must have monitoring)
+- Simplify onboarding by reducing manual plugin selection
+
+**Example: Kubernetes Workload with Auto-provisioned Resources**:
+```yaml
+spec:
+  apiVersion: pmp.io/v1
+  kind: KubernetesWorkload
+  executor: opentofu
+
+  plugins:
+    # Users can manually add these plugins
+    allowed:
+      - template_pack_name: postgres
+        plugin_name: access
+
+    # These plugins are automatically installed
+    installed:
+      - template_pack_name: github
+        plugin_name: repository
+        inputs:
+          gitignore_template:
+            default: Terraform
+          license_template:
+            default: apache-2.0
+      - template_pack_name: aws
+        plugin_name: ecr
+        inputs:
+          image_tag_mutability:
+            default: IMMUTABLE
+```
+
 ### Infrastructure System
 
 **Required**: Yes - cannot create projects without one

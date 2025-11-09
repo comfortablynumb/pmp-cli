@@ -9,6 +9,18 @@ spec:
   kind: CodeRepository
   executor: opentofu
 
+  # Example: Plugins that are automatically installed during project creation
+  # Uncomment to enable auto-provisioning of resources for this repository
+  # plugins:
+  #   installed:
+  #     - template_pack_name: aws
+  #       plugin_name: ecr
+  #       inputs:
+  #         image_tag_mutability:
+  #           default: IMMUTABLE
+  #         scan_on_push:
+  #           default: "true"
+
   inputs:
     # Basic Settings
     repository_name:

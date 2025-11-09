@@ -112,6 +112,10 @@ pub struct PluginsConfig {
     /// List of allowed plugins from other templates
     #[serde(default)]
     pub allowed: Vec<AllowedPluginConfig>,
+
+    /// List of plugins that are automatically installed during project creation
+    #[serde(default)]
+    pub installed: Vec<AllowedPluginConfig>,
 }
 
 /// Configuration for an allowed plugin
