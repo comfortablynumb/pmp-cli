@@ -58,6 +58,8 @@ impl CollectionManager {
             kind: "Infrastructure".to_string(),
             metadata: InfrastructureMetadata { name, description },
             spec: InfrastructureSpec {
+                categories: vec![],
+                template_packs: std::collections::HashMap::new(),
                 resource_kinds: vec![],
                 environments: std::collections::HashMap::new(),
                 hooks: None,

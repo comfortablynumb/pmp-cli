@@ -4,20 +4,204 @@ metadata:
   name: Infrastructure Example with PostgreSQL Backend
   description: Example project collection demonstrating PostgreSQL remote state backend configuration
 spec:
-  resource_kinds:
-    - apiVersion: pmp.io/v1
-      kind: KubernetesWorkload
+  # Categories organize templates hierarchically for better discovery and organization
+  categories:
+    # ============================================================================
+    # Applications - Workloads and services running in Kubernetes
+    # ============================================================================
+    - id: applications
+      name: Applications
+      description: Application workloads and services
+      templates: []
+      subcategories:
+        # GitOps tools for continuous deployment
+        - id: applications_gitops
+          name: GitOps
+          description: GitOps and continuous deployment tools
+          subcategories: []
+          templates:
+            - template_pack: argo-cd
+              template: argo-cd
+            - template_pack: argo-cd
+              template: helm-application
+
+        # Microservices and APIs
+        - id: applications_microservices
+          name: Microservices
+          description: Microservices and API applications
+          subcategories: []
+          templates:
+            - template_pack: kubernetes-workloads
+              template: http-api
+            - template_pack: examples
+              template: application
+
+        # Platform-level services
+        - id: applications_platform
+          name: Platform Services
+          description: Core platform services and utilities
+          subcategories: []
+          templates:
+            - template_pack: kubernetes-workloads
+              template: helm
+            - template_pack: vault
+              template: vault
+
+        # Development and testing tools
+        - id: applications_development
+          name: Development & Testing
+          description: Development and testing applications
+          subcategories: []
+          templates:
+            - template_pack: minikube-http-echo
+              template: minikube-http-echo
+
+    # ============================================================================
+    # Infrastructure - Core infrastructure components
+    # ============================================================================
+    - id: infrastructure
+      name: Infrastructure
+      description: Core infrastructure components and services
+      templates: []
+      subcategories:
+        # Databases
+        - id: infrastructure_databases
+          name: Databases
+          description: Database systems and data stores
+          subcategories: []
+          templates:
+            - template_pack: postgres
+              template: postgres
+
+        # Networking and service mesh
+        - id: infrastructure_networking
+          name: Networking
+          description: Service mesh and networking components
+          subcategories: []
+          templates:
+            - template_pack: kubernetes
+              template: linkerd
+
+        # Observability stack
+        - id: infrastructure_observability
+          name: Observability
+          description: Monitoring, logging, and tracing
+          subcategories: []
+          templates:
+            - template_pack: kubernetes
+              template: k8s-monitoring
+
+    # ============================================================================
+    # DevOps - Development and operations tooling
+    # ============================================================================
+    - id: devops
+      name: DevOps
+      description: Development and operations tools
+      templates: []
+      subcategories:
+        # Source control
+        - id: devops_source_control
+          name: Source Control
+          description: Version control repositories
+          subcategories: []
+          templates:
+            - template_pack: github
+              template: repository
+
+        # Container registries
+        - id: devops_registries
+          name: Container Registries
+          description: Container image registries
+          subcategories: []
+          templates:
+            - template_pack: aws
+              template: ecr
+
+  # Template pack configurations for input defaults and customizations
+  template_packs:
+    # Kubernetes workloads pack
+    kubernetes-workloads:
       templates:
         http-api:
-          template_pack_name: kubernetes-workloads
           defaults:
             inputs:
               docker_image:
                 value: ironedge/pmp-test-api
+                show_as_default: false
               version:
                 value: latest
-    - apiVersion: pmp.io/v1
-      kind: Postgres
+                show_as_default: false
+        helm:
+          defaults: {}
+
+    # Argo CD pack
+    argo-cd:
+      templates:
+        argo-cd:
+          defaults:
+            inputs:
+              namespace:
+                value: argocd
+                show_as_default: true
+        helm-application:
+          defaults: {}
+
+    # Examples pack
+    examples:
+      templates:
+        application:
+          defaults: {}
+
+    # PostgreSQL pack
+    postgres:
+      templates:
+        postgres:
+          defaults:
+            inputs:
+              instance_name:
+                value: main-db
+                show_as_default: true
+
+    # Kubernetes infrastructure pack
+    kubernetes:
+      templates:
+        linkerd:
+          defaults: {}
+        k8s-monitoring:
+          defaults: {}
+
+    # Vault pack
+    vault:
+      templates:
+        vault:
+          defaults: {}
+
+    # GitHub pack
+    github:
+      templates:
+        repository:
+          defaults:
+            inputs:
+              visibility:
+                value: private
+                show_as_default: true
+
+    # AWS pack
+    aws:
+      templates:
+        ecr:
+          defaults:
+            inputs:
+              image_tag_mutability:
+                value: MUTABLE
+                show_as_default: true
+
+    # Minikube pack
+    minikube-http-echo:
+      templates:
+        minikube-http-echo:
+          defaults: {}
+
   environments:
     development:
       name: Development

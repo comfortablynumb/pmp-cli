@@ -212,53 +212,90 @@ spec:
 **File**: `.pmp.infrastructure.yaml`
 
 **Must define**:
-- `spec.environments` - Available environments (keys must be lowercase alphanumeric + optional hyphens)
-- `spec.resource_kinds` - Available resource kinds, which limits which templates can be used
+- `spec.environments` - Available environments (keys must be lowercase alphanumeric + optional underscores)
+- `spec.categories` - Hierarchical category tree for organizing templates
 
 **Environment Naming Rules**:
 - Environment names (keys in `spec.environments`) MUST be lowercase alphanumeric
-- May contain hyphens (-)
-- No uppercase letters, underscores, or special characters allowed
+- May contain underscores (_)
+- Cannot start with a number
+- No uppercase letters, hyphens, or other special characters allowed
 
-**Template Configuration** (Optional):
-- `spec.resource_kinds[].templates` - Template-specific configuration for filtering and input overrides
-- Allows filtering which templates can be used for each resource kind
-- Enables collection-level input overrides (change defaults or set fixed values)
+**Category Structure** (Required):
+- `spec.categories` - Hierarchical tree organizing templates by category
+- Templates must be listed in categories to be usable
+- Categories can have subcategories for nested organization
 - Structure:
   ```yaml
   spec:
-    resource_kinds:
-      - apiVersion: pmp.io/v1
-        kind: KubernetesWorkload
-        templates:
-          <template-name>:
-            template_pack_name: <pack-name>  # Required: template pack this template belongs to
-            allowed: true                     # Optional (default: true): allow/block this template
-            defaults:                         # Optional: input overrides
-              inputs:
-                <input-name>:
-                  value: <value>              # The override value
-                  show_as_default: true       # true: change default; false: skip user prompt
+    categories:
+      - id: category_id               # Unique identifier (alphanumeric, underscores)
+        name: Category Display Name   # Human-readable name
+        description: Optional description
+        subcategories: []             # Nested categories (optional)
+        templates:                    # Templates in this category
+          - template_pack: pack-name
+            template: template-name
   ```
 
-**Template Configuration Features**:
-- **Filtering**: Set `allowed: false` to block specific templates for a resource kind
+**Template Pack Configuration** (Optional):
+- `spec.template_packs` - Template pack configurations for input defaults and overrides
+- Separate from categories - handles input customization
+- Structure:
+  ```yaml
+  spec:
+    template_packs:
+      <pack-name>:
+        templates:
+          <template-name>:
+            defaults:
+              inputs:
+                <input-name>:
+                  value: <value>
+                  show_as_default: true  # true: change default; false: skip user prompt
+  ```
+
+**Template Organization Features**:
+- **Filtering**: Only templates listed in categories are accessible
+- **Multi-Category**: Templates can appear in multiple categories
+- **Hierarchical**: Use subcategories for nested organization
 - **Input Overrides**:
   - `show_as_default: true` - Changes the default value shown to user (user can still override)
   - `show_as_default: false` - Uses the value directly without prompting the user
-- **Input Precedence**: Template base → Environment overrides → Collection overrides → User input
-- **Backward Compatible**: Existing collections without `templates` field work unchanged
+- **Input Precedence**: Template base → Environment overrides → Template pack overrides → User input
+- **Backward Compatible**: Old `resource_kinds` format auto-migrates to categories on load
 
-**Template Configuration Example**:
+**Complete Infrastructure Example**:
 ```yaml
 spec:
-  resource_kinds:
-    - apiVersion: pmp.io/v1
-      kind: KubernetesWorkload
+  # Category tree organizing templates
+  categories:
+    - id: pmp_io_v1_kubernetesworkload
+      name: KubernetesWorkload (pmp.io/v1)
+      description: Kubernetes workload templates
+      subcategories: []
+      templates:
+        - template_pack: microservices
+          template: api-service
+        - template_pack: microservices
+          template: worker-service
+
+    - id: databases
+      name: Databases
+      description: Database templates
+      subcategories:
+        - id: relational
+          name: Relational Databases
+          templates:
+            - template_pack: postgres
+              template: postgres
+      templates: []
+
+  # Template pack configuration for input overrides
+  template_packs:
+    microservices:
       templates:
         api-service:
-          template_pack_name: microservices
-          allowed: true
           defaults:
             inputs:
               replicas:
@@ -267,9 +304,12 @@ spec:
               environment:
                 value: "production"
                 show_as_default: false    # Always use "production", no prompt
-        legacy-app:
-          template_pack_name: microservices
-          allowed: false                  # Block this template
+        worker-service:
+          defaults: {}
+    postgres:
+      templates:
+        postgres:
+          defaults: {}
 ```
 
 **Executor Configuration** (Optional):
@@ -450,7 +490,7 @@ Environment: `projects/kubernetes_workload/my-api/environments/dev/.pmp.environm
 - Template files must be `.pmp.template.yaml` (inside `templates/` subdirectory)
 - Plugin files must be `.pmp.plugin.yaml` (inside `templates/` subdirectory)
 - Resource kinds must be alphanumeric
-- Environment names must be lowercase alphanumeric + optional hyphens
+- Environment names must be lowercase alphanumeric + optional underscores (cannot start with number)
 - Project discovery must work at any depth
 - Multiple projects per resource kind supported
 - Multiple environments per project supported

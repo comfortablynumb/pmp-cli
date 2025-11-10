@@ -71,6 +71,7 @@ impl UpdateCommand {
         // Discover plugins with compatible projects
         let plugins_with_projects = Self::discover_plugins_with_compatible_projects(
             ctx,
+            &collection,
             &collection_root,
             template_packs_paths,
             &current_env_resource, // Pass target project info for filtering
@@ -341,6 +342,7 @@ impl UpdateCommand {
     /// Returns a list of plugins with their compatible projects
     fn discover_plugins_with_compatible_projects(
         ctx: &crate::context::Context,
+        infrastructure: &InfrastructureResource,
         collection_root: &Path,
         template_packs_paths: Option<&str>,
         target_env_resource: &DynamicProjectEnvironmentResource,
@@ -371,7 +373,16 @@ impl UpdateCommand {
         // Convert to Vec<&str> for the discovery function
         let custom_paths: Vec<&str> = all_paths.iter().map(|s| s.as_str()).collect();
 
-        let template_packs = TemplateDiscovery::discover_template_packs_with_custom_paths(&*ctx.fs, &*ctx.output, &custom_paths)?;
+        let all_template_packs = TemplateDiscovery::discover_template_packs_with_custom_paths(&*ctx.fs, &*ctx.output, &custom_paths)?;
+
+        // Filter to only packs configured in infrastructure (if template_packs is configured)
+        let template_packs: Vec<_> = if infrastructure.spec.template_packs.is_empty() {
+            all_template_packs  // No filtering - include all packs
+        } else {
+            all_template_packs.into_iter()
+                .filter(|pack| infrastructure.spec.template_packs.contains_key(&pack.resource.metadata.name))
+                .collect()
+        };
 
         // For each template pack
         for pack_info in template_packs {

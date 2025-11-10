@@ -14,6 +14,13 @@ use serde_json::Value;
 /// Handles the 'create' command - creates projects from templates
 pub struct CreateCommand;
 
+/// Helper enum for category navigation options
+enum OptionType {
+    Back,
+    Category(String),
+    Template(String, String), // (pack, template)
+}
+
 impl CreateCommand {
     /// Process installed plugins from the template spec
     #[allow(clippy::too_many_arguments)]
@@ -397,14 +404,14 @@ impl CreateCommand {
             ctx.output.key_value("Description", desc);
         }
 
-        // Step 2: Get resource kinds from infrastructure
-        let allowed_resource_kinds = &infrastructure.spec.resource_kinds;
-
-        if allowed_resource_kinds.is_empty() {
+        // Step 2: Validate infrastructure configuration
+        if infrastructure.spec.categories.is_empty() {
             anyhow::bail!(
-                "Infrastructure must define resource_kinds.\n\nPlease add resource kinds to the Infrastructure."
+                "Infrastructure must define categories.\n\nPlease add categories to organize templates in the Infrastructure."
             );
         }
+
+        // Note: template_packs can be empty - we'll include all discovered packs in that case
 
         // Step 3: Discover template packs
         // Parse flag paths (colon-separated)
@@ -436,41 +443,61 @@ impl CreateCommand {
             );
         }
 
-        // Step 4: Filter template packs by checking their templates against collection's allowed resource kinds
+        // Step 4: Build flat list of allowed templates from category tree
+        let allowed_templates = Self::collect_templates_from_categories(&infrastructure.spec.categories);
+
+        if allowed_templates.is_empty() {
+            anyhow::bail!(
+                "No templates defined in category tree.\n\nPlease add templates to categories in the Infrastructure."
+            );
+        }
+
+        // Step 4.5: Filter template packs to only configured ones (or include all if template_packs is empty)
+        let configured_pack_names: Option<std::collections::HashSet<&String>> = if infrastructure.spec.template_packs.is_empty() {
+            None  // No filtering - include all packs
+        } else {
+            Some(infrastructure.spec.template_packs.keys().collect())
+        };
+
+        // Step 5: Filter template packs by checking their templates against category tree
         let mut filtered_packs_with_templates: Vec<(TemplatePackInfo, Vec<(TemplateInfo, Option<crate::template::metadata::TemplateConfig>)>)> = Vec::new();
 
         for pack in &all_template_packs {
+            let pack_name = &pack.resource.metadata.name;
+
+            // Skip packs not in template_packs config (if configured)
+            if let Some(ref configured_names) = configured_pack_names {
+                if !configured_names.contains(pack_name) {
+                    continue;
+                }
+            }
+
             let templates_in_pack = TemplateDiscovery::discover_templates_in_pack(&*ctx.fs, &*ctx.output, &pack.path)
                 .context("Failed to discover templates in pack")?;
 
-            let pack_name = &pack.resource.metadata.name;
-
-            // Filter templates that match allowed resource kinds and template-specific configuration
+            // Filter templates that are in the category tree
             let matching_templates: Vec<(TemplateInfo, Option<crate::template::metadata::TemplateConfig>)> = templates_in_pack
                 .into_iter()
                 .filter_map(|t| {
-                    // Find a matching resource kind filter
-                    for filter in allowed_resource_kinds.iter() {
-                        if filter.matches_template(&t.resource.spec) {
-                            // Check template-specific configuration
-                            let template_name = &t.resource.metadata.name;
-                            match filter.get_template_config(template_name, pack_name) {
-                                Some(Some(config)) => {
-                                    // Template is explicitly configured and allowed
-                                    return Some((t, Some(config.clone())));
+                    let template_name = &t.resource.metadata.name;
+
+                    // Check if this template is in the category tree
+                    if allowed_templates.contains(&(pack_name.clone(), template_name.clone())) {
+                        // Get template configuration from template_packs (if any)
+                        let config = infrastructure.get_template_config(pack_name, template_name)
+                            .map(|override_config| {
+                                // Convert TemplateOverrideConfig to TemplateConfig for compatibility
+                                crate::template::metadata::TemplateConfig {
+                                    template_pack_name: pack_name.clone(),
+                                    allowed: true,
+                                    defaults: override_config.defaults.clone(),
                                 }
-                                Some(None) => {
-                                    // Template is explicitly not allowed
-                                    return None;
-                                }
-                                None => {
-                                    // No template-specific config, allow by default
-                                    return Some((t, None));
-                                }
-                            }
-                        }
+                            });
+
+                        Some((t, config))
+                    } else {
+                        None  // Template not in category tree
                     }
-                    None // No matching resource kind filter
                 })
                 .collect();
 
@@ -482,17 +509,55 @@ impl CreateCommand {
 
         if filtered_packs_with_templates.is_empty() {
             anyhow::bail!(
-                "No template packs contain templates that match the resource kinds allowed in this infrastructure.\n\nAllowed resource kinds: {}",
-                allowed_resource_kinds.iter()
-                    .map(|r| format!("{}/{}", r.api_version, r.kind))
-                    .collect::<Vec<_>>()
-                    .join(", ")
+                "No template packs contain templates that match the categories in this infrastructure.\n\nCategories: {}",
+                Self::format_category_names(&infrastructure.spec.categories)
             );
         }
 
         ctx.output.blank();
-        ctx.output.info(&format!("Found {} compatible template pack(s)", filtered_packs_with_templates.len()));
 
+        // Step 5: Navigate category tree and select template
+        ctx.output.subsection("Template Selection");
+        ctx.output.dimmed("Browse templates by category");
+        ctx.output.blank();
+
+        let selected_template_ref = Self::navigate_categories_and_select_template(
+            ctx,
+            &infrastructure.spec.categories,
+            &filtered_packs_with_templates,
+        )?;
+
+        let selected_pack_name = selected_template_ref.0.clone();
+        let selected_template_name = selected_template_ref.1.clone();
+
+        // Find the selected template and config
+        let mut selected_template_info: Option<(TemplateInfo, Option<crate::template::metadata::TemplateConfig>)> = None;
+        for (pack, templates) in &filtered_packs_with_templates {
+            for (template, config) in templates {
+                if pack.resource.metadata.name == selected_pack_name
+                    && template.resource.metadata.name == selected_template_name {
+                    selected_template_info = Some((template.clone(), config.clone()));
+                    break;
+                }
+            }
+            if selected_template_info.is_some() {
+                break;
+            }
+        }
+
+        let (selected_template, template_config) = selected_template_info
+            .context("Selected template not found in discovered templates")?;
+
+        // Display selected template info
+        ctx.output.subsection("Selected Template");
+        ctx.output.key_value_highlight("Template", &selected_template.resource.metadata.name);
+        if let Some(desc) = &selected_template.resource.metadata.description {
+            ctx.output.key_value("Description", desc);
+        }
+        ctx.output.blank();
+
+        // Step 5 (OLD): Select template pack - REPLACED BY CATEGORY NAVIGATION
+        /*
         // Step 5: Select template pack
         let (selected_pack, available_templates) = if filtered_packs_with_templates.len() == 1 {
             // Only one pack, use it automatically
@@ -591,6 +656,7 @@ impl CreateCommand {
 
             (template, config)
         };
+        */
 
         // Step 6.5: Handle template reference projects (if template requires them)
         let mut template_reference_projects = Vec::new();
@@ -627,9 +693,13 @@ impl CreateCommand {
                             let env_file = env_path.join(".pmp.environment.yaml");
                             if ctx.fs.exists(&env_file) {
                                 if let Ok(env_resource) = crate::template::metadata::DynamicProjectEnvironmentResource::from_file(&*ctx.fs, &env_file) {
+                                    // Check apiVersion/kind match AND template is in category tree
                                     if env_resource.api_version == template_ref.api_version
                                         && env_resource.kind == template_ref.kind
-                                        && Self::labels_match(&project.labels, &template_ref.label_selector) {
+                                        && Self::labels_match(&project.labels, &template_ref.label_selector)
+                                        && env_resource.spec.template.as_ref()
+                                            .map(|t| infrastructure.is_template_in_category_tree(&t.template_pack_name, &t.name))
+                                            .unwrap_or(false) {
                                         compatible_projects.push((project.clone(), project_path.clone()));
                                         break;
                                     }
@@ -959,7 +1029,7 @@ impl CreateCommand {
             &project_name,
             &selected_template.resource,
             &inputs,
-            &selected_pack.resource.metadata.name,
+            &selected_pack_name,
             &selected_template.resource.metadata.name,
             &template_reference_projects,
             &added_plugins,
@@ -1280,6 +1350,227 @@ impl CreateCommand {
         true
     }
 
+    /// Recursively collect all templates from the category tree
+    fn collect_templates_from_categories(categories: &[crate::template::metadata::Category]) -> std::collections::HashSet<(String, String)> {
+        let mut templates = std::collections::HashSet::new();
+
+        for category in categories {
+            // Add templates from this category
+            for template in &category.templates {
+                templates.insert((template.template_pack.clone(), template.template.clone()));
+            }
+
+            // Recursively add templates from subcategories
+            let sub_templates = Self::collect_templates_from_categories(&category.subcategories);
+            templates.extend(sub_templates);
+        }
+
+        templates
+    }
+
+    /// Format category names for display in error messages
+    fn format_category_names(categories: &[crate::template::metadata::Category]) -> String {
+        let names: Vec<String> = categories
+            .iter()
+            .map(|c| c.name.clone())
+            .collect();
+
+        if names.is_empty() {
+            "(none)".to_string()
+        } else {
+            names.join(", ")
+        }
+    }
+
+    /// Clear previous lines from terminal output
+    /// Uses ANSI escape codes to move cursor up and clear lines
+    fn clear_previous_lines(count: usize) {
+        use std::io::{self, Write};
+        for _ in 0..count {
+            // Move cursor up one line and clear it
+            print!("\x1B[1A\x1B[2K");
+        }
+        // Flush to ensure the escape codes are applied immediately
+        io::stdout().flush().ok();
+    }
+
+    /// Navigate category tree and select a template
+    /// Returns (template_pack_name, template_name)
+    fn navigate_categories_and_select_template(
+        ctx: &crate::context::Context,
+        categories: &[crate::template::metadata::Category],
+        filtered_packs_with_templates: &[(TemplatePackInfo, Vec<(TemplateInfo, Option<crate::template::metadata::TemplateConfig>)>)],
+    ) -> Result<(String, String)> {
+        // Build set of discovered templates
+        let discovered_templates: std::collections::HashSet<(String, String)> = filtered_packs_with_templates
+            .iter()
+            .flat_map(|(pack, templates)| {
+                templates.iter().map(move |(template, _)| {
+                    (pack.resource.metadata.name.clone(), template.resource.metadata.name.clone())
+                })
+            })
+            .collect();
+
+        // Helper to check if a category has any content (recursively)
+        fn has_content(
+            category: &crate::template::metadata::Category,
+            discovered: &std::collections::HashSet<(String, String)>,
+        ) -> bool {
+            // Check if this category has any discovered templates
+            let has_templates = category.templates.iter().any(|t| {
+                discovered.contains(&(t.template_pack.clone(), t.template.clone()))
+            });
+
+            // Check if any subcategories have content
+            let has_subcategories = category.subcategories.iter().any(|sub| has_content(sub, discovered));
+
+            has_templates || has_subcategories
+        }
+
+        // Navigation state: stack of category IDs
+        let mut nav_stack: Vec<String> = Vec::new();
+
+        loop {
+            // Find current category
+            let (current_category, current_subcategories) = if nav_stack.is_empty() {
+                // At root level - no current category, just root categories
+                (None, categories)
+            } else {
+                // Navigate to the selected category
+                let mut current_cats = categories;
+                let mut found_category: Option<&crate::template::metadata::Category> = None;
+
+                for (idx, category_id) in nav_stack.iter().enumerate() {
+                    let cat = current_cats.iter().find(|c| &c.id == category_id)
+                        .ok_or_else(|| anyhow::anyhow!("Category not found: {}", category_id))?;
+
+                    if idx == nav_stack.len() - 1 {
+                        // This is the last category in the stack - this is our current category
+                        found_category = Some(cat);
+                    } else {
+                        // Navigate deeper
+                        current_cats = &cat.subcategories;
+                    }
+                }
+
+                let current_cat = found_category.unwrap();
+                (Some(current_cat), &current_cat.subcategories[..])
+            };
+
+            // Build options for current level
+            let mut options: Vec<String> = Vec::new();
+            let mut option_types: Vec<OptionType> = Vec::new();
+
+            // Add subcategories (only those with content)
+            for category in current_subcategories {
+                if has_content(category, &discovered_templates) {
+                    let display = if let Some(desc) = &category.description {
+                        format!("📁 {} - {}", category.name, desc)
+                    } else {
+                        format!("📁 {}", category.name)
+                    };
+                    options.push(display);
+                    option_types.push(OptionType::Category(category.id.clone()));
+                }
+            }
+
+            // Add templates from current category (if we're inside a category)
+            // OR templates from all root categories (if we're at root)
+            if let Some(cat) = current_category {
+                // We're inside a specific category - show its templates
+                for template_ref in &cat.templates {
+                    if discovered_templates.contains(&(template_ref.template_pack.clone(), template_ref.template.clone())) {
+                        let desc = filtered_packs_with_templates
+                            .iter()
+                            .find(|(p, _)| p.resource.metadata.name == template_ref.template_pack)
+                            .and_then(|(_, templates)| {
+                                templates
+                                    .iter()
+                                    .find(|(t, _)| t.resource.metadata.name == template_ref.template)
+                                    .and_then(|(t, _)| t.resource.metadata.description.as_deref())
+                            })
+                            .unwrap_or("");
+
+                        let display = if desc.is_empty() {
+                            format!("📄 {}", template_ref.template)
+                        } else {
+                            format!("📄 {} - {}", template_ref.template, desc)
+                        };
+                        options.push(display);
+                        option_types.push(OptionType::Template(
+                            template_ref.template_pack.clone(),
+                            template_ref.template.clone(),
+                        ));
+                    }
+                }
+            } else {
+                // We're at root - show templates from all root categories
+                for category in current_subcategories {
+                    for template_ref in &category.templates {
+                        if discovered_templates.contains(&(template_ref.template_pack.clone(), template_ref.template.clone())) {
+                            let desc = filtered_packs_with_templates
+                                .iter()
+                                .find(|(p, _)| p.resource.metadata.name == template_ref.template_pack)
+                                .and_then(|(_, templates)| {
+                                    templates
+                                        .iter()
+                                        .find(|(t, _)| t.resource.metadata.name == template_ref.template)
+                                        .and_then(|(t, _)| t.resource.metadata.description.as_deref())
+                                })
+                                .unwrap_or("");
+
+                            let display = if desc.is_empty() {
+                                format!("📄 {}", template_ref.template)
+                            } else {
+                                format!("📄 {} - {}", template_ref.template, desc)
+                            };
+                            options.push(display);
+                            option_types.push(OptionType::Template(
+                                template_ref.template_pack.clone(),
+                                template_ref.template.clone(),
+                            ));
+                        }
+                    }
+                }
+            }
+
+            // Add "Back" option at the end if not at root
+            if !nav_stack.is_empty() {
+                options.push("← Back".to_string());
+                option_types.push(OptionType::Back);
+            }
+
+            if options.is_empty() {
+                anyhow::bail!("No templates or categories available");
+            }
+
+            // Show selection prompt (empty string to avoid repeated prompts during navigation)
+            let selected = ctx.input.select("", options.clone())
+                .context("Failed to select")?;
+
+            // Find which option was selected
+            let selected_index = options.iter().position(|opt| opt == &selected)
+                .context("Selection not found")?;
+
+            match &option_types[selected_index] {
+                OptionType::Back => {
+                    // Clear the previous selection output (1 line)
+                    Self::clear_previous_lines(1);
+                    nav_stack.pop();
+                }
+                OptionType::Category(category_id) => {
+                    // Clear the previous selection output (1 line)
+                    Self::clear_previous_lines(1);
+                    nav_stack.push(category_id.clone());
+                }
+                OptionType::Template(pack, template) => {
+                    // Don't clear for template selection - this is the final choice
+                    return Ok((pack.clone(), template.clone()));
+                }
+            }
+        }
+    }
+
     /// Generate the .pmp.project.yaml file for the project (identifier only, no spec)
     fn generate_project_identifier_yaml(
         ctx: &crate::context::Context,
@@ -1470,6 +1761,20 @@ spec:
         fs: &MockFileSystem,
         resource_kinds_yaml: &str,
     ) {
+        // Convert old resource_kinds format to new category format for tests
+        // This simulates what the migration logic does
+        setup_infrastructure_with_categories(
+            fs,
+            &convert_resource_kinds_to_categories(resource_kinds_yaml),
+            &extract_template_packs_config(resource_kinds_yaml),
+        );
+    }
+
+    fn setup_infrastructure_with_categories(
+        fs: &MockFileSystem,
+        categories_yaml: &str,
+        template_packs_yaml: &str,
+    ) {
         let infrastructure_yaml = format!(
             r#"apiVersion: pmp.io/v1
 kind: Infrastructure
@@ -1477,17 +1782,190 @@ metadata:
   name: Test Infrastructure
   description: Test infrastructure
 spec:
-  resource_kinds:
+  categories:
+{}
+  template_packs:
 {}
   environments:
     dev:
       name: Development
       description: Development environment"#,
-            resource_kinds_yaml
+            categories_yaml,
+            template_packs_yaml
         );
         // Create in actual current directory (for discovery to work)
         let current_dir = std::env::current_dir().unwrap();
         fs.write(&current_dir.join(".pmp.infrastructure.yaml"), &infrastructure_yaml).unwrap();
+    }
+
+    /// Convert old resource_kinds YAML to new categories format
+    fn convert_resource_kinds_to_categories(resource_kinds_yaml: &str) -> String {
+        // Parse the resource kinds and create corresponding categories
+        // For simplicity in tests, we'll extract apiVersion/kind and create a category per resource
+
+        // This is a simplified conversion for test purposes
+        // The real migration logic in metadata.rs handles this more comprehensively
+
+        if resource_kinds_yaml.contains("kind: TestResource") {
+            // Check if there's no templates section - this means ALL templates are allowed (old default behavior)
+            let has_templates_section = resource_kinds_yaml.contains("templates:");
+
+            if !has_templates_section {
+                // No templates section means all templates allowed - use a default set
+                return r#"    - id: pmp_io_v1_testresource
+      name: TestResource (pmp.io/v1)
+      description: Test resource type
+      templates:
+        - template_pack: test-pack
+          template: test-template"#.to_string();
+            }
+
+            // Build template list based on what's mentioned and allowed
+            let mut templates = Vec::new();
+
+            // Check for template-a
+            if resource_kinds_yaml.contains("template-a") {
+                // Look for the allowed flag after template-a
+                let after_template_a = resource_kinds_yaml.split("template-a:").nth(1).unwrap_or("");
+                let next_template = after_template_a.split("template-").next().unwrap_or("");
+                if !next_template.contains("allowed: false") {
+                    templates.push("template-a");
+                }
+            }
+
+            // Check for template-b
+            if resource_kinds_yaml.contains("template-b") {
+                let after_template_b = resource_kinds_yaml.split("template-b:").nth(1).unwrap_or("");
+                let next_template = after_template_b.split("template-").next().unwrap_or("");
+                if !next_template.contains("allowed: false") {
+                    templates.push("template-b");
+                }
+            }
+
+            // Check for allowed-template
+            if resource_kinds_yaml.contains("allowed-template") {
+                templates.push("allowed-template");
+            }
+
+            // Check for test-template
+            if resource_kinds_yaml.contains("test-template") {
+                let after_test_template = resource_kinds_yaml.split("test-template:").nth(1).unwrap_or("");
+                if !after_test_template.is_empty() {
+                    let next_section = after_test_template.split('\n').take(3).collect::<Vec<_>>().join("\n");
+                    if !next_section.contains("allowed: false") {
+                        templates.push("test-template");
+                    }
+                } else {
+                    templates.push("test-template");
+                }
+            }
+
+            // Check for blocked-template (only if explicitly allowed: true or not mentioned)
+            if resource_kinds_yaml.contains("blocked-template") {
+                let after_blocked = resource_kinds_yaml.split("blocked-template:").nth(1).unwrap_or("");
+                let next_section = after_blocked.split('\n').take(3).collect::<Vec<_>>().join("\n");
+                if !next_section.contains("allowed: false") {
+                    templates.push("blocked-template");
+                }
+            }
+
+            if templates.is_empty() {
+                r#"    - id: pmp_io_v1_testresource
+      name: TestResource (pmp.io/v1)
+      description: Test resource type
+      templates: []"#.to_string()
+            } else {
+                let template_entries: Vec<String> = templates.iter().map(|t| {
+                    format!("        - template_pack: test-pack\n          template: {}", t)
+                }).collect();
+
+                format!(
+                    r#"    - id: pmp_io_v1_testresource
+      name: TestResource (pmp.io/v1)
+      description: Test resource type
+      templates:
+{}"#,
+                    template_entries.join("\n")
+                )
+            }
+        } else if resource_kinds_yaml.contains("kind: KubernetesWorkload") {
+            r#"    - id: pmp_io_v1_kubernetesworkload
+      name: KubernetesWorkload (pmp.io/v1)
+      description: Kubernetes workload
+      templates:
+        - template_pack: k8s-pack
+          template: api-service"#.to_string()
+        } else {
+            "    []".to_string()
+        }
+    }
+
+    /// Extract template_packs configuration from resource_kinds YAML
+    fn extract_template_packs_config(resource_kinds_yaml: &str) -> String {
+        // Extract template pack configurations from the old format
+        // For test purposes, we'll check for specific patterns
+
+        // Check for template-a/template-b scenario
+        if resource_kinds_yaml.contains("template-a") && resource_kinds_yaml.contains("template-b") {
+            r#"    test-pack:
+      templates:
+        template-a:
+          defaults:
+            inputs:
+              setting_a:
+                value: override-a
+                show_as_default: false
+        template-b:
+          defaults: {}"#.to_string()
+        } else if resource_kinds_yaml.contains("defaults:") && resource_kinds_yaml.contains("inputs:") {
+            // Extract the actual field name and value from the YAML
+            // Look for pattern: field_name:\n              value: "..."
+            let inputs_section = resource_kinds_yaml.split("inputs:").nth(1).unwrap_or("");
+            let lines: Vec<&str> = inputs_section.lines().collect();
+
+            let mut field_name = String::new();
+            let mut field_value = String::new();
+            let mut show_as_default = String::from("true");
+
+            for (_i, line) in lines.iter().enumerate() {
+                let trimmed = line.trim();
+                if trimmed.ends_with(':') && !trimmed.starts_with("value:") && !trimmed.starts_with("show_as_default:") && !trimmed.is_empty() {
+                    field_name = trimmed.trim_end_matches(':').to_string();
+                }
+                if trimmed.starts_with("value:") {
+                    field_value = trimmed.strip_prefix("value:").unwrap_or("").trim().to_string();
+                }
+                if trimmed.starts_with("show_as_default:") {
+                    show_as_default = trimmed.strip_prefix("show_as_default:").unwrap_or("true").trim().to_string();
+                }
+            }
+
+            if !field_name.is_empty() && !field_value.is_empty() {
+                format!(
+                    r#"    test-pack:
+      templates:
+        test-template:
+          defaults:
+            inputs:
+              {}:
+                value: {}
+                show_as_default: {}"#,
+                    field_name, field_value, show_as_default
+                )
+            } else {
+                r#"    test-pack:
+      templates:
+        test-template:
+          defaults: {}"#.to_string()
+            }
+        } else {
+            r#"    test-pack:
+      templates:
+        allowed-template:
+          defaults: {}
+        test-template:
+          defaults: {}"#.to_string()
+        }
     }
 
     #[test]
@@ -1519,6 +1997,8 @@ spec:
 
         // Set up mock user input
         let input = MockUserInput::new();
+        input.add_response(MockResponse::Select("📁 TestResource (pmp.io/v1) - Test resource type".to_string())); // category selection
+        input.add_response(MockResponse::Select("📄 allowed-template - Test template".to_string())); // template selection
         input.add_response(MockResponse::Text("test_project".to_string())); // project name
         input.add_response(MockResponse::Text("1".to_string())); // replica_count
         input.add_response(MockResponse::Confirm(false)); // apply after create
@@ -1577,6 +2057,7 @@ spec:
         assert!(result.is_err(), "Create command should fail when all templates are blocked");
         let err_msg = format!("{}", result.unwrap_err());
         assert!(
+            err_msg.contains("No templates defined in category tree") ||
             err_msg.contains("No template packs contain templates") ||
             err_msg.contains("allowed in this infrastructure"),
             "Error should mention no matching templates: {}", err_msg
@@ -1617,6 +2098,8 @@ spec:
 
         // Set up mock user input
         let input = MockUserInput::new();
+        input.add_response(MockResponse::Select("📁 TestResource (pmp.io/v1) - Test resource type".to_string())); // category selection
+        input.add_response(MockResponse::Select("📄 test-template - Test template".to_string())); // template selection
         input.add_response(MockResponse::Text("test_project".to_string())); // project name
         // User should be prompted for replica_count with default of 5
         input.add_response(MockResponse::Text("3".to_string())); // Override the default to 3
@@ -1679,6 +2162,8 @@ spec:
 
         // Set up mock user input
         let input = MockUserInput::new();
+        input.add_response(MockResponse::Select("📁 TestResource (pmp.io/v1) - Test resource type".to_string())); // category selection
+        input.add_response(MockResponse::Select("📄 test-template - Test template".to_string())); // template selection
         input.add_response(MockResponse::Text("test_project".to_string())); // project name
         // User should NOT be prompted for replica_count (it's fixed at 5)
         input.add_response(MockResponse::Text("prod".to_string())); // environment_name (still asked)
@@ -1730,6 +2215,8 @@ spec:
 
         // Set up mock user input
         let input = MockUserInput::new();
+        input.add_response(MockResponse::Select("📁 TestResource (pmp.io/v1) - Test resource type".to_string())); // category selection
+        input.add_response(MockResponse::Select("📄 test-template - Test template".to_string())); // template selection
         input.add_response(MockResponse::Text("test_project".to_string())); // project name
         input.add_response(MockResponse::Text("2".to_string())); // replica_count
         input.add_response(MockResponse::Confirm(false)); // apply after create
@@ -1808,6 +2295,8 @@ spec:
         // Set up mock user input
         let input = MockUserInput::new();
         // Only template-a should be available, template-b is blocked
+        input.add_response(MockResponse::Select("📁 TestResource (pmp.io/v1) - Test resource type".to_string())); // category selection
+        input.add_response(MockResponse::Select("📄 template-a - Test template".to_string())); // template selection
         input.add_response(MockResponse::Text("test_project".to_string())); // project name
         // setting_a should not be prompted (show_as_default: false)
         input.add_response(MockResponse::Confirm(false)); // apply after create
@@ -1860,6 +2349,8 @@ spec:
 
         // Set up mock user input
         let input = MockUserInput::new();
+        input.add_response(MockResponse::Select("📁 TestResource (pmp.io/v1) - Test resource type".to_string())); // category selection
+        input.add_response(MockResponse::Select("📄 test-template - Test template".to_string())); // template selection
         input.add_response(MockResponse::Text("my_project".to_string())); // project name
         input.add_response(MockResponse::Text("custom-id".to_string())); // project_id (should see interpolated description)
         input.add_response(MockResponse::Confirm(false)); // apply after create
@@ -1904,6 +2395,8 @@ spec:
 
         // Set up mock user input
         let input = MockUserInput::new();
+        input.add_response(MockResponse::Select("📁 TestResource (pmp.io/v1) - Test resource type".to_string())); // category selection
+        input.add_response(MockResponse::Select("📄 test-template - Test template".to_string())); // template selection
         input.add_response(MockResponse::Text("my_app".to_string())); // project name
         input.add_response(MockResponse::Text("proj-my_app".to_string())); // Accept the interpolated default
         input.add_response(MockResponse::Confirm(false)); // apply after create
@@ -1961,6 +2454,8 @@ spec:
 
         // Set up mock user input
         let input = MockUserInput::new();
+        input.add_response(MockResponse::Select("📁 TestResource (pmp.io/v1) - Test resource type".to_string())); // category selection
+        input.add_response(MockResponse::Select("📄 test-template - Test template".to_string())); // template selection
         input.add_response(MockResponse::Text("my_service".to_string())); // project name
         // docker_image should not be prompted (show_as_default: false)
         input.add_response(MockResponse::Confirm(false)); // apply after create
@@ -2011,6 +2506,8 @@ spec:
 
         // Set up mock user input
         let input = MockUserInput::new();
+        input.add_response(MockResponse::Select("📁 TestResource (pmp.io/v1) - Test resource type".to_string())); // category selection
+        input.add_response(MockResponse::Select("📄 test-template - Test template".to_string())); // template selection
         input.add_response(MockResponse::Text("test_project".to_string())); // project name
         input.add_response(MockResponse::Select("Production".to_string())); // environment selection (by label)
         input.add_response(MockResponse::Confirm(false)); // apply after create
@@ -2058,6 +2555,8 @@ spec:
 
         // Set up mock user input
         let input = MockUserInput::new();
+        input.add_response(MockResponse::Select("📁 TestResource (pmp.io/v1) - Test resource type".to_string())); // category selection
+        input.add_response(MockResponse::Select("📄 test-template - Test template".to_string())); // template selection
         input.add_response(MockResponse::Text("test_project".to_string())); // project name
         input.add_response(MockResponse::Text("5".to_string())); // replica_count
         input.add_response(MockResponse::Confirm(false)); // apply after create
@@ -2103,6 +2602,8 @@ spec:
 
         // Set up mock user input
         let input = MockUserInput::new();
+        input.add_response(MockResponse::Select("📁 TestResource (pmp.io/v1) - Test resource type".to_string())); // category selection
+        input.add_response(MockResponse::Select("📄 test-template - Test template".to_string())); // template selection
         input.add_response(MockResponse::Text("test_project".to_string())); // project name
         input.add_response(MockResponse::Confirm(true)); // enable_monitoring
         input.add_response(MockResponse::Confirm(false)); // apply after create
@@ -2173,9 +2674,18 @@ metadata:
   name: Test Infrastructure
   description: Test infrastructure
 spec:
-  resource_kinds:
-    - apiVersion: pmp.io/v1
-      kind: TestResource
+  categories:
+    - id: pmp_io_v1_testresource
+      name: TestResource (pmp.io/v1)
+      description: Test resource type
+      templates:
+        - template_pack: test-pack
+          template: test-template
+  template_packs:
+    test-pack:
+      templates:
+        test-template:
+          defaults: {}
   environments:
     dev:
       name: Development
@@ -2187,6 +2697,8 @@ spec:
 
         // Set up mock user input - select production environment
         let input = MockUserInput::new();
+        input.add_response(MockResponse::Select("📁 TestResource (pmp.io/v1) - Test resource type".to_string())); // category selection
+        input.add_response(MockResponse::Select("📄 test-template - Test template".to_string())); // template selection
         input.add_response(MockResponse::Select("Production - Production environment".to_string())); // Select production environment
         input.add_response(MockResponse::Text("test_project".to_string())); // project name
         input.add_response(MockResponse::Text("3".to_string())); // replica_count (should default to 3 for production)
@@ -2231,6 +2743,8 @@ spec:
 
         // Set up mock user input
         let input = MockUserInput::new();
+        input.add_response(MockResponse::Select("📁 TestResource (pmp.io/v1) - Test resource type".to_string())); // category selection
+        input.add_response(MockResponse::Select("📄 test-template - Test template".to_string())); // template selection
         input.add_response(MockResponse::Text("test_project".to_string())); // project name
         input.add_response(MockResponse::Text("myapp".to_string())); // app_name
         input.add_response(MockResponse::Confirm(false)); // apply after create

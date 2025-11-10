@@ -1,8 +1,8 @@
 use crate::output;
 use crate::template::TemplateDiscovery;
 use crate::template::metadata::{
-    Environment, InfrastructureMetadata, InfrastructureResource,
-    InfrastructureSpec, ResourceKindFilter,
+    Category, CategoryTemplate, Environment, InfrastructureMetadata, InfrastructureResource,
+    InfrastructureSpec, TemplatePackConfig,
 };
 use anyhow::{Context, Result};
 use std::collections::HashMap;
@@ -89,48 +89,57 @@ impl InitCommand {
         // Convert to Vec<&str> for the discovery function
         let custom_paths: Vec<&str> = all_paths.iter().map(|s| s.as_str()).collect();
 
-        let templates = TemplateDiscovery::discover_templates_with_custom_paths(&*ctx.fs, &*ctx.output, &custom_paths)
-            .context("Failed to discover templates")?;
+        // Discover template packs
+        let template_packs = TemplateDiscovery::discover_template_packs_with_custom_paths(&*ctx.fs, &*ctx.output, &custom_paths)
+            .context("Failed to discover template packs")?;
 
-        // Step 4: Extract unique resource kinds from templates
-        let mut resource_kinds_map: HashMap<String, ResourceKindFilter> = HashMap::new();
-        for template in &templates {
-            let key = format!(
-                "{}/{}",
-                template.resource.spec.api_version,
-                template.resource.spec.kind
-            );
-            resource_kinds_map.insert(
-                key,
-                ResourceKindFilter {
-                    api_version: template.resource.spec.api_version.clone(),
-                    kind: template.resource.spec.kind.clone(),
-                    templates: None,
-                },
-            );
+        // Step 4: Build template selection options organized by pack
+        let mut template_options: Vec<String> = Vec::new();
+        let mut template_map: HashMap<String, (String, String, String, String)> = HashMap::new(); // key -> (pack_name, template_name, api_version, kind)
+
+        for pack in &template_packs {
+            let pack_name = &pack.resource.metadata.name;
+
+            // Discover templates in this pack
+            let templates_in_pack = TemplateDiscovery::discover_templates_in_pack(&*ctx.fs, &*ctx.output, &pack.path)
+                .context("Failed to discover templates in pack")?;
+
+            for template in &templates_in_pack {
+                let template_name = &template.resource.metadata.name;
+                let api_version = &template.resource.spec.api_version;
+                let kind = &template.resource.spec.kind;
+
+                let option_key = format!("{} / {} ({})", pack_name, template_name, kind);
+                template_options.push(option_key.clone());
+                template_map.insert(
+                    option_key,
+                    (pack_name.clone(), template_name.clone(), api_version.clone(), kind.clone()),
+                );
+            }
         }
 
-        // Step 5: Present resource kinds as multi-select
-        let resource_kinds = if resource_kinds_map.is_empty() {
+        // Step 5: Let user select templates
+        let (categories, template_packs_config) = if template_options.is_empty() {
             output::warning("No templates found in the system.");
-            output::dimmed("The Infrastructure will be created without any resource kinds.");
+            output::dimmed("The Infrastructure will be created without any templates.");
             output::dimmed("You can add templates later and update the infrastructure file.");
             output::blank();
-            vec![]
+            (vec![], HashMap::new())
         } else {
-            let kind_options: Vec<String> = resource_kinds_map.keys().cloned().collect();
+            output::subsection("Template Selection");
+            output::dimmed("Select which templates you want to allow in this infrastructure.");
+            output::dimmed("Templates will be organized into categories by resource kind.");
+            output::blank();
 
-            let selected_keys = ctx.input.multi_select(
-                "Select resource kinds to allow in this infrastructure:",
-                kind_options.clone(),
+            let selected_options = ctx.input.multi_select(
+                "Select templates:",
+                template_options.clone(),
                 None
             )
-            .context("Failed to select resource kinds")?;
+            .context("Failed to select templates")?;
 
-            selected_keys
-                .iter()
-                .filter_map(|key| resource_kinds_map.get(key).cloned())
-                .collect()
+            // Build categories and template_packs from selections
+            Self::build_categories_from_selections(&selected_options, &template_map)
         };
 
         // Step 6: Collect environments
@@ -209,7 +218,9 @@ impl InitCommand {
                 description: collection_description,
             },
             spec: InfrastructureSpec {
-                resource_kinds,
+                categories,
+                template_packs: template_packs_config,
+                resource_kinds: vec![],  // New structure - no longer used
                 environments,
                 hooks: None,
                 executor: None,
@@ -233,7 +244,8 @@ impl InitCommand {
         output::key_value_highlight("Infrastructure", &collection_name);
         output::key_value("File", &infrastructure_file.display().to_string());
         output::key_value("Projects directory", &projects_dir.display().to_string());
-        output::key_value("Resource kinds", &infrastructure.spec.resource_kinds.len().to_string());
+        output::key_value("Categories", &infrastructure.spec.categories.len().to_string());
+        output::key_value("Template packs", &infrastructure.spec.template_packs.len().to_string());
         output::key_value("Environments", &infrastructure.spec.environments.len().to_string());
 
         let next_steps_list = vec![
@@ -267,7 +279,7 @@ impl InitCommand {
             // Present editing options with hints
             let options: Vec<String> = vec![
                 "Metadata - Edit infrastructure name and description".to_string(),
-                "Resource kinds - Add or remove allowed resource kinds from templates".to_string(),
+                "Templates - Add or remove allowed templates and categories".to_string(),
                 "Environments - Add, edit, or remove environments".to_string(),
                 "Exit - Save and exit".to_string(),
             ];
@@ -294,8 +306,8 @@ impl InitCommand {
                         break;
                     }
                 }
-                opt if opt.starts_with("Resource kinds") => {
-                    Self::edit_resource_kinds(ctx, &mut infrastructure, template_packs_paths)?;
+                opt if opt.starts_with("Templates") => {
+                    Self::edit_templates_and_categories(ctx, &mut infrastructure, template_packs_paths)?;
 
                     // Save after editing
                     infrastructure.save(&*ctx.fs, infrastructure_file)
@@ -349,10 +361,19 @@ impl InitCommand {
         if let Some(desc) = &infrastructure.metadata.description {
             output::key_value("Description", desc);
         }
-        output::key_value("Resource kinds", &infrastructure.spec.resource_kinds.len().to_string());
-        for rk in &infrastructure.spec.resource_kinds {
-            output::list_item(&format!("{}/{}", rk.api_version, rk.kind));
+
+        // Count total templates
+        let total_templates: usize = infrastructure.spec.categories.iter()
+            .map(|c| c.templates.len())
+            .sum();
+
+        output::key_value("Categories", &infrastructure.spec.categories.len().to_string());
+        for category in &infrastructure.spec.categories {
+            output::list_item(&format!("{} ({} templates)", category.name, category.templates.len()));
         }
+
+        output::key_value("Total templates", &total_templates.to_string());
+        output::key_value("Template packs", &infrastructure.spec.template_packs.len().to_string());
         output::key_value("Environments", &infrastructure.spec.environments.len().to_string());
         for (key, env) in &infrastructure.spec.environments {
             output::list_item(&format!("{} ({})", key, env.name));
@@ -384,14 +405,13 @@ impl InitCommand {
     }
 
     /// Edit resource kinds with pre-selection of current kinds
-    fn edit_resource_kinds(
+    fn edit_templates_and_categories(
         ctx: &crate::context::Context,
         infrastructure: &mut InfrastructureResource,
         template_packs_paths: Option<&str>,
     ) -> Result<()> {
-        output::subsection("Editing Resource Kinds");
+        output::subsection("Editing Templates and Categories");
 
-        // Discover templates
         // Parse flag paths (colon-separated)
         let flag_paths: Vec<String> = if let Some(paths) = template_packs_paths {
             crate::template::discovery::parse_colon_separated_paths(paths)
@@ -412,65 +432,80 @@ impl InitCommand {
         // Convert to Vec<&str> for the discovery function
         let custom_paths: Vec<&str> = all_paths.iter().map(|s| s.as_str()).collect();
 
-        let templates = TemplateDiscovery::discover_templates_with_custom_paths(&*ctx.fs, &*ctx.output, &custom_paths)
-            .context("Failed to discover templates")?;
+        // Discover template packs
+        let template_packs = TemplateDiscovery::discover_template_packs_with_custom_paths(&*ctx.fs, &*ctx.output, &custom_paths)
+            .context("Failed to discover template packs")?;
 
-        // Extract unique resource kinds from templates
-        let mut resource_kinds_map: HashMap<String, ResourceKindFilter> = HashMap::new();
-        for template in &templates {
-            let key = format!(
-                "{}/{}",
-                template.resource.spec.api_version,
-                template.resource.spec.kind
-            );
-            resource_kinds_map.insert(
-                key,
-                ResourceKindFilter {
-                    api_version: template.resource.spec.api_version.clone(),
-                    kind: template.resource.spec.kind.clone(),
-                    templates: None,
-                },
-            );
+        // Build template selection options organized by pack
+        let mut template_options: Vec<String> = Vec::new();
+        let mut template_map: HashMap<String, (String, String, String, String)> = HashMap::new();
+
+        for pack in &template_packs {
+            let pack_name = &pack.resource.metadata.name;
+
+            // Discover templates in this pack
+            let templates_in_pack = TemplateDiscovery::discover_templates_in_pack(&*ctx.fs, &*ctx.output, &pack.path)
+                .context("Failed to discover templates in pack")?;
+
+            for template in &templates_in_pack {
+                let template_name = &template.resource.metadata.name;
+                let api_version = &template.resource.spec.api_version;
+                let kind = &template.resource.spec.kind;
+
+                let option_key = format!("{} / {} ({})", pack_name, template_name, kind);
+                template_options.push(option_key.clone());
+                template_map.insert(
+                    option_key,
+                    (pack_name.clone(), template_name.clone(), api_version.clone(), kind.clone()),
+                );
+            }
         }
 
-        if resource_kinds_map.is_empty() {
+        if template_options.is_empty() {
             output::warning("No templates found in the system.");
-            output::dimmed("Cannot edit resource kinds.");
+            output::dimmed("Cannot edit templates.");
             output::blank();
             return Ok(());
         }
 
-        let kind_options: Vec<String> = resource_kinds_map.keys().cloned().collect();
+        // Build list of currently selected templates for pre-selection
+        let mut current_selections: Vec<String> = Vec::new();
+        for category in &infrastructure.spec.categories {
+            for template in &category.templates {
+                // Try to find matching option with kind info
+                for opt in &template_options {
+                    if opt.starts_with(&format!("{} / {}", template.template_pack, template.template)) {
+                        current_selections.push(opt.clone());
+                        break;
+                    }
+                }
+            }
+        }
 
-        // Find which current resource kinds should be pre-selected
-        let current_kind_keys: Vec<String> = infrastructure
-            .spec
-            .resource_kinds
-            .iter()
-            .map(|rk| format!("{}/{}", rk.api_version, rk.kind))
-            .collect();
-
-        // Find indices of currently selected kinds
-        let default_indices: Vec<usize> = kind_options
+        // Find indices of currently selected templates
+        let default_indices: Vec<usize> = template_options
             .iter()
             .enumerate()
-            .filter(|(_, opt)| current_kind_keys.contains(opt))
+            .filter(|(_, opt)| current_selections.contains(opt))
             .map(|(idx, _)| idx)
             .collect();
 
-        let selected_keys = ctx.input.multi_select(
-            "Select resource kinds to allow in this infrastructure:",
-            kind_options.clone(),
+        let selected_options = ctx.input.multi_select(
+            "Select templates to allow in this infrastructure:",
+            template_options.clone(),
             Some(&default_indices)
         )
-        .context("Failed to select resource kinds")?;
+        .context("Failed to select templates")?;
 
-        infrastructure.spec.resource_kinds = selected_keys
-            .iter()
-            .filter_map(|key| resource_kinds_map.get(key).cloned())
-            .collect();
+        // Build categories and template_packs from selections
+        let (categories, template_packs_config) = Self::build_categories_from_selections(&selected_options, &template_map);
 
-        output::success(&format!("Resource kinds updated ({} selected)", infrastructure.spec.resource_kinds.len()));
+        infrastructure.spec.categories = categories;
+        infrastructure.spec.template_packs = template_packs_config;
+
+        output::success(&format!("Templates updated ({} templates in {} categories)",
+            selected_options.len(),
+            infrastructure.spec.categories.len()));
         output::blank();
         Ok(())
     }
@@ -649,6 +684,55 @@ impl InitCommand {
     }
 
     /// Capitalize the first letter of a string
+    /// Build categories and template_packs config from user selections
+    fn build_categories_from_selections(
+        selected_options: &[String],
+        template_map: &HashMap<String, (String, String, String, String)>,
+    ) -> (Vec<Category>, HashMap<String, TemplatePackConfig>) {
+        // Group templates by resource kind (apiVersion/kind)
+        let mut categories_map: HashMap<String, Category> = HashMap::new();
+        let mut template_packs_config: HashMap<String, TemplatePackConfig> = HashMap::new();
+
+        for option in selected_options {
+            if let Some((pack_name, template_name, api_version, kind)) = template_map.get(option) {
+                // Create category ID from apiVersion/kind
+                let category_id = format!(
+                    "{}_{}",
+                    api_version.replace("/", "_").replace(".", "_"),
+                    kind.to_lowercase()
+                );
+
+                // Get or create category
+                let category = categories_map.entry(category_id.clone()).or_insert_with(|| Category {
+                    id: category_id.clone(),
+                    name: format!("{} ({})", kind, api_version),
+                    description: Some(format!("Templates for {} resources", kind)),
+                    subcategories: vec![],
+                    templates: vec![],
+                });
+
+                // Add template to category
+                category.templates.push(CategoryTemplate {
+                    template_pack: pack_name.clone(),
+                    template: template_name.clone(),
+                });
+
+                // Add to template_packs config
+                let pack_config = template_packs_config
+                    .entry(pack_name.clone())
+                    .or_insert_with(TemplatePackConfig::default);
+
+                // Add template with default config if not already present
+                pack_config.templates.entry(template_name.clone()).or_insert_with(Default::default);
+            }
+        }
+
+        // Convert map to vec
+        let categories: Vec<Category> = categories_map.into_values().collect();
+
+        (categories, template_packs_config)
+    }
+
     fn capitalize_first(s: &str) -> String {
         let mut chars = s.chars();
         match chars.next() {
