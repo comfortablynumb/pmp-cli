@@ -1114,7 +1114,7 @@ impl CreateCommand {
                     Ok(serde_json::Value::Bool(answer))
                 }
                 serde_json::Value::Number(n) => {
-                    let prompt_text = format!("{} (default: {})", description, n);
+                    let prompt_text = format!("{} [default: {}]", description, n);
                     let answer = ctx.input.text(&prompt_text, Some(&n.to_string()))
                         .context("Failed to get input")?;
 
@@ -1128,21 +1128,23 @@ impl CreateCommand {
                     }
                 }
                 serde_json::Value::String(s) => {
-                    let prompt_text = format!("{} (default: {})", description, s);
+                    let prompt_text = format!("{} [default: {}]", description, s);
                     let answer = ctx.input.text(&prompt_text, Some(s))
                         .context("Failed to get input")?;
                     Ok(serde_json::Value::String(answer))
                 }
                 _ => {
                     // Fallback to string input
-                    let answer = ctx.input.text(&description, None)
+                    let prompt_text = format!("{} [required]", description);
+                    let answer = ctx.input.text(&prompt_text, None)
                         .context("Failed to get input")?;
                     Ok(serde_json::Value::String(answer))
                 }
             }
         } else {
             // No default, prompt for string
-            let answer = ctx.input.text(&description, None)
+            let prompt_text = format!("{} [required]", description);
+            let answer = ctx.input.text(&prompt_text, None)
                 .context("Failed to get input")?;
             Ok(serde_json::Value::String(answer))
         }
@@ -1159,9 +1161,9 @@ impl CreateCommand {
             InputType::String => {
                 let default_str = default.and_then(|v| v.as_str());
                 let prompt_text = if let Some(def) = default_str {
-                    format!("{} (default: {})", description, def)
+                    format!("{} [default: {}]", description, def)
                 } else {
-                    description.to_string()
+                    format!("{} [required]", description)
                 };
                 let answer = ctx.input.text(&prompt_text, default_str)
                     .context("Failed to get input")?;
@@ -1242,14 +1244,20 @@ impl CreateCommand {
         if let Some(max_val) = max {
             constraints.push(format!("max: {}", max_val));
         }
-        if let Some(def) = default {
-            constraints.push(format!("default: {}", def));
-        }
 
-        if !constraints.is_empty() {
-            prompt.push_str(&format!(" ({})", constraints.join(", ")));
-        }
+        let default_part = if let Some(def) = default {
+            format!("default: {}", def)
+        } else {
+            "required".to_string()
+        };
 
+        let constraint_text = if !constraints.is_empty() {
+            format!("{} - {}", constraints.join(", "), default_part)
+        } else {
+            default_part
+        };
+
+        prompt.push_str(&format!(" [{}]", constraint_text));
         prompt
     }
 

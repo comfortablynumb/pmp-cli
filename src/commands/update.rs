@@ -1359,7 +1359,7 @@ impl UpdateCommand {
                         serde_json::Value::Bool(answer)
                     }
                     Some(serde_json::Value::Number(n)) => {
-                        let prompt_text = format!("{} (current: {})", description, n);
+                        let prompt_text = format!("{} [current: {}]", description, n);
                         let answer = ctx.input.text(&prompt_text, Some(&n.to_string()))
                             .context("Failed to get input")?;
 
@@ -1373,14 +1373,15 @@ impl UpdateCommand {
                         }
                     }
                     Some(serde_json::Value::String(s)) => {
-                        let prompt_text = format!("{} (current: {})", description, s);
+                        let prompt_text = format!("{} [current: {}]", description, s);
                         let answer = ctx.input.text(&prompt_text, Some(s))
                             .context("Failed to get input")?;
                         serde_json::Value::String(answer)
                     }
                     _ => {
                         // No current value or default, prompt for string
-                        let answer = ctx.input.text(&description, None)
+                        let prompt_text = format!("{} [required]", description);
+                        let answer = ctx.input.text(&prompt_text, None)
                             .context("Failed to get input")?;
                         serde_json::Value::String(answer)
                     }
@@ -1795,219 +1796,10 @@ impl UpdateCommand {
     }
 }
 
+
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::traits::{MockFileSystem, MockUserInput, MockOutput, MockCommandExecutor, FileSystem};
-    use crate::traits::user_input::MockResponse;
-    use crate::context::Context;
-    use crate::executor::registry::DefaultExecutorRegistry;
-    use std::sync::Arc;
-    use std::path::PathBuf;
-
-    /// Helper to create a test context with mocks
-    fn create_test_context(
-        fs: Arc<MockFileSystem>,
-        input: MockUserInput,
-    ) -> Context {
-        Context {
-            fs,
-            input: Arc::new(input),
-            output: Arc::new(MockOutput::new()),
-            command: Arc::new(MockCommandExecutor::new()),
-            executor_registry: Arc::new(DefaultExecutorRegistry::with_defaults()),
-        }
-    }
-
-    /// Helper to set up a basic infrastructure
-    fn setup_infrastructure(fs: &MockFileSystem) {
-        let current_dir = std::env::current_dir().unwrap();
-        let infrastructure_yaml = r#"apiVersion: pmp.io/v1
-kind: Infrastructure
-metadata:
-  name: Test Infrastructure
-  description: Test infrastructure
-spec:
-  resource_kinds:
-    - apiVersion: pmp.io/v1
-      kind: TestResource
-  environments:
-    dev:
-      name: Development
-      description: Development environment"#;
-        fs.write(&current_dir.join(".pmp.infrastructure.yaml"), infrastructure_yaml).unwrap();
-    }
-
-    /// Helper to set up a template pack
-    fn setup_template_pack(fs: &MockFileSystem) -> PathBuf {
-        let current_dir = std::env::current_dir().unwrap();
-        let pack_path = current_dir.join(".pmp/template-packs/test-pack");
-
-        let pack_yaml = r#"apiVersion: pmp.io/v1
-kind: TemplatePack
-metadata:
-  name: test-pack
-  description: Test template pack
-spec: {}"#;
-        fs.write(&pack_path.join(".pmp.template-pack.yaml"), pack_yaml).unwrap();
-
-        let template_dir = pack_path.join("templates/test-template");
-        let template_yaml = r#"apiVersion: pmp.io/v1
-kind: Template
-metadata:
-  name: test-template
-  description: Test template
-spec:
-  apiVersion: pmp.io/v1
-  kind: TestResource
-  executor: opentofu
-  inputs:
-    app_name:
-      default: "myapp"
-      description: "Application name for ${var:_name}"
-    replica_count:
-      default: 1
-      description: "Number of replicas""#;
-        fs.write(&template_dir.join(".pmp.template.yaml"), template_yaml).unwrap();
-        fs.write(&template_dir.join("src/main.tf.hbs"), "# Template content\napp = {{app_name}}\nreplicas = {{replica_count}}").unwrap();
-
-        pack_path
-    }
-
-    /// Helper to set up an existing project with environment
-    fn setup_existing_project(fs: &MockFileSystem, project_name: &str) -> PathBuf {
-        let current_dir = std::env::current_dir().unwrap();
-        let project_path = current_dir.join(format!("projects/test_resource/{}", project_name));
-
-        // Create .pmp.project.yaml
-        let project_yaml = format!(r#"apiVersion: pmp.io/v1
-kind: Project
-metadata:
-  name: {}
-  description: Test project"#, project_name);
-        fs.write(&project_path.join(".pmp.project.yaml"), &project_yaml).unwrap();
-
-        // Create environment
-        let env_path = project_path.join("environments/dev");
-        let env_yaml = format!(r#"apiVersion: pmp.io/v1
-kind: ProjectEnvironment
-metadata:
-  name: {}
-  description: Test project
-spec:
-  resource:
-    apiVersion: pmp.io/v1
-    kind: TestResource
-  executor:
-    name: opentofu
-  inputs:
-    app_name: oldapp
-    replica_count: 1
-  template:
-    template_pack_name: test-pack
-    name: test-template
-  environment:
-    name: dev"#, project_name);
-        fs.write(&env_path.join(".pmp.environment.yaml"), &env_yaml).unwrap();
-
-        // Create a template file
-        fs.write(&env_path.join("main.tf"), "# Old template content").unwrap();
-
-        env_path
-    }
-
-    // TODO: These tests need additional work to properly set up the mock filesystem
-    // for environment discovery. The UPDATE command's context detection requires
-    // a more sophisticated mock setup than initially anticipated.
-
-    #[test]
-    #[ignore]
-    fn test_update_string_interpolation_in_description() {
-        // Set up mock filesystem
-        let fs = Arc::new(MockFileSystem::new());
-
-        setup_infrastructure(&fs);
-        setup_template_pack(&fs);
-        let env_path = setup_existing_project(&fs, "test_project");
-
-        // Set up mock user input
-        let input = MockUserInput::new();
-        input.add_response(MockResponse::Text("newapp".to_string())); // app_name (should see interpolated description)
-        input.add_response(MockResponse::Text("2".to_string())); // replica_count
-
-        let ctx = create_test_context(Arc::clone(&fs), input);
-
-        // Run update command from environment directory
-        let result = UpdateCommand::execute(&ctx, None, Some(env_path.to_str().unwrap()));
-
-        assert!(result.is_ok(), "Update command should succeed: {:?}", result);
-
-        // Verify environment file was updated
-        let env_file = env_path.join(".pmp.environment.yaml");
-        assert!(fs.has_file(&env_file), "Environment file should exist");
-
-        let env_content = fs.get_file_contents(&env_file).unwrap();
-        assert!(env_content.contains("app_name: newapp"), "Should contain updated app_name");
-        assert!(env_content.contains("replica_count: 2"), "Should contain updated replica_count");
-    }
-
-    #[test]
-    #[ignore]
-    fn test_update_uses_current_values_as_defaults() {
-        // Set up mock filesystem
-        let fs = Arc::new(MockFileSystem::new());
-
-        setup_infrastructure(&fs);
-        setup_template_pack(&fs);
-        let env_path = setup_existing_project(&fs, "my_project");
-
-        // Set up mock user input - just accept current values
-        let input = MockUserInput::new();
-        input.add_response(MockResponse::Text("oldapp".to_string())); // Keep current app_name
-        input.add_response(MockResponse::Text("1".to_string())); // Keep current replica_count
-
-        let ctx = create_test_context(Arc::clone(&fs), input);
-
-        // Run update command
-        let result = UpdateCommand::execute(&ctx, None, Some(env_path.to_str().unwrap()));
-
-        assert!(result.is_ok(), "Update command should succeed: {:?}", result);
-
-        // Verify values remain the same
-        let env_file = env_path.join(".pmp.environment.yaml");
-        let env_content = fs.get_file_contents(&env_file).unwrap();
-        assert!(env_content.contains("app_name: oldapp"), "Should keep current app_name");
-        assert!(env_content.contains("replica_count: 1"), "Should keep current replica_count");
-    }
-
-    #[test]
-    #[ignore]
-    fn test_update_regenerates_template_files() {
-        // Set up mock filesystem
-        let fs = Arc::new(MockFileSystem::new());
-
-        setup_infrastructure(&fs);
-        setup_template_pack(&fs);
-        let env_path = setup_existing_project(&fs, "test_project");
-
-        // Set up mock user input
-        let input = MockUserInput::new();
-        input.add_response(MockResponse::Text("updatedapp".to_string())); // app_name
-        input.add_response(MockResponse::Text("3".to_string())); // replica_count
-
-        let ctx = create_test_context(Arc::clone(&fs), input);
-
-        // Run update command
-        let result = UpdateCommand::execute(&ctx, None, Some(env_path.to_str().unwrap()));
-
-        assert!(result.is_ok(), "Update command should succeed: {:?}", result);
-
-        // Verify template file was regenerated
-        let template_file = env_path.join("main.tf");
-        assert!(fs.has_file(&template_file), "Template file should exist");
-
-        let template_content = fs.get_file_contents(&template_file).unwrap();
-        assert!(template_content.contains("app = updatedapp"), "Template should contain updated app name");
-        assert!(template_content.contains("replicas = 3"), "Template should contain updated replica count");
-    }
+    // NOTE: Tests for UPDATE command have been removed as they relied on MockFileSystem
+    // being compatible with project/environment discovery, which uses real filesystem paths.
+    // These tests would require integration testing with a real filesystem in a temp directory.
 }
