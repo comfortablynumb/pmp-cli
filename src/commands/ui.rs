@@ -102,6 +102,12 @@ struct DirectoryEntry {
 }
 
 #[derive(Debug, Serialize)]
+struct DriveInfo {
+    name: String,
+    path: String,
+}
+
+#[derive(Debug, Serialize)]
 struct TemplatePackInfo {
     name: String,
     description: Option<String>,
@@ -201,6 +207,7 @@ impl UiCommand {
             .route("/api/infrastructure", get(get_infrastructure))
             .route("/api/infrastructure/load", post(load_infrastructure))
             .route("/api/browse", post(browse_directory))
+            .route("/api/drives", get(list_drives))
             .route("/api/projects", get(list_projects))
             .route("/api/projects/create", post(create_project))
             .route("/api/generate", post(generate))
@@ -934,6 +941,64 @@ async fn browse_directory(
             error: Some(format!("Failed to read directory: {}", e)),
         }),
     }
+}
+
+async fn list_drives(State(state): State<AppState>) -> Json<ApiResponse<Vec<DriveInfo>>> {
+    use std::path::PathBuf;
+
+    let mut drives = Vec::new();
+
+    #[cfg(target_os = "windows")]
+    {
+        // On Windows, enumerate drive letters A: through Z:
+        for letter in b'A'..=b'Z' {
+            let drive_path = format!("{}:\\", letter as char);
+            let path = PathBuf::from(&drive_path);
+
+            // Check if the drive exists
+            if state.ctx.fs.exists(&path) {
+                drives.push(DriveInfo {
+                    name: format!("{}: Drive", letter as char),
+                    path: drive_path,
+                });
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        // On Unix-like systems, show root and common mount points
+        let root = PathBuf::from("/");
+        if state.ctx.fs.exists(&root) {
+            drives.push(DriveInfo {
+                name: "Root (/)".to_string(),
+                path: "/".to_string(),
+            });
+        }
+
+        // Check for common mount points
+        let mount_points = vec![
+            ("/mnt", "Mounts (/mnt)"),
+            ("/media", "Media (/media)"),
+            ("/home", "Home (/home)"),
+        ];
+
+        for (path_str, name) in mount_points {
+            let path = PathBuf::from(path_str);
+            if state.ctx.fs.exists(&path) && state.ctx.fs.is_dir(&path) {
+                drives.push(DriveInfo {
+                    name: name.to_string(),
+                    path: path_str.to_string(),
+                });
+            }
+        }
+    }
+
+    Json(ApiResponse {
+        success: true,
+        data: Some(drives),
+        error: None,
+    })
 }
 
 async fn load_infrastructure(
