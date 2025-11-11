@@ -10,74 +10,57 @@ spec:
   executor: opentofu
 
   inputs:
-    namespace:
+    - name: namespace
       default: "vault"
       description: Kubernetes namespace for Vault
-
-    chart_version:
+    - name: chart_version
       default: "0.28.1"
       description: Vault Helm chart version
-
-    create_namespace:
+    - name: create_namespace
       default: true
       description: Whether to create the namespace if it doesn't exist
-
-    server_replicas:
+    - name: server_replicas
       default: 1
       description: Number of Vault server replicas
-
-    ha_enabled:
+    - name: ha_enabled
       default: false
       description: Enable high availability mode with Raft storage
-
-    ui_enabled:
+    - name: ui_enabled
       default: true
       description: Enable Vault UI
-
-    ui_service_type:
+    - name: ui_service_type
       default: "ClusterIP"
       description: Service type for Vault UI (ClusterIP, LoadBalancer, NodePort)
-
-    enable_ingress:
+    - name: enable_ingress
       default: false
       description: Enable ingress for Vault UI
-
-    ingress_host:
+    - name: ingress_host
       default: ""
       description: Hostname for Vault ingress (optional)
-
-    ingress_class:
+    - name: ingress_class
       default: "nginx"
       description: Ingress class name
-
-    enable_tls:
+    - name: enable_tls
       default: false
       description: Enable TLS for Vault
-
-    storage_size:
+    - name: storage_size
       default: "10Gi"
       description: Storage size for Vault data (when using HA mode)
-
-    injector_enabled:
+    - name: injector_enabled
       default: true
       description: Enable Vault agent injector for sidecar injection
-
-    injector_replicas:
+    - name: injector_replicas
       default: 1
       description: Number of Vault agent injector replicas
-
-    resources_requests_cpu:
+    - name: resources_requests_cpu
       default: "250m"
       description: CPU resource request for Vault server
-
-    resources_requests_memory:
+    - name: resources_requests_memory
       default: "256Mi"
       description: Memory resource request for Vault server
-
-    resources_limits_cpu:
+    - name: resources_limits_cpu
       default: "500m"
       description: CPU resource limit for Vault server
-
-    resources_limits_memory:
+    - name: resources_limits_memory
       default: "512Mi"
       description: Memory resource limit for Vault server

@@ -1,0 +1,94 @@
+{{#if create_load_balancer}}
+# Application Load Balancer
+resource "aws_lb" "plugin_alb" {
+  name               = "${var.project_name}-alb"
+  internal           = false
+  load_balancer_type = "application"
+  security_groups    = [aws_security_group.plugin_alb.id]
+  subnets            = var.subnet_ids != "" ? split(",", var.subnet_ids) : data.aws_subnets.selected.ids
+
+  enable_deletion_protection = false
+  enable_http2              = true
+
+  tags = {
+    Name      = "${var.project_name}-alb"
+    ManagedBy = "pmp"
+    Plugin    = "aws/ecs"
+  }
+}
+
+# Security Group for ALB
+resource "aws_security_group" "plugin_alb" {
+  name        = "${var.project_name}-alb"
+  description = "Security group for ${var.project_name} ALB"
+  vpc_id      = data.aws_vpc.selected.id
+
+  ingress {
+    description = "Allow HTTP/HTTPS from internet"
+    from_port   = var.load_balancer_port
+    to_port     = var.load_balancer_port
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    description = "Allow all outbound traffic"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name      = "${var.project_name}-alb"
+    ManagedBy = "pmp"
+    Plugin    = "aws/ecs"
+  }
+}
+
+# Target Group
+resource "aws_lb_target_group" "plugin_alb_tg" {
+  name        = "${var.project_name}-tg"
+  port        = var.container_port
+  protocol    = "HTTP"
+  vpc_id      = data.aws_vpc.selected.id
+  target_type = "ip"
+
+  health_check {
+    enabled             = true
+    healthy_threshold   = 2
+    unhealthy_threshold = 3
+    timeout             = 5
+    interval            = 30
+    path                = "/"
+    protocol            = "HTTP"
+    matcher             = "200-299"
+  }
+
+  deregistration_delay = 30
+
+  tags = {
+    Name      = "${var.project_name}-tg"
+    ManagedBy = "pmp"
+    Plugin    = "aws/ecs"
+  }
+}
+
+# Listener
+resource "aws_lb_listener" "plugin_alb_listener" {
+  load_balancer_arn = aws_lb.plugin_alb.arn
+  port              = var.load_balancer_port
+  protocol          = "HTTP"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.plugin_alb_tg.arn
+  }
+
+  tags = {
+    Name      = "${var.project_name}-listener"
+    ManagedBy = "pmp"
+    Plugin    = "aws/ecs"
+  }
+}
+{{/if}}

@@ -88,9 +88,9 @@ pub struct TemplateSpec {
     /// Executor name (e.g., "opentofu", "terraform") (REQUIRED)
     pub executor: String,
 
-    /// Inputs applied to all environments
-    #[serde(default)]
-    pub inputs: HashMap<String, InputSpec>,
+    /// Inputs applied to all environments (supports both array and object format)
+    #[serde(default, deserialize_with = "deserialize_inputs")]
+    pub inputs: Vec<InputDefinition>,
 
     /// Environment-specific overrides
     #[serde(default)]
@@ -104,6 +104,57 @@ pub struct TemplateSpec {
     /// If set, user must select projects matching these dependencies when creating a project
     #[serde(default)]
     pub dependencies: Vec<TemplateDependency>,
+}
+
+/// Custom deserializer for inputs that supports both HashMap and Vec formats
+fn deserialize_inputs<'de, D>(deserializer: D) -> Result<Vec<InputDefinition>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::{Visitor, SeqAccess, MapAccess};
+    use std::fmt;
+
+    struct InputsVisitor;
+
+    impl<'de> Visitor<'de> for InputsVisitor {
+        type Value = Vec<InputDefinition>;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            formatter.write_str("a sequence of input definitions or a map of input names to specs")
+        }
+
+        // Handle array format (new)
+        fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+        where
+            A: SeqAccess<'de>,
+        {
+            let mut inputs = Vec::new();
+            while let Some(input_def) = seq.next_element::<InputDefinition>()? {
+                inputs.push(input_def);
+            }
+            Ok(inputs)
+        }
+
+        // Handle object format (legacy)
+        fn visit_map<M>(self, mut map: M) -> Result<Self::Value, M::Error>
+        where
+            M: MapAccess<'de>,
+        {
+            let mut inputs = Vec::new();
+            while let Some((name, input_spec)) = map.next_entry::<String, InputSpec>()? {
+                inputs.push(InputDefinition {
+                    name,
+                    input_type: input_spec.input_type,
+                    enum_values: input_spec.enum_values,
+                    default: input_spec.default,
+                    description: input_spec.description,
+                });
+            }
+            Ok(inputs)
+        }
+    }
+
+    deserializer.deserialize_any(InputsVisitor)
 }
 
 /// Plugins configuration in template
@@ -127,9 +178,9 @@ pub struct AllowedPluginConfig {
     /// Name of the plugin to allow
     pub plugin_name: String,
 
-    /// Optional input overrides/requirements for this plugin
-    #[serde(default)]
-    pub inputs: HashMap<String, InputSpec>,
+    /// Optional input overrides/requirements for this plugin (supports both array and object format)
+    #[serde(default, deserialize_with = "deserialize_inputs")]
+    pub inputs: Vec<InputDefinition>,
 }
 
 /// Reference to a template that provides the plugin (used for requires_project_with_template)
@@ -241,9 +292,9 @@ pub struct PluginSpec {
     /// Role/purpose of this plugin (e.g., "network", "storage")
     pub role: String,
 
-    /// Inputs for this plugin
-    #[serde(default)]
-    pub inputs: HashMap<String, InputSpec>,
+    /// Inputs for this plugin (supports both array and object format)
+    #[serde(default, deserialize_with = "deserialize_inputs")]
+    pub inputs: Vec<InputDefinition>,
 
     /// Optional requirement for a reference project with specific template
     /// If set, user must select a project matching this template when adding the plugin
@@ -268,9 +319,9 @@ pub struct ResourceSpec {
     /// Executor name (e.g., "opentofu", "terraform") (REQUIRED)
     pub executor: String,
 
-    /// Inputs applied to all environments
-    #[serde(default)]
-    pub inputs: HashMap<String, InputSpec>,
+    /// Inputs applied to all environments (supports both array and object format)
+    #[serde(default, deserialize_with = "deserialize_inputs")]
+    pub inputs: Vec<InputDefinition>,
 
     /// Environment-specific overrides
     #[serde(default)]
@@ -338,6 +389,41 @@ pub struct InputSpec {
     pub description: Option<String>,
 }
 
+/// Input definition with a name (used in array format)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InputDefinition {
+    /// Name of the input
+    pub name: String,
+
+    /// Input type specification
+    #[serde(flatten, skip_serializing_if = "Option::is_none")]
+    pub input_type: Option<InputType>,
+
+    /// Possible enum values for this input (deprecated, use input_type with Select)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enum_values: Option<Vec<String>>,
+
+    /// Default value (supports variable interpolation like ${var:_name})
+    #[serde(default)]
+    pub default: Option<Value>,
+
+    /// Description of the input
+    #[serde(default)]
+    pub description: Option<String>,
+}
+
+impl InputDefinition {
+    /// Convert to InputSpec (without the name)
+    pub fn to_input_spec(&self) -> InputSpec {
+        InputSpec {
+            input_type: self.input_type.clone(),
+            enum_values: self.enum_values.clone(),
+            default: self.default.clone(),
+            description: self.description.clone(),
+        }
+    }
+}
+
 /// Environment-specific overrides
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EnvironmentOverrides {
@@ -349,9 +435,9 @@ pub struct EnvironmentOverrides {
 /// Overrides specification
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct OverridesSpec {
-    /// Input overrides
-    #[serde(default)]
-    pub inputs: HashMap<String, InputSpec>,
+    /// Input overrides (supports both array and object format)
+    #[serde(default, deserialize_with = "deserialize_inputs")]
+    pub inputs: Vec<InputDefinition>,
 }
 
 // ============================================================================
@@ -1636,5 +1722,110 @@ fn test_empty_categories_and_template_packs() {
     // Should handle empty structures gracefully
     assert!(!infrastructure.is_template_in_category_tree("any", "template"));
     assert!(infrastructure.get_template_config("any", "template").is_none());
+}
+
+#[test]
+fn test_input_definition_array_format_deserialization() {
+    // Test array format with various input types
+    let yaml = r#"
+apiVersion: pmp.io/v1
+kind: Template
+metadata:
+  name: test-template
+  description: Test template
+spec:
+  apiVersion: pmp.io/v1
+  kind: TestResource
+  executor: opentofu
+  inputs:
+    - name: string_input
+      description: A string input
+      default: "test"
+    - name: number_input
+      description: A number input
+      default: 42
+    - name: bool_input
+      description: A boolean input
+      default: true
+    - name: enum_input
+      description: An enum input
+      default: option1
+      enum_values:
+        - option1
+        - option2
+        - option3
+  environments: {}
+"#;
+
+    let template: TemplateResource = serde_yaml::from_str(yaml).unwrap();
+    assert_eq!(template.spec.inputs.len(), 4);
+
+    // Verify inputs are in order
+    assert_eq!(template.spec.inputs[0].name, "string_input");
+    assert_eq!(template.spec.inputs[1].name, "number_input");
+    assert_eq!(template.spec.inputs[2].name, "bool_input");
+    assert_eq!(template.spec.inputs[3].name, "enum_input");
+
+    // Verify values
+    assert_eq!(template.spec.inputs[0].default, Some(serde_json::Value::String("test".to_string())));
+    assert_eq!(template.spec.inputs[1].default, Some(serde_json::Value::Number(42.into())));
+    assert_eq!(template.spec.inputs[2].default, Some(serde_json::Value::Bool(true)));
+}
+
+#[test]
+fn test_input_definition_object_format_deserialization() {
+    // Test legacy object format (backward compatibility)
+    let yaml = r#"
+apiVersion: pmp.io/v1
+kind: Template
+metadata:
+  name: test-template
+  description: Test template
+spec:
+  apiVersion: pmp.io/v1
+  kind: TestResource
+  executor: opentofu
+  inputs:
+    string_input:
+      description: A string input
+      default: "test"
+    number_input:
+      description: A number input
+      default: 42
+  environments: {}
+"#;
+
+    let template: TemplateResource = serde_yaml::from_str(yaml).unwrap();
+    assert_eq!(template.spec.inputs.len(), 2);
+
+    // Note: Object format doesn't guarantee order, but items should be present
+    let names: Vec<_> = template.spec.inputs.iter().map(|i| i.name.as_str()).collect();
+    assert!(names.contains(&"string_input"));
+    assert!(names.contains(&"number_input"));
+}
+
+#[test]
+fn test_plugin_inputs_array_format() {
+    let yaml = r#"
+apiVersion: pmp.io/v1
+kind: Plugin
+metadata:
+  name: test-plugin
+  description: Test plugin
+spec:
+  role: test-role
+  inputs:
+    - name: plugin_input1
+      description: First plugin input
+      default: "value1"
+    - name: plugin_input2
+      description: Second plugin input
+      default: 100
+"#;
+
+    let plugin: PluginResource = serde_yaml::from_str(yaml).unwrap();
+    assert_eq!(plugin.spec.inputs.len(), 2);
+    assert_eq!(plugin.spec.inputs[0].name, "plugin_input1");
+    assert_eq!(plugin.spec.inputs[1].name, "plugin_input2");
 }
 }

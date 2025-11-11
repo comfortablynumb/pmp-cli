@@ -9,13 +9,13 @@ spec:
 
   inputs:
     # Project Metadata
-    project_name:
+    - name: project_name
       type: string
       description: CloudFront distribution identifier (defaults to project name)
       default: ""
 
     # Origin Configuration
-    origin_type:
+    - name: origin_type
       type: select
       options:
         - label: "S3 Bucket"
@@ -27,17 +27,17 @@ spec:
       default: "s3"
       description: Type of origin
 
-    origin_domain_name:
+    - name: origin_domain_name
       type: string
       description: Origin domain name (S3 bucket name, ALB DNS, or custom domain)
       default: ""
 
-    origin_path:
+    - name: origin_path
       type: string
       description: Optional path to append to origin requests (e.g., /production)
       default: ""
 
-    origin_protocol_policy:
+    - name: origin_protocol_policy
       type: select
       options:
         - label: "HTTPS Only"
@@ -50,28 +50,28 @@ spec:
       description: Protocol for connecting to custom origin
 
     # S3 Origin Configuration
-    s3_origin_access_control:
+    - name: s3_origin_access_control
       type: boolean
       description: Use Origin Access Control for S3 (recommended over OAI)
       default: true
 
     # Custom Domain Configuration
-    enable_custom_domain:
+    - name: enable_custom_domain
       type: boolean
       description: Enable custom domain with SSL certificate
       default: false
 
-    domain_names:
+    - name: domain_names
       type: string
       description: Comma-separated custom domain names (e.g., example.com,www.example.com)
       default: ""
 
-    acm_certificate_arn:
+    - name: acm_certificate_arn
       type: string
       description: ARN of ACM certificate in us-east-1 (required for custom domain)
       default: ""
 
-    ssl_support_method:
+    - name: ssl_support_method
       type: select
       options:
         - label: "SNI Only (Recommended)"
@@ -81,7 +81,7 @@ spec:
       default: "sni-only"
       description: SSL certificate delivery method
 
-    minimum_protocol_version:
+    - name: minimum_protocol_version
       type: select
       options:
         - label: "TLSv1.2_2021"
@@ -96,7 +96,7 @@ spec:
       description: Minimum SSL/TLS protocol version
 
     # Viewer Protocol Configuration
-    viewer_protocol_policy:
+    - name: viewer_protocol_policy
       type: select
       options:
         - label: "Redirect HTTP to HTTPS"
@@ -109,28 +109,28 @@ spec:
       description: Protocol for viewer requests
 
     # Cache Configuration
-    default_ttl:
+    - name: default_ttl
       type: number
       description: Default TTL in seconds (0 for no caching)
       default: 86400
       min: 0
       max: 31536000
 
-    min_ttl:
+    - name: min_ttl
       type: number
       description: Minimum TTL in seconds
       default: 0
       min: 0
       max: 31536000
 
-    max_ttl:
+    - name: max_ttl
       type: number
       description: Maximum TTL in seconds
       default: 31536000
       min: 0
       max: 31536000
 
-    cache_policy:
+    - name: cache_policy
       type: select
       options:
         - label: "CachingOptimized (Recommended for static content)"
@@ -147,13 +147,13 @@ spec:
       description: Managed cache policy
 
     # Compression
-    compress:
+    - name: compress
       type: boolean
       description: Enable automatic compression (gzip, brotli)
       default: true
 
     # HTTP Versions
-    http_version:
+    - name: http_version
       type: select
       options:
         - label: "HTTP/2 and HTTP/3"
@@ -166,7 +166,7 @@ spec:
       description: Supported HTTP versions
 
     # Price Class
-    price_class:
+    - name: price_class
       type: select
       options:
         - label: "All Edge Locations (Best Performance)"
@@ -179,12 +179,12 @@ spec:
       description: Edge location coverage
 
     # Geographic Restrictions
-    enable_geo_restriction:
+    - name: enable_geo_restriction
       type: boolean
       description: Enable geographic restrictions
       default: false
 
-    geo_restriction_type:
+    - name: geo_restriction_type
       type: select
       options:
         - label: "Whitelist (Allow only specific countries)"
@@ -194,39 +194,39 @@ spec:
       default: "blacklist"
       description: Type of geographic restriction
 
-    geo_restriction_locations:
+    - name: geo_restriction_locations
       type: string
       description: Comma-separated ISO 3166-1 alpha-2 country codes
       default: ""
 
     # WAF Integration
-    enable_waf:
+    - name: enable_waf
       type: boolean
       description: Attach WAF Web ACL
       default: false
 
-    waf_acl_id:
+    - name: waf_acl_id
       type: string
       description: WAF Web ACL ID (must be in us-east-1 for CloudFront)
       default: ""
 
     # Custom Error Responses
-    enable_custom_error_responses:
+    - name: enable_custom_error_responses
       type: boolean
       description: Enable custom error responses
       default: false
 
-    error_404_response_page:
+    - name: error_404_response_page
       type: string
       description: Path to custom 404 error page
       default: "/404.html"
 
-    error_403_response_page:
+    - name: error_403_response_page
       type: string
       description: Path to custom 403 error page
       default: "/403.html"
 
-    error_response_code:
+    - name: error_response_code
       type: number
       description: HTTP response code for custom error pages
       default: 404
@@ -234,34 +234,34 @@ spec:
       max: 599
 
     # Logging
-    enable_logging:
+    - name: enable_logging
       type: boolean
       description: Enable access logging to S3
       default: false
 
-    log_bucket_name:
+    - name: log_bucket_name
       type: string
       description: S3 bucket name for access logs
       default: ""
 
-    log_prefix:
+    - name: log_prefix
       type: string
       description: Log file prefix
       default: "cloudfront/"
 
-    log_include_cookies:
+    - name: log_include_cookies
       type: boolean
       description: Include cookies in access logs
       default: false
 
     # Default Root Object
-    default_root_object:
+    - name: default_root_object
       type: string
       description: Default file for root URL requests
       default: "index.html"
 
     # IPv6
-    enable_ipv6:
+    - name: enable_ipv6
       type: boolean
       description: Enable IPv6
       default: true

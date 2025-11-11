@@ -1,0 +1,22 @@
+apiVersion: pmp.io/v1
+kind: Plugin
+metadata:
+  name: hub
+  description: Create a Docker Hub repository for your application containers
+
+spec:
+  role: container-registry
+
+  inputs:
+    - name: repository_name
+      type: string
+      description: Docker Hub repository name (defaults to project name)
+      default: ""
+    - name: namespace
+      type: string
+      description: Docker Hub namespace (organization or username)
+      default: ""
+    - name: description
+      type: string
+      description: Repository description (defaults to project description)
+      default: ""

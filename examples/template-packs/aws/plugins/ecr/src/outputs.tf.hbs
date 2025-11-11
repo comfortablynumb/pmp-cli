@@ -19,6 +19,16 @@ output "registry_id" {
   value       = aws_ecr_repository.plugin_repo.registry_id
 }
 
+output "image_url" {
+  description = "The full ECR image URL without tag (use this for docker pull with your desired tag)"
+  value       = aws_ecr_repository.plugin_repo.repository_url
+}
+
+output "image_url_latest" {
+  description = "The full ECR image URL with 'latest' tag"
+  value       = "${aws_ecr_repository.plugin_repo.repository_url}:latest"
+}
+
 # Quick Start Commands
 output "docker_commands" {
   description = "Docker commands for this ECR repository"

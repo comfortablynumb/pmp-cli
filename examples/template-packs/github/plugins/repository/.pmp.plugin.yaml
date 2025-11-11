@@ -8,19 +8,15 @@ spec:
   role: source-control
 
   inputs:
-    # Project Metadata
-    project_name:
+    - name: project_name
       type: string
       description: Repository name (defaults to project name)
       default: ""
-
-    project_description:
+    - name: project_description
       type: string
       description: Repository description (defaults to project description)
       default: ""
-
-    # Basic Settings
-    visibility:
+    - name: visibility
       type: select
       options:
         - label: "Public (Anyone can see)"
@@ -31,25 +27,19 @@ spec:
           value: "internal"
       default: "private"
       description: Repository visibility level
-
-    # Repository Features
-    has_issues:
+    - name: has_issues
       type: boolean
       description: Enable issues for this repository
       default: true
-
-    has_wiki:
+    - name: has_wiki
       type: boolean
       description: Enable wiki for this repository
       default: false
-
-    has_projects:
+    - name: has_projects
       type: boolean
       description: Enable projects for this repository
       default: false
-
-    # Initialization
-    gitignore_template:
+    - name: gitignore_template
       type: select
       options:
         - label: "None"
@@ -70,8 +60,7 @@ spec:
           value: "Terraform"
       default: ""
       description: .gitignore template to use
-
-    license_template:
+    - name: license_template
       type: select
       options:
         - label: "None"
@@ -86,25 +75,19 @@ spec:
           value: "bsd-3-clause"
       default: "mit"
       description: License template to use
-
-    default_branch:
+    - name: default_branch
       type: string
       description: Default branch name
       default: "main"
-
-    # Merge Settings
-    delete_branch_on_merge:
+    - name: delete_branch_on_merge
       type: boolean
       description: Automatically delete head branches after pull requests are merged
       default: true
-
-    # Branch Protection
-    enable_branch_protection:
+    - name: enable_branch_protection
       type: boolean
       description: Enable branch protection rules for the default branch
       default: true
-
-    required_approving_review_count:
+    - name: required_approving_review_count
       type: select
       options:
         - label: "1 Approval"
@@ -115,14 +98,11 @@ spec:
           value: "3"
       default: "1"
       description: Number of required approving reviews
-
-    # Access Management
-    enable_team_access:
+    - name: enable_team_access
       type: boolean
       description: Enable team-based access management
       default: false
-
-    teams:
+    - name: teams
       type: string
       description: Team access configuration (format - team-name:permission,another-team:permission)
       default: ""

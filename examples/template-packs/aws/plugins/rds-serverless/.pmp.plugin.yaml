@@ -9,13 +9,13 @@ spec:
 
   inputs:
     # Project Metadata
-    project_name:
+    - name: project_name
       type: string
       description: Database cluster identifier (defaults to project name)
       default: ""
 
     # Engine Configuration
-    engine:
+    - name: engine
       type: select
       options:
         - label: "Aurora PostgreSQL Serverless v2"
@@ -25,7 +25,7 @@ spec:
       default: "aurora-postgresql"
       description: Database engine type
 
-    engine_version:
+    - name: engine_version
       type: select
       options:
         - label: "PostgreSQL 15.5 (Latest)"
@@ -42,25 +42,25 @@ spec:
       description: Database engine version
 
     # Database Configuration
-    database_name:
+    - name: database_name
       type: string
       description: Initial database name to create
       default: "mydb"
 
-    master_username:
+    - name: master_username
       type: string
       description: Master username for database access
       default: "dbadmin"
 
     # Serverless v2 Scaling Configuration
-    serverless_min_capacity:
+    - name: serverless_min_capacity
       type: number
       description: Minimum ACUs (Aurora Capacity Units) - 0.5 to 128
       default: 0.5
       min: 0.5
       max: 128
 
-    serverless_max_capacity:
+    - name: serverless_max_capacity
       type: number
       description: Maximum ACUs (Aurora Capacity Units) - 0.5 to 128
       default: 2
@@ -68,13 +68,13 @@ spec:
       max: 128
 
     # High Availability
-    availability_zones:
+    - name: availability_zones
       type: string
       description: Comma-separated availability zones (leave empty for automatic selection)
       default: ""
 
     # Instance Configuration
-    instance_count:
+    - name: instance_count
       type: number
       description: Number of Aurora Serverless v2 instances (1 for single-AZ, 2+ for Multi-AZ)
       default: 2
@@ -82,74 +82,74 @@ spec:
       max: 15
 
     # Network Configuration
-    vpc_id:
+    - name: vpc_id
       type: string
       description: VPC ID for the database cluster
       default: ""
 
-    subnet_ids:
+    - name: subnet_ids
       type: string
       description: Comma-separated subnet IDs for DB subnet group (minimum 2 in different AZs)
       default: ""
 
-    security_group_ids:
+    - name: security_group_ids
       type: string
       description: Comma-separated security group IDs
       default: ""
 
-    publicly_accessible:
+    - name: publicly_accessible
       type: boolean
       description: Make database publicly accessible (not recommended for production)
       default: false
 
     # Backup Configuration
-    backup_retention_period:
+    - name: backup_retention_period
       type: number
       description: Backup retention period in days (1-35)
       default: 7
       min: 1
       max: 35
 
-    preferred_backup_window:
+    - name: preferred_backup_window
       type: string
       description: Daily backup window in UTC (e.g., 03:00-04:00)
       default: "03:00-04:00"
 
-    preferred_maintenance_window:
+    - name: preferred_maintenance_window
       type: string
       description: Weekly maintenance window in UTC (e.g., sun:04:00-sun:05:00)
       default: "sun:04:00-sun:05:00"
 
     # Encryption
-    storage_encrypted:
+    - name: storage_encrypted
       type: boolean
       description: Enable storage encryption
       default: true
 
-    kms_key_id:
+    - name: kms_key_id
       type: string
       description: KMS key ID for encryption (leave empty for AWS managed key)
       default: ""
 
     # Monitoring & Logging
-    enabled_cloudwatch_logs_exports:
+    - name: enabled_cloudwatch_logs_exports
       type: string
       description: Comma-separated log types to export (postgresql or audit,error,general,slowquery for MySQL)
       default: "postgresql"
 
-    performance_insights_enabled:
+    - name: performance_insights_enabled
       type: boolean
       description: Enable Performance Insights for query monitoring
       default: true
 
-    performance_insights_retention_period:
+    - name: performance_insights_retention_period
       type: number
       description: Performance Insights data retention in days (7 or 731)
       default: 7
       min: 7
       max: 731
 
-    monitoring_interval:
+    - name: monitoring_interval
       type: number
       description: Enhanced monitoring interval in seconds (0, 1, 5, 10, 15, 30, 60)
       default: 60
@@ -157,50 +157,50 @@ spec:
       max: 60
 
     # Deletion Protection
-    deletion_protection:
+    - name: deletion_protection
       type: boolean
       description: Enable deletion protection
       default: true
 
-    skip_final_snapshot:
+    - name: skip_final_snapshot
       type: boolean
       description: Skip final snapshot when deleting (not recommended for production)
       default: false
 
-    final_snapshot_identifier:
+    - name: final_snapshot_identifier
       type: string
       description: Name for final snapshot (if skip_final_snapshot is false)
       default: ""
 
     # Advanced Configuration
-    enable_http_endpoint:
+    - name: enable_http_endpoint
       type: boolean
       description: Enable Data API for serverless HTTP access
       default: false
 
-    auto_minor_version_upgrade:
+    - name: auto_minor_version_upgrade
       type: boolean
       description: Enable automatic minor version upgrades
       default: true
 
-    apply_immediately:
+    - name: apply_immediately
       type: boolean
       description: Apply changes immediately (vs during maintenance window)
       default: false
 
     # Parameter Group
-    custom_parameter_group_family:
+    - name: custom_parameter_group_family
       type: string
       description: Parameter group family (e.g., aurora-postgresql15, aurora-mysql8.0)
       default: "aurora-postgresql15"
 
     # Tags
-    environment:
+    - name: environment
       type: string
       description: Environment name (dev, staging, prod)
       default: ""
 
-    application:
+    - name: application
       type: string
       description: Application name
       default: ""

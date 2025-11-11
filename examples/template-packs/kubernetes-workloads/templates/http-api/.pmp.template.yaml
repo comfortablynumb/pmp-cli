@@ -14,7 +14,7 @@ spec:
       - template_pack_name: postgres
         plugin_name: access
         inputs:
-          k8s_secret_namespace:
+          - name: k8s_secret_namespace
             default: ""
             description: Kubernetes namespace for credential secret (defaults to project namespace)
       - template_pack_name: vault
@@ -26,37 +26,33 @@ spec:
     #   - template_pack_name: github
     #     plugin_name: repository
     #     inputs:
-    #       gitignore_template:
+    #       - name: gitignore_template
     #         default: Terraform
-    #       license_template:
+    #       - name: license_template
     #         default: apache-2.0
-    #       visibility:
+    #       - name: visibility
     #         default: private
     #   - template_pack_name: aws
     #     plugin_name: ecr
     #     inputs:
-    #       image_tag_mutability:
+    #       - name: image_tag_mutability
     #         default: IMMUTABLE
-    #       scan_on_push:
+    #       - name: scan_on_push
     #         default: "true"
 
   inputs:
-    docker_image:
+    - name: docker_image
       description: Docker image name (e.g., nginx, myregistry.io/myapp)
-
-    docker_image_version:
+    - name: docker_image_version
       description: Docker image tag/version (e.g., latest, v1.2.3)
       default: latest
-
-    min_replicas:
+    - name: min_replicas
       default: 2
       description: Minimum number of pod replicas for auto-scaling
-
-    max_replicas:
+    - name: max_replicas
       default: 10
       description: Maximum number of pod replicas for auto-scaling
-
-    cpu_millicores:
+    - name: cpu_millicores
       enum_values:
         - 20
         - 50
@@ -73,8 +69,7 @@ spec:
         - 32000
       default: 250
       description: CPU limit in millicores (1000m = 1 CPU core)
-
-    memory_mb:
+    - name: memory_mb
       enum_values:
         - 64
         - 128
@@ -87,16 +82,13 @@ spec:
         - 16384
       default: 512
       description: Memory limit in MB
-
-    http_port:
+    - name: http_port
       default: 8080
       description: Container HTTP port to expose
-
-    healthcheck_uri:
+    - name: healthcheck_uri
       default: "/_/health"
       description: HTTP path for health check endpoint
-
-    service_type:
+    - name: service_type
       enum_values:
         - ClusterIP
         - NodePort

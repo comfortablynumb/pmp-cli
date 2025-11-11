@@ -10,48 +10,38 @@ spec:
   executor: opentofu
 
   inputs:
-    project:
+    - name: project
       default: "default"
       description: ArgoCD project name
-
-    app_description:
+    - name: app_description
       default: ""
       description: Description of the application (optional)
-
-    helm_repo_url:
+    - name: helm_repo_url
       default: "https://comfortablynumb.github.io/pmp-helm-charts"
       description: Helm repository URL
-
-    chart_name:
+    - name: chart_name
       default: "charts/application"
       description: Name of the Helm chart in the repository
-
-    target_revision:
+    - name: target_revision
       default: ""
       description: Chart version to deploy (required)
       required: true
-
-    helm_release_name:
+    - name: helm_release_name
       default: ""
       description: Helm release name (optional, defaults to project name)
-
-    helm_values:
+    - name: helm_values
       default: ""
       description: Inline Helm values as YAML string (optional)
-
-    helm_values_files:
+    - name: helm_values_files
       default: ""
       description: Comma-separated list of values file paths in the repo (optional)
-
-    helm_parameters:
+    - name: helm_parameters
       default: ""
       description: Helm parameters as key=value pairs, comma-separated (optional)
-
-    destination_namespace:
+    - name: destination_namespace
       default: "default"
       description: Target Kubernetes namespace for deployment
-
-    destination_server:
+    - name: destination_server
       default: "https://kubernetes.default.svc"
       description: Target Kubernetes cluster API server URL
 

@@ -9,13 +9,13 @@ spec:
 
   inputs:
     # Project Metadata
-    project_name:
+    - name: project_name
       type: string
       description: ElastiCache cluster name (defaults to project name)
       default: ""
 
     # Engine Configuration
-    engine:
+    - name: engine
       type: select
       options:
         - label: "Redis (In-memory data structure store)"
@@ -25,13 +25,13 @@ spec:
       default: "redis"
       description: Cache engine type
 
-    engine_version:
+    - name: engine_version
       type: string
       description: Engine version (e.g., "7.0" for Redis, "1.6.17" for Memcached)
       default: "7.0"
 
     # Cluster Configuration
-    node_type:
+    - name: node_type
       type: select
       options:
         - label: "cache.t3.micro (0.5 GB RAM)"
@@ -47,19 +47,19 @@ spec:
       default: "cache.t3.small"
       description: Node instance type
 
-    num_cache_nodes:
+    - name: num_cache_nodes
       type: number
       description: Number of cache nodes (1-20 for Memcached, 1-6 for Redis without cluster mode)
       default: 1
       min: 1
       max: 20
 
-    parameter_group_family:
+    - name: parameter_group_family
       type: string
       description: Parameter group family (e.g., "redis7", "memcached1.6")
       default: "redis7"
 
-    port:
+    - name: port
       type: number
       description: Port number (6379 for Redis, 11211 for Memcached)
       default: 6379
@@ -67,52 +67,52 @@ spec:
       max: 65535
 
     # Security Settings
-    at_rest_encryption_enabled:
+    - name: at_rest_encryption_enabled
       type: boolean
       description: Enable encryption at rest (Redis only)
       default: true
 
-    transit_encryption_enabled:
+    - name: transit_encryption_enabled
       type: boolean
       description: Enable encryption in transit (Redis only)
       default: true
 
-    auth_token_enabled:
+    - name: auth_token_enabled
       type: boolean
       description: Enable Redis AUTH token for authentication (Redis only)
       default: false
 
     # Backup Settings
-    snapshot_retention_limit:
+    - name: snapshot_retention_limit
       type: number
       description: Number of days to retain automatic snapshots (Redis only, 0 to disable)
       default: 5
       min: 0
       max: 35
 
-    snapshot_window:
+    - name: snapshot_window
       type: string
       description: Daily time range for automatic snapshots in UTC (e.g., "05:00-09:00")
       default: "05:00-09:00"
 
     # Maintenance Settings
-    maintenance_window:
+    - name: maintenance_window
       type: string
       description: Weekly time range for maintenance in UTC (e.g., "sun:05:00-sun:07:00")
       default: "sun:05:00-sun:07:00"
 
-    auto_minor_version_upgrade:
+    - name: auto_minor_version_upgrade
       type: boolean
       description: Enable automatic minor version upgrades during maintenance window
       default: true
 
     # Network Settings
-    subnet_ids:
+    - name: subnet_ids
       type: string
       description: Comma-separated list of subnet IDs for the cache subnet group
       default: ""
 
-    security_group_ids:
+    - name: security_group_ids
       type: string
       description: Comma-separated list of security group IDs
       default: ""

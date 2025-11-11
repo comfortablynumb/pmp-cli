@@ -1,0 +1,6 @@
+apiVersion: pmp.io/v1
+kind: TemplatePack
+metadata:
+  name: docker
+  description: Docker Hub repository management with automated provisioning and lifecycle policies
+spec: {}

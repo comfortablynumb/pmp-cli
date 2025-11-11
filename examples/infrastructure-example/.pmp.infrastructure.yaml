@@ -31,8 +31,6 @@ spec:
           description: Microservices and API applications
           subcategories: []
           templates:
-            - template_pack: kubernetes-workloads
-              template: http-api
             - template_pack: examples
               template: application
 

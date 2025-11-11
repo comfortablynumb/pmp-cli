@@ -1,0 +1,124 @@
+variable "project_name" {
+  type        = string
+  description = "ECS service name"
+  default     = "{{project_name}}"
+}
+
+variable "create_cluster" {
+  type        = bool
+  description = "Create a new ECS cluster"
+  default     = {{create_cluster}}
+}
+
+variable "cluster_name" {
+  type        = string
+  description = "ECS cluster name"
+  default     = "{{cluster_name}}"
+}
+
+variable "launch_type" {
+  type        = string
+  description = "ECS launch type (FARGATE or EC2)"
+  default     = "{{launch_type}}"
+
+  validation {
+    condition     = contains(["FARGATE", "EC2"], var.launch_type)
+    error_message = "Launch type must be either FARGATE or EC2"
+  }
+}
+
+variable "container_image" {
+  type        = string
+  description = "Docker container image"
+  default     = "{{container_image}}"
+}
+
+variable "container_port" {
+  type        = number
+  description = "Container port to expose"
+  default     = {{container_port}}
+}
+
+variable "cpu" {
+  type        = string
+  description = "Task CPU units"
+  default     = "{{cpu}}"
+}
+
+variable "memory" {
+  type        = string
+  description = "Task memory in MB"
+  default     = "{{memory}}"
+}
+
+variable "desired_count" {
+  type        = number
+  description = "Desired number of tasks"
+  default     = {{desired_count}}
+}
+
+variable "assign_public_ip" {
+  type        = bool
+  description = "Assign public IP to tasks"
+  default     = {{assign_public_ip}}
+}
+
+variable "vpc_id" {
+  type        = string
+  description = "VPC ID (leave empty for default VPC)"
+  default     = "{{vpc_id}}"
+}
+
+variable "subnet_ids" {
+  type        = string
+  description = "Comma-separated subnet IDs"
+  default     = "{{subnet_ids}}"
+}
+
+variable "create_load_balancer" {
+  type        = bool
+  description = "Create an Application Load Balancer"
+  default     = {{create_load_balancer}}
+}
+
+variable "load_balancer_port" {
+  type        = number
+  description = "Load balancer listener port"
+  default     = {{load_balancer_port}}
+}
+
+variable "enable_autoscaling" {
+  type        = bool
+  description = "Enable auto-scaling"
+  default     = {{enable_autoscaling}}
+}
+
+variable "min_capacity" {
+  type        = number
+  description = "Minimum number of tasks for auto-scaling"
+  default     = {{min_capacity}}
+}
+
+variable "max_capacity" {
+  type        = number
+  description = "Maximum number of tasks for auto-scaling"
+  default     = {{max_capacity}}
+}
+
+variable "target_cpu_utilization" {
+  type        = number
+  description = "Target CPU utilization percentage"
+  default     = {{target_cpu_utilization}}
+}
+
+variable "log_retention_days" {
+  type        = number
+  description = "CloudWatch Logs retention period"
+  default     = {{log_retention_days}}
+}
+
+variable "environment_variables" {
+  type        = string
+  description = "Environment variables as key=value pairs"
+  default     = "{{environment_variables}}"
+}

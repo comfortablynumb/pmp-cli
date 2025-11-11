@@ -26,62 +26,51 @@ spec:
         postgres_namespace: {}
 
   inputs:
-    role_name:
+    - name: role_name
       type: string
       description: Database role/user name to create
       # No default - required input
-
-    role_password:
+    - name: role_password
       type: string
       description: Password for the role (auto-generated if not provided)
       default: ""
-
-    database_name:
+    - name: database_name
       type: string
       description: Database to grant access to
       default: ""  # Inherited from parent template
-
-    privileges:
+    - name: privileges
       description: Array of privileges to grant (SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER)
       default: ["SELECT"]
-
-    grant_option:
+    - name: grant_option
       type: boolean
       description: Allow user to grant privileges to others
       default: false
-
-    connection_limit:
+    - name: connection_limit
       type: number
       min: -1
       description: Maximum concurrent connections (-1 for unlimited)
       default: -1
-
-    valid_until:
+    - name: valid_until
       type: string
       description: Password expiration timestamp (format YYYY-MM-DD HH:MM:SS)
       default: ""
-
-    schema_name:
+    - name: schema_name
       type: string
       description: Schema to grant privileges on
       default: "public"
-
-    create_schema:
+    - name: create_schema
       type: boolean
       description: Allow user to create schemas
       default: false
-
-    superuser:
+    - name: superuser
       type: boolean
       description: Grant superuser privileges (WARNING - use with caution)
       default: false
-
-    create_role:
+    - name: create_role
       type: boolean
       description: Allow user to create other roles
       default: false
-
-    create_db:
+    - name: create_db
       type: boolean
       description: Allow user to create databases
       default: false

@@ -1,0 +1,207 @@
+terraform {
+  required_version = ">= 1.0"
+
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+  }
+}
+
+# Data sources for VPC and subnets
+data "aws_vpc" "selected" {
+  id      = var.vpc_id != "" ? var.vpc_id : null
+  default = var.vpc_id == "" ? true : null
+}
+
+data "aws_subnets" "selected" {
+  filter {
+    name   = "vpc-id"
+    values = [data.aws_vpc.selected.id]
+  }
+}
+
+# CloudWatch Log Group
+resource "aws_cloudwatch_log_group" "plugin_ecs" {
+  name              = "/ecs/${var.project_name}"
+  retention_in_days = var.log_retention_days
+
+  tags = {
+    Name      = "ecs-logs-${var.project_name}"
+    ManagedBy = "pmp"
+    Plugin    = "aws/ecs"
+  }
+}
+
+{{#if create_cluster}}
+# ECS Cluster
+resource "aws_ecs_cluster" "plugin_cluster" {
+  name = var.cluster_name != "" ? var.cluster_name : "${var.project_name}-cluster"
+
+  setting {
+    name  = "containerInsights"
+    value = "enabled"
+  }
+
+  tags = {
+    Name      = var.cluster_name != "" ? var.cluster_name : "${var.project_name}-cluster"
+    ManagedBy = "pmp"
+    Plugin    = "aws/ecs"
+  }
+}
+
+resource "aws_ecs_cluster_capacity_providers" "plugin_cluster" {
+  cluster_name = aws_ecs_cluster.plugin_cluster.name
+
+  capacity_providers = {{#if (eq launch_type "FARGATE")}}["FARGATE", "FARGATE_SPOT"]{{else}}["EC2"]{{/if}}
+
+  default_capacity_provider_strategy {
+    capacity_provider = {{#if (eq launch_type "FARGATE")}}"FARGATE"{{else}}"EC2"{{/if}}
+    weight            = 1
+    base              = 1
+  }
+}
+{{/if}}
+
+# Security Group for ECS Tasks
+resource "aws_security_group" "plugin_ecs_tasks" {
+  name        = "${var.project_name}-ecs-tasks"
+  description = "Security group for ${var.project_name} ECS tasks"
+  vpc_id      = data.aws_vpc.selected.id
+
+  ingress {
+    description = "Allow traffic on container port"
+    from_port   = var.container_port
+    to_port     = var.container_port
+    protocol    = "tcp"
+    cidr_blocks = {{#if create_load_balancer}}[data.aws_vpc.selected.cidr_block]{{else}}["0.0.0.0/0"]{{/if}}
+  }
+
+  egress {
+    description = "Allow all outbound traffic"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name      = "${var.project_name}-ecs-tasks"
+    ManagedBy = "pmp"
+    Plugin    = "aws/ecs"
+  }
+}
+
+# Parse environment variables
+locals {
+  env_vars_list = var.environment_variables != "" ? split(",", var.environment_variables) : []
+  env_vars_map = {
+    for item in local.env_vars_list :
+    split("=", item)[0] => split("=", item)[1]
+    if length(split("=", item)) == 2
+  }
+  env_vars = [
+    for key, value in local.env_vars_map : {
+      name  = key
+      value = value
+    }
+  ]
+}
+
+# ECS Task Definition
+resource "aws_ecs_task_definition" "plugin_task" {
+  family                   = var.project_name
+  requires_compatibilities = [var.launch_type]
+  network_mode             = "awsvpc"
+  cpu                      = var.cpu
+  memory                   = var.memory
+  execution_role_arn       = aws_iam_role.plugin_ecs_execution.arn
+  task_role_arn            = aws_iam_role.plugin_ecs_task.arn
+
+  container_definitions = jsonencode([
+    {
+      name      = var.project_name
+      image     = var.container_image
+      essential = true
+
+      portMappings = [
+        {
+          containerPort = var.container_port
+          hostPort      = var.container_port
+          protocol      = "tcp"
+        }
+      ]
+
+      environment = local.env_vars
+
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = aws_cloudwatch_log_group.plugin_ecs.name
+          "awslogs-region"        = data.aws_region.current.name
+          "awslogs-stream-prefix" = "ecs"
+        }
+      }
+
+      healthCheck = {
+        command     = ["CMD-SHELL", "exit 0"]
+        interval    = 30
+        timeout     = 5
+        retries     = 3
+        startPeriod = 60
+      }
+    }
+  ])
+
+  tags = {
+    Name      = var.project_name
+    ManagedBy = "pmp"
+    Plugin    = "aws/ecs"
+  }
+}
+
+# ECS Service
+resource "aws_ecs_service" "plugin_service" {
+  name            = var.project_name
+  cluster         = {{#if create_cluster}}aws_ecs_cluster.plugin_cluster.id{{else}}var.cluster_name{{/if}}
+  task_definition = aws_ecs_task_definition.plugin_task.arn
+  desired_count   = var.desired_count
+  launch_type     = var.launch_type
+
+  network_configuration {
+    subnets          = var.subnet_ids != "" ? split(",", var.subnet_ids) : data.aws_subnets.selected.ids
+    security_groups  = [aws_security_group.plugin_ecs_tasks.id]
+    assign_public_ip = var.assign_public_ip
+  }
+
+  {{#if create_load_balancer}}
+  load_balancer {
+    target_group_arn = aws_lb_target_group.plugin_alb_tg[0].arn
+    container_name   = var.project_name
+    container_port   = var.container_port
+  }
+
+  depends_on = [aws_lb_listener.plugin_alb_listener[0]]
+  {{/if}}
+
+  deployment_configuration {
+    maximum_percent         = 200
+    minimum_healthy_percent = 100
+  }
+
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
+  }
+
+  tags = {
+    Name      = var.project_name
+    ManagedBy = "pmp"
+    Plugin    = "aws/ecs"
+  }
+}
+
+# Data source for current AWS region
+data "aws_region" "current" {}
+data "aws_caller_identity" "current" {}

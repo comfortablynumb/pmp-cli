@@ -2,8 +2,8 @@ use crate::collection::CollectionDiscovery;
 use crate::commands::apply::ApplyCommand;
 use crate::output;
 use crate::schema::SchemaValidator;
-use crate::template::{TemplateDiscovery, TemplateRenderer, TemplatePackInfo, TemplateInfo, interpolate_value};
-use crate::template::utils::interpolate_variables;
+use crate::template::{TemplateDiscovery, TemplateRenderer, TemplatePackInfo, TemplateInfo};
+use crate::template::utils::interpolate_all;
 use crate::template::metadata::{AddedPlugin, PluginProjectReference, TemplateResource, InputType};
 use anyhow::{Context, Result};
 use std::collections::HashMap;
@@ -159,8 +159,12 @@ impl CreateCommand {
 
             // Merge plugin inputs with installed config inputs
             let mut merged_inputs = plugin_info.resource.spec.inputs.clone();
-            for (input_name, input_spec) in &installed_config.inputs {
-                merged_inputs.insert(input_name.clone(), input_spec.clone());
+            // Append installed config inputs, overriding any existing inputs with the same name
+            for installed_input in &installed_config.inputs {
+                // Remove any existing input with the same name
+                merged_inputs.retain(|input_def| input_def.name != installed_input.name);
+                // Add the installed config input
+                merged_inputs.push(installed_input.clone());
             }
 
             // Ask user if they want to customize inputs
@@ -242,21 +246,28 @@ impl CreateCommand {
 
     /// Build default inputs from input specs without prompting user
     fn build_default_inputs(
-        inputs_spec: &HashMap<String, crate::template::metadata::InputSpec>,
+        inputs_spec: &[crate::template::metadata::InputDefinition],
         project_name: &str,
     ) -> Result<HashMap<String, Value>> {
         let mut inputs = HashMap::new();
 
-        // Always add name (automatic variable with underscore prefix)
+        // Always add name (automatic variables)
         inputs.insert("_name".to_string(), Value::String(project_name.to_string()));
+        inputs.insert("name".to_string(), Value::String(project_name.to_string()));
 
-        for (input_name, input_spec) in inputs_spec {
-            if input_name == "_name" {
+        for input_def in inputs_spec {
+            if input_def.name == "_name" || input_def.name == "name" {
                 continue;
             }
 
-            if let Some(default) = &input_spec.default {
-                inputs.insert(input_name.clone(), default.clone());
+            if let Some(default) = &input_def.default {
+                // Build variables map for interpolation
+                let vars = Self::get_interpolation_variables(&inputs, project_name);
+
+                // Interpolate both ${env:...} and ${var:...} patterns in the default value
+                let interpolated_value = crate::template::utils::interpolate_value_all(default, &vars)?;
+
+                inputs.insert(input_def.name.clone(), interpolated_value);
             }
         }
 
@@ -281,39 +292,40 @@ impl CreateCommand {
     /// Collect plugin inputs from user (same as update.rs)
     fn collect_plugin_inputs(
         ctx: &crate::context::Context,
-        inputs_spec: &HashMap<String, crate::template::metadata::InputSpec>,
+        inputs_spec: &[crate::template::metadata::InputDefinition],
         project_name: &str,
     ) -> Result<HashMap<String, Value>> {
         let mut inputs = HashMap::new();
 
-        // Always add name (automatic variable with underscore prefix)
+        // Always add name (automatic variables)
         inputs.insert("_name".to_string(), Value::String(project_name.to_string()));
+        inputs.insert("name".to_string(), Value::String(project_name.to_string()));
 
         // Collect each input defined in the plugin
-        for (input_name, input_spec) in inputs_spec {
-            // Skip if it's the '_name' field (already added)
-            if input_name == "_name" {
+        for input_def in inputs_spec {
+            // Skip if it's the '_name' or 'name' field (already added)
+            if input_def.name == "_name" || input_def.name == "name" {
                 continue;
             }
 
             // Get variables for interpolation
             let vars = Self::get_interpolation_variables(&inputs, project_name);
 
-            // Interpolate variables in the description
-            let description = if let Some(desc) = &input_spec.description {
-                interpolate_variables(desc, &vars)?
+            // Interpolate variables in the description (supports both ${env:...} and ${var:...})
+            let description = if let Some(desc) = &input_def.description {
+                interpolate_all(desc, &vars)?
             } else {
-                input_name.to_string()
+                input_def.name.to_string()
             };
 
-            // Interpolate variables in the default value
-            let interpolated_default = if let Some(default) = &input_spec.default {
-                Some(interpolate_value(default, &vars)?)
+            // Interpolate variables in the default value (supports both ${env:...} and ${var:...})
+            let interpolated_default = if let Some(default) = &input_def.default {
+                Some(crate::template::utils::interpolate_value_all(default, &vars)?)
             } else {
                 None
             };
 
-            let value = if let Some(enum_values) = &input_spec.enum_values {
+            let value = if let Some(enum_values) = &input_def.enum_values {
                 // This is a select input
                 let mut sorted_enum_values = enum_values.clone();
                 sorted_enum_values.sort();
@@ -372,7 +384,7 @@ impl CreateCommand {
                 Value::String(answer)
             };
 
-            inputs.insert(input_name.clone(), value);
+            inputs.insert(input_def.name.clone(), value);
         }
 
         // Auto-populate project_name if empty
@@ -881,8 +893,11 @@ impl CreateCommand {
 
         // Override with environment-specific inputs if they exist
         if let Some(env_overrides) = selected_template.resource.spec.environments.get(&selected_environment) {
-            for (input_name, input_spec) in &env_overrides.overrides.inputs {
-                merged_inputs.insert(input_name.clone(), input_spec.clone());
+            for env_input in &env_overrides.overrides.inputs {
+                // Remove any existing input with the same name
+                merged_inputs.retain(|input_def| input_def.name != env_input.name);
+                // Add the environment-specific input
+                merged_inputs.push(env_input.clone());
             }
         }
 
@@ -1072,36 +1087,37 @@ impl CreateCommand {
     /// Collect template inputs with infrastructure-level overrides
     fn collect_template_inputs_with_overrides(
         ctx: &crate::context::Context,
-        inputs_spec: &std::collections::HashMap<String, crate::template::metadata::InputSpec>,
+        inputs_spec: &[crate::template::metadata::InputDefinition],
         project_name: &str,
         collection_overrides: Option<&std::collections::HashMap<String, crate::template::metadata::InputOverride>>,
     ) -> Result<std::collections::HashMap<String, serde_json::Value>> {
         let mut inputs = std::collections::HashMap::new();
 
-        // Always add name (automatic variable with underscore prefix)
+        // Always add name (automatic variables)
         inputs.insert("_name".to_string(), serde_json::Value::String(project_name.to_string()));
+        inputs.insert("name".to_string(), serde_json::Value::String(project_name.to_string()));
 
         // Collect each input defined in the template
-        for (input_name, input_spec) in inputs_spec {
+        for input_def in inputs_spec {
             // Check if there's a infrastructure-level override for this input
-            let override_config = collection_overrides.and_then(|overrides| overrides.get(input_name));
+            let override_config = collection_overrides.and_then(|overrides| overrides.get(&input_def.name));
 
             let value = if let Some(override_cfg) = override_config {
                 if !override_cfg.show_as_default {
                     // Use the override value directly without prompting the user
-                    // Still need to interpolate variables in the override value
+                    // Still need to interpolate variables in the override value (supports ${env:...} and ${var:...})
                     let vars = Self::get_interpolation_variables(&inputs, project_name);
-                    interpolate_value(&override_cfg.value, &vars)?
+                    crate::template::utils::interpolate_value_all(&override_cfg.value, &vars)?
                 } else {
                     // Show the override value as the default and let user override
-                    Self::prompt_for_input_with_default(ctx, input_name, input_spec, Some(&override_cfg.value), &inputs, project_name)?
+                    Self::prompt_for_input_with_default(ctx, &input_def.name, &input_def.to_input_spec(), Some(&override_cfg.value), &inputs, project_name)?
                 }
             } else {
                 // No collection override, use normal flow
-                Self::prompt_for_input_with_default(ctx, input_name, input_spec, None, &inputs, project_name)?
+                Self::prompt_for_input_with_default(ctx, &input_def.name, &input_def.to_input_spec(), None, &inputs, project_name)?
             };
 
-            inputs.insert(input_name.clone(), value);
+            inputs.insert(input_def.name.clone(), value);
         }
 
         Ok(inputs)
@@ -1132,9 +1148,9 @@ impl CreateCommand {
         // Get variables for interpolation
         let vars = Self::get_interpolation_variables(current_inputs, project_name);
 
-        // Interpolate variables in the description
+        // Interpolate variables in the description (supports both ${env:...} and ${var:...})
         let description = if let Some(desc) = &input_spec.description {
-            interpolate_variables(desc, &vars)?
+            interpolate_all(desc, &vars)?
         } else {
             input_name.to_string()
         };
@@ -1142,9 +1158,9 @@ impl CreateCommand {
         // Use collection default if provided, otherwise use template default
         let mut effective_default = collection_default.or(input_spec.default.as_ref()).cloned();
 
-        // Interpolate variables in the default value
+        // Interpolate variables in the default value (supports both ${env:...} and ${var:...})
         if let Some(ref default_val) = effective_default {
-            effective_default = Some(interpolate_value(default_val, &vars)?);
+            effective_default = Some(crate::template::utils::interpolate_value_all(default_val, &vars)?);
         }
 
         // Check for explicit input type

@@ -9,13 +9,13 @@ spec:
 
   inputs:
     # Project Metadata
-    project_name:
+    - name: project_name
       type: string
       description: Bedrock resource name prefix (defaults to project name)
       default: ""
 
     # Resource Type
-    resource_type:
+    - name: resource_type
       type: select
       options:
         - label: "Knowledge Base (RAG with vector search)"
@@ -28,7 +28,7 @@ spec:
       description: Type of Bedrock resource to create
 
     # Foundation Model Selection
-    foundation_model:
+    - name: foundation_model
       type: select
       options:
         - label: "Claude 3 Sonnet (Anthropic)"
@@ -49,7 +49,7 @@ spec:
       description: Foundation model to use
 
     # Knowledge Base Configuration
-    kb_embedding_model:
+    - name: kb_embedding_model
       type: select
       options:
         - label: "Titan Embeddings G1"
@@ -61,7 +61,7 @@ spec:
       default: "amazon.titan-embed-text-v1"
       description: Embedding model for knowledge base (if resource_type is knowledge-base)
 
-    kb_vector_dimensions:
+    - name: kb_vector_dimensions
       type: number
       description: Vector embedding dimensions (1536 for Titan, 1024 for Cohere)
       default: 1536
@@ -69,7 +69,7 @@ spec:
       max: 2048
 
     # Data Source Configuration
-    kb_data_source_type:
+    - name: kb_data_source_type
       type: select
       options:
         - label: "S3 Bucket"
@@ -85,18 +85,18 @@ spec:
       default: "s3"
       description: Data source type for knowledge base
 
-    kb_s3_bucket_name:
+    - name: kb_s3_bucket_name
       type: string
       description: S3 bucket name containing knowledge base documents
       default: ""
 
-    kb_s3_prefix:
+    - name: kb_s3_prefix
       type: string
       description: S3 prefix for knowledge base documents
       default: ""
 
     # Vector Store Configuration
-    vector_store_type:
+    - name: vector_store_type
       type: select
       options:
         - label: "Amazon OpenSearch Serverless"
@@ -109,46 +109,46 @@ spec:
       description: Vector database for knowledge base storage
 
     # OpenSearch Serverless Configuration
-    opensearch_collection_name:
+    - name: opensearch_collection_name
       type: string
       description: OpenSearch Serverless collection name (leave empty to create new)
       default: ""
 
-    opensearch_index_name:
+    - name: opensearch_index_name
       type: string
       description: OpenSearch index name for vectors
       default: "bedrock-knowledge-base-index"
 
     # Agent Configuration
-    agent_instruction:
+    - name: agent_instruction
       type: string
       description: Instructions for the agent (if resource_type is agent)
       default: "You are a helpful AI assistant. Answer questions accurately and concisely."
 
-    agent_idle_session_ttl:
+    - name: agent_idle_session_ttl
       type: number
-      description = "Session timeout in seconds (for agents)"
+      description: Session timeout in seconds (for agents)
       default: 600
       min: 60
       max: 3600
 
-    enable_agent_action_groups:
+    - name: enable_agent_action_groups
       type: boolean
       description: Enable action groups for agent to call APIs/Lambda functions
       default: false
 
     # Guardrails Configuration
-    guardrail_blocked_messaging:
+    - name: guardrail_blocked_messaging
       type: string
       description: Message to show when content is blocked by guardrails
       default: "I'm sorry, but I cannot provide that information as it violates our content policy."
 
-    enable_content_filters:
+    - name: enable_content_filters
       type: boolean
       description: Enable content filtering (profanity, hate speech, violence)
       default: true
 
-    content_filter_strength:
+    - name: content_filter_strength
       type: select
       options:
         - label: "Low (Minimal filtering)"
@@ -160,51 +160,51 @@ spec:
       default: "MEDIUM"
       description: Content filter strength
 
-    enable_pii_detection:
+    - name: enable_pii_detection
       type: boolean
       description: Enable PII (Personally Identifiable Information) detection
       default: true
 
-    pii_entities_to_block:
+    - name: pii_entities_to_block
       type: string
       description: Comma-separated PII entities to block (e.g., EMAIL,PHONE,SSN,CREDIT_CARD)
       default: "EMAIL,PHONE,SSN,CREDIT_CARD,ADDRESS"
 
-    enable_topic_filters:
+    - name: enable_topic_filters
       type: boolean
       description: Enable topic-based filtering
       default: false
 
-    blocked_topics:
+    - name: blocked_topics
       type: string
       description: Comma-separated topics to block (e.g., politics,religion)
       default: ""
 
     # Monitoring & Logging
-    enable_cloudwatch_logs:
+    - name: enable_cloudwatch_logs
       type: boolean
       description: Enable CloudWatch logging for model invocations
       default: true
 
-    log_retention_days:
+    - name: log_retention_days
       type: number
       description: CloudWatch log retention in days
       default: 7
       min: 1
       max: 3653
 
-    enable_model_invocation_logging:
+    - name: enable_model_invocation_logging
       type: boolean
       description: Log model invocations for monitoring and debugging
       default: true
 
     # Cost Controls
-    enable_provisioned_throughput:
+    - name: enable_provisioned_throughput
       type: boolean
       description: Use provisioned throughput (fixed cost, guaranteed capacity)
       default: false
 
-    provisioned_model_units:
+    - name: provisioned_model_units
       type: number
       description: Number of provisioned model units
       default: 1
@@ -212,12 +212,12 @@ spec:
       max: 10
 
     # Tags
-    environment:
+    - name: environment
       type: string
       description: Environment name (dev, staging, prod)
       default: ""
 
-    application:
+    - name: application
       type: string
       description: Application name
       default: ""

@@ -237,8 +237,11 @@ impl GenerateCommand {
         // Override with environment-specific inputs if an environment was selected
         if let Some(ref env) = selected_environment {
             if let Some(env_overrides) = selected_template.resource.spec.environments.get(env) {
-                for (input_name, input_spec) in &env_overrides.overrides.inputs {
-                    merged_inputs.insert(input_name.clone(), input_spec.clone());
+                for env_input in &env_overrides.overrides.inputs {
+                    // Remove any existing input with the same name
+                    merged_inputs.retain(|input_def| input_def.name != env_input.name);
+                    // Add the environment-specific input
+                    merged_inputs.push(env_input.clone());
                 }
             }
         }
@@ -320,21 +323,30 @@ impl GenerateCommand {
     /// Collect inputs from user based on template input specifications (simplified version without infrastructure overrides)
     fn collect_template_inputs(
         ctx: &crate::context::Context,
-        inputs_spec: &std::collections::HashMap<String, crate::template::metadata::InputSpec>,
+        inputs_spec: &[crate::template::metadata::InputDefinition],
         name: &str,
     ) -> Result<std::collections::HashMap<String, serde_json::Value>> {
         let mut inputs = std::collections::HashMap::new();
 
-        // Always add name
+        // Always add automatic variables
+        inputs.insert(
+            "_name".to_string(),
+            serde_json::Value::String(name.to_string()),
+        );
         inputs.insert(
             "name".to_string(),
             serde_json::Value::String(name.to_string()),
         );
 
         // Collect each input defined in the template
-        for (input_name, input_spec) in inputs_spec {
-            let value = Self::prompt_for_input(ctx, input_name, input_spec)?;
-            inputs.insert(input_name.clone(), value);
+        for input_def in inputs_spec {
+            // Skip automatic variables
+            if input_def.name == "_name" || input_def.name == "name" {
+                continue;
+            }
+
+            let value = Self::prompt_for_input(ctx, &input_def.name, &input_def.to_input_spec())?;
+            inputs.insert(input_def.name.clone(), value);
         }
 
         Ok(inputs)

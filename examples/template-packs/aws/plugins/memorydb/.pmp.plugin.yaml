@@ -9,13 +9,13 @@ spec:
 
   inputs:
     # Project Metadata
-    project_name:
+    - name: project_name
       type: string
       description: MemoryDB cluster name (defaults to project name)
       default: ""
 
     # Cluster Configuration
-    node_type:
+    - name: node_type
       type: select
       options:
         - label: "db.t4g.small (1.37 GB RAM)"
@@ -31,21 +31,21 @@ spec:
       default: "db.t4g.small"
       description: Node instance type
 
-    num_shards:
+    - name: num_shards
       type: number
       description: Number of shards in the cluster
       default: 1
       min: 1
       max: 500
 
-    num_replicas_per_shard:
+    - name: num_replicas_per_shard
       type: number
       description: Number of replicas per shard (0-5)
       default: 1
       min: 0
       max: 5
 
-    engine_version:
+    - name: engine_version
       type: select
       options:
         - label: "Redis 7.0"
@@ -55,7 +55,7 @@ spec:
       default: "7.0"
       description: Redis engine version
 
-    port:
+    - name: port
       type: number
       description: Port number for MemoryDB
       default: 6379
@@ -63,64 +63,64 @@ spec:
       max: 65535
 
     # Security Settings
-    tls_enabled:
+    - name: tls_enabled
       type: boolean
       description: Enable TLS encryption in transit
       default: true
 
-    acl_name:
+    - name: acl_name
       type: string
       description: ACL name for access control (leave empty to create default ACL)
       default: ""
 
     # Snapshot Settings
-    snapshot_retention_limit:
+    - name: snapshot_retention_limit
       type: number
       description: Number of days to retain automatic snapshots (0 to disable)
       default: 7
       min: 0
       max: 35
 
-    snapshot_window:
+    - name: snapshot_window
       type: string
       description: Daily time range for automatic snapshots in UTC (e.g., "05:00-09:00")
       default: "05:00-09:00"
 
     # Maintenance Settings
-    maintenance_window:
+    - name: maintenance_window
       type: string
       description: Weekly time range for maintenance in UTC (e.g., "sun:05:00-sun:07:00")
       default: "sun:05:00-sun:07:00"
 
-    auto_minor_version_upgrade:
+    - name: auto_minor_version_upgrade
       type: boolean
       description: Enable automatic minor version upgrades during maintenance window
       default: true
 
     # Network Settings
-    subnet_ids:
+    - name: subnet_ids
       type: string
       description: Comma-separated list of subnet IDs for the subnet group
       default: ""
 
-    security_group_ids:
+    - name: security_group_ids
       type: string
       description: Comma-separated list of security group IDs
       default: ""
 
     # Performance Settings
-    data_tiering:
+    - name: data_tiering
       type: boolean
       description: Enable data tiering (automatically uses SSD for frequently accessed data)
       default: false
 
     # User Management
-    create_admin_user:
+    - name: create_admin_user
       type: boolean
       description: Create an admin user with full Redis permissions
       default: true
 
-    admin_username:
+    - name: admin_username
       type: string
       description: Admin username (only if create_admin_user is true)
       default: "admin"

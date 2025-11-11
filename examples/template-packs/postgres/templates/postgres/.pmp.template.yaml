@@ -10,52 +10,43 @@ spec:
   executor: opentofu
 
   inputs:
-    namespace:
+    - name: namespace
       type: string
       default: "postgres"
       description: Kubernetes namespace for PostgreSQL
-
-    chart_version:
+    - name: chart_version
       type: string
       default: "15.5.38"
       description: Bitnami PostgreSQL Helm chart version
-
-    create_namespace:
+    - name: create_namespace
       type: boolean
       default: true
       description: Whether to create the namespace if it doesn't exist
-
-    database_name:
+    - name: database_name
       type: string
       default: "mydb"
       description: Name of the PostgreSQL database to create
-
-    postgres_username:
+    - name: postgres_username
       type: string
       default: "postgres"
       description: PostgreSQL superuser username
-
-    postgres_password:
+    - name: postgres_password
       type: string
       default: "changeme123"
       description: PostgreSQL superuser password (CHANGE IN PRODUCTION!)
-
-    storage_size:
+    - name: storage_size
       type: string
       default: "8Gi"
       description: Size of the persistent volume for database data
-
-    storage_class:
+    - name: storage_class
       type: string
       default: ""
       description: Storage class name for persistence (empty for default)
-
-    persistence_enabled:
+    - name: persistence_enabled
       type: boolean
       default: true
       description: Enable persistent storage for database data
-
-    architecture:
+    - name: architecture
       type: select
       options:
         - label: "Standalone (Single Instance)"
@@ -64,40 +55,33 @@ spec:
           value: "replication"
       default: "standalone"
       description: PostgreSQL architecture
-
-    replica_count:
+    - name: replica_count
       type: number
       min: 1
       max: 10
       default: 1
       description: Number of read replicas (only for replication mode)
-
-    resources_requests_cpu:
+    - name: resources_requests_cpu
       type: string
       default: "250m"
       description: CPU resource request for PostgreSQL
-
-    resources_requests_memory:
+    - name: resources_requests_memory
       type: string
       default: "256Mi"
       description: Memory resource request for PostgreSQL
-
-    resources_limits_cpu:
+    - name: resources_limits_cpu
       type: string
       default: "500m"
       description: CPU resource limit for PostgreSQL
-
-    resources_limits_memory:
+    - name: resources_limits_memory
       type: string
       default: "512Mi"
       description: Memory resource limit for PostgreSQL
-
-    metrics_enabled:
+    - name: metrics_enabled
       type: boolean
       default: false
       description: Enable Prometheus metrics exporter
-
-    service_type:
+    - name: service_type
       type: select
       options:
         - label: "ClusterIP (Internal Only)"
@@ -108,8 +92,7 @@ spec:
           value: "NodePort"
       default: "ClusterIP"
       description: Kubernetes service type for PostgreSQL
-
-    sslmode:
+    - name: sslmode
       type: select
       options:
         - label: "Disable (No SSL)"

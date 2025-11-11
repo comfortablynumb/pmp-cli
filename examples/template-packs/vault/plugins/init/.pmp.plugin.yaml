@@ -12,15 +12,14 @@ spec:
     kind: KubernetesWorkload
 
   inputs:
-    mount_name:
+    - name: mount_name
       type: string
       description: Name for the KV v2 mount (will default to environment name if left empty)
       default: ""
       validation:
         pattern: ^[a-z0-9-]*$
         error_message: Mount name must contain only lowercase letters, numbers, and hyphens
-
-    mount_description:
+    - name: mount_description
       type: string
       description: Description for the KV v2 mount
       default: ""

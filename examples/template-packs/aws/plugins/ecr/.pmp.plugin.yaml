@@ -8,14 +8,11 @@ spec:
   role: container-registry
 
   inputs:
-    # Project Metadata
-    project_name:
+    - name: project_name
       type: string
       description: ECR repository name (defaults to project name)
       default: ""
-
-    # Basic Settings
-    image_tag_mutability:
+    - name: image_tag_mutability
       type: select
       options:
         - label: "Mutable (Tags can be overwritten)"
@@ -24,9 +21,7 @@ spec:
           value: "IMMUTABLE"
       default: "MUTABLE"
       description: Tag mutability setting for the repository
-
-    # Encryption Settings
-    encryption_type:
+    - name: encryption_type
       type: select
       options:
         - label: "AES256 (AWS Managed)"
@@ -35,25 +30,19 @@ spec:
           value: "KMS"
       default: "AES256"
       description: Encryption type for images at rest
-
-    enable_kms_key_rotation:
+    - name: enable_kms_key_rotation
       type: boolean
       description: Enable automatic key rotation for KMS keys (only when encryption_type is KMS)
       default: true
-
-    # Image Scanning
-    scan_on_push:
+    - name: scan_on_push
       type: boolean
       description: Enable automatic image scanning when images are pushed
       default: true
-
-    # Lifecycle Policy Settings
-    enable_lifecycle_policy:
+    - name: enable_lifecycle_policy
       type: boolean
       description: Enable lifecycle policy to automatically clean up old images
       default: true
-
-    keep_image_count:
+    - name: keep_image_count
       type: select
       options:
         - label: "5 images"
@@ -68,8 +57,7 @@ spec:
           value: "30"
       default: "10"
       description: Number of tagged images to retain (for lifecycle policy)
-
-    expire_untagged_after_days:
+    - name: expire_untagged_after_days
       type: select
       options:
         - label: "1 day"

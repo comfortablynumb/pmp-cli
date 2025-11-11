@@ -193,8 +193,11 @@ impl UpdateCommand {
 
         // Override with environment-specific inputs if they exist
         if let Some(env_overrides) = matching_template.resource.spec.environments.get(&env_name) {
-            for (input_name, input_spec) in &env_overrides.overrides.inputs {
-                merged_inputs.insert(input_name.clone(), input_spec.clone());
+            for env_input in &env_overrides.overrides.inputs {
+                // Remove any existing input with the same name
+                merged_inputs.retain(|input_def| input_def.name != env_input.name);
+                // Add the environment-specific input
+                merged_inputs.push(env_input.clone());
             }
         }
 
@@ -433,7 +436,7 @@ impl UpdateCommand {
                                                     .unwrap_or_else(|| AllowedPluginConfig {
                                                         template_pack_name: pack_info.resource.metadata.name.clone(),
                                                         plugin_name: plugin_info.resource.metadata.name.clone(),
-                                                        inputs: HashMap::new(),
+                                                        inputs: Vec::new(),
                                                     });
 
                                                 compatible_projects.push(CompatibleProject {
@@ -476,7 +479,7 @@ impl UpdateCommand {
                         .unwrap_or_else(|| AllowedPluginConfig {
                             template_pack_name: pack_info.resource.metadata.name.clone(),
                             plugin_name: plugin_info.resource.metadata.name.clone(),
-                            inputs: HashMap::new(),
+                            inputs: Vec::new(),
                         });
 
                     // Add plugin with empty compatible projects list (no reference project needed)
@@ -630,7 +633,7 @@ impl UpdateCommand {
             allowed_plugin_config = AllowedPluginConfig {
                 template_pack_name: selected_plugin_with_projects.plugin_info.template_pack_name.clone(),
                 plugin_name: selected_plugin_with_projects.plugin_info.resource.metadata.name.clone(),
-                inputs: HashMap::new(),
+                inputs: Vec::new(),
             };
         }
 
@@ -686,8 +689,11 @@ impl UpdateCommand {
         let mut merged_inputs = selected_plugin_with_projects.plugin_info.resource.spec.inputs.clone();
 
         // Override with allowed plugin input specs
-        for (input_name, input_spec) in &allowed_plugin_config.inputs {
-            merged_inputs.insert(input_name.clone(), input_spec.clone());
+        for allowed_input in &allowed_plugin_config.inputs {
+            // Remove any existing input with the same name
+            merged_inputs.retain(|input_def| input_def.name != allowed_input.name);
+            // Add the allowed config input
+            merged_inputs.push(allowed_input.clone());
         }
 
         // 5. Collect inputs from user
@@ -1306,19 +1312,24 @@ impl UpdateCommand {
     /// Collect inputs from user based on template input specifications, using current values as defaults
     fn collect_template_inputs_with_defaults(
         ctx: &crate::context::Context,
-        inputs_spec: &std::collections::HashMap<String, crate::template::metadata::InputSpec>,
+        inputs_spec: &[crate::template::metadata::InputDefinition],
         current_inputs: &std::collections::HashMap<String, serde_json::Value>,
         project_name: &str,
     ) -> Result<std::collections::HashMap<String, serde_json::Value>> {
-        use crate::template::utils::{interpolate_variables, interpolate_value};
+        use crate::template::utils::{interpolate_all, interpolate_value_all};
 
         let mut inputs = std::collections::HashMap::new();
 
-        // Always add name (automatic variable with underscore prefix)
+        // Always add automatic variables
         inputs.insert("_name".to_string(), serde_json::Value::String(project_name.to_string()));
+        inputs.insert("name".to_string(), serde_json::Value::String(project_name.to_string()));
 
         // Collect each input defined in the template
-        for (input_name, input_spec) in inputs_spec {
+        for input_def in inputs_spec {
+            // Skip automatic variables
+            if input_def.name == "_name" || input_def.name == "name" {
+                continue;
+            }
             // Get variables for interpolation
             let mut vars = std::collections::HashMap::new();
             vars.insert("_name".to_string(), serde_json::Value::String(project_name.to_string()));
@@ -1326,24 +1337,24 @@ impl UpdateCommand {
                 vars.insert(key.clone(), value.clone());
             }
 
-            // Interpolate variables in the description
-            let description = if let Some(desc) = &input_spec.description {
-                interpolate_variables(desc, &vars)?
+            // Interpolate variables in the description (supports both ${env:...} and ${var:...})
+            let description = if let Some(desc) = &input_def.description {
+                interpolate_all(desc, &vars)?
             } else {
-                input_name.to_string()
+                input_def.name.to_string()
             };
 
             // Get the current value for this input
-            let current_value = current_inputs.get(input_name);
+            let current_value = current_inputs.get(&input_def.name);
 
-            // Interpolate the default value
-            let interpolated_default = if let Some(default) = &input_spec.default {
-                Some(interpolate_value(default, &vars)?)
+            // Interpolate the default value (supports both ${env:...} and ${var:...})
+            let interpolated_default = if let Some(default) = &input_def.default {
+                Some(interpolate_value_all(default, &vars)?)
             } else {
                 None
             };
 
-            let value = if let Some(enum_values) = &input_spec.enum_values {
+            let value = if let Some(enum_values) = &input_def.enum_values {
                 // This is a select input
                 // Sort enum values alphabetically for display
                 let mut sorted_enum_values = enum_values.clone();
@@ -1399,7 +1410,7 @@ impl UpdateCommand {
                 }
             };
 
-            inputs.insert(input_name.clone(), value);
+            inputs.insert(input_def.name.clone(), value);
         }
 
         Ok(inputs)
@@ -1540,20 +1551,21 @@ impl UpdateCommand {
     /// Collect plugin inputs from user
     fn collect_plugin_inputs(
         ctx: &crate::context::Context,
-        inputs_spec: &HashMap<String, crate::template::metadata::InputSpec>,
+        inputs_spec: &[crate::template::metadata::InputDefinition],
         project_name: &str,
     ) -> Result<HashMap<String, Value>> {
-        use crate::template::utils::{interpolate_variables, interpolate_value};
+        use crate::template::utils::{interpolate_all, interpolate_value_all};
 
         let mut inputs = HashMap::new();
 
-        // Always add name (automatic variable with underscore prefix)
+        // Always add automatic variables
         inputs.insert("_name".to_string(), Value::String(project_name.to_string()));
+        inputs.insert("name".to_string(), Value::String(project_name.to_string()));
 
         // Collect each input defined in the plugin
-        for (input_name, input_spec) in inputs_spec {
-            // Skip if it's the '_name' field (already added)
-            if input_name == "_name" {
+        for input_def in inputs_spec {
+            // Skip automatic variables
+            if input_def.name == "_name" || input_def.name == "name" {
                 continue;
             }
 
@@ -1564,21 +1576,21 @@ impl UpdateCommand {
                 vars.insert(key.clone(), value.clone());
             }
 
-            // Interpolate variables in the description
-            let description = if let Some(desc) = &input_spec.description {
-                interpolate_variables(desc, &vars)?
+            // Interpolate variables in the description (supports both ${env:...} and ${var:...})
+            let description = if let Some(desc) = &input_def.description {
+                interpolate_all(desc, &vars)?
             } else {
-                input_name.to_string()
+                input_def.name.to_string()
             };
 
-            // Interpolate variables in the default value
-            let interpolated_default = if let Some(default) = &input_spec.default {
-                Some(interpolate_value(default, &vars)?)
+            // Interpolate variables in the default value (supports both ${env:...} and ${var:...})
+            let interpolated_default = if let Some(default) = &input_def.default {
+                Some(interpolate_value_all(default, &vars)?)
             } else {
                 None
             };
 
-            let value = if let Some(enum_values) = &input_spec.enum_values {
+            let value = if let Some(enum_values) = &input_def.enum_values {
                 // This is a select input
                 // Sort enum values alphabetically for display
                 let mut sorted_enum_values = enum_values.clone();
@@ -1644,7 +1656,7 @@ impl UpdateCommand {
                 Value::String(answer)
             };
 
-            inputs.insert(input_name.clone(), value);
+            inputs.insert(input_def.name.clone(), value);
         }
 
         // Auto-populate project_name if empty
@@ -1667,21 +1679,22 @@ impl UpdateCommand {
     /// Collect plugin inputs from user with current values as defaults
     fn collect_plugin_inputs_with_defaults(
         ctx: &crate::context::Context,
-        inputs_spec: &HashMap<String, crate::template::metadata::InputSpec>,
+        inputs_spec: &[crate::template::metadata::InputDefinition],
         current_inputs: &HashMap<String, Value>,
         project_name: &str,
     ) -> Result<HashMap<String, Value>> {
-        use crate::template::utils::{interpolate_variables, interpolate_value};
+        use crate::template::utils::{interpolate_all, interpolate_value_all};
 
         let mut inputs = HashMap::new();
 
-        // Always add name (automatic variable with underscore prefix)
+        // Always add automatic variables
         inputs.insert("_name".to_string(), Value::String(project_name.to_string()));
+        inputs.insert("name".to_string(), Value::String(project_name.to_string()));
 
         // Collect each input defined in the plugin
-        for (input_name, input_spec) in inputs_spec {
-            // Skip if it's the '_name' field (already added)
-            if input_name == "_name" {
+        for input_def in inputs_spec {
+            // Skip automatic variables
+            if input_def.name == "_name" || input_def.name == "name" {
                 continue;
             }
 
@@ -1692,24 +1705,24 @@ impl UpdateCommand {
                 vars.insert(key.clone(), value.clone());
             }
 
-            // Interpolate variables in the description
-            let description = if let Some(desc) = &input_spec.description {
-                interpolate_variables(desc, &vars)?
+            // Interpolate variables in the description (supports both ${env:...} and ${var:...})
+            let description = if let Some(desc) = &input_def.description {
+                interpolate_all(desc, &vars)?
             } else {
-                input_name.to_string()
+                input_def.name.to_string()
             };
 
             // Get the current value for this input
-            let current_value = current_inputs.get(input_name);
+            let current_value = current_inputs.get(&input_def.name);
 
-            // Interpolate variables in the default value
-            let interpolated_default = if let Some(default) = &input_spec.default {
-                Some(interpolate_value(default, &vars)?)
+            // Interpolate variables in the default value (supports both ${env:...} and ${var:...})
+            let interpolated_default = if let Some(default) = &input_def.default {
+                Some(interpolate_value_all(default, &vars)?)
             } else {
                 None
             };
 
-            let value = if let Some(enum_values) = &input_spec.enum_values {
+            let value = if let Some(enum_values) = &input_def.enum_values {
                 // This is a select input
                 // Sort enum values alphabetically for display
                 let mut sorted_enum_values = enum_values.clone();
@@ -1786,7 +1799,7 @@ impl UpdateCommand {
                 }
             };
 
-            inputs.insert(input_name.clone(), value);
+            inputs.insert(input_def.name.clone(), value);
         }
 
         // Auto-populate project_name if empty

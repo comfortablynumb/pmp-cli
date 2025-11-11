@@ -1,0 +1,53 @@
+# Repository Information
+output "repository_name" {
+  description = "The name of the Docker Hub repository"
+  value       = dockerhub_repository.plugin_repo.name
+}
+
+output "repository_namespace" {
+  description = "The namespace of the Docker Hub repository"
+  value       = dockerhub_repository.plugin_repo.namespace
+}
+
+output "repository_full_name" {
+  description = "The full name of the repository (namespace/name)"
+  value       = "${dockerhub_repository.plugin_repo.namespace}/${dockerhub_repository.plugin_repo.name}"
+}
+
+output "repository_url" {
+  description = "The URL to the repository on Docker Hub"
+  value       = "https://hub.docker.com/r/${dockerhub_repository.plugin_repo.namespace}/${dockerhub_repository.plugin_repo.name}"
+}
+
+output "image_url_latest" {
+description = "The full ECR image URL with 'latest' tag"
+value       = "${dockerhub_repository.plugin_repo.namespace}/${dockerhub_repository.plugin_repo.name}:latest"
+}
+
+# Quick Start Commands
+output "quick_start" {
+  description = "Quick start commands for this Docker Hub repository"
+  value = <<-EOT
+    # Pull the image
+    docker pull ${dockerhub_repository.plugin_repo.namespace}/${dockerhub_repository.plugin_repo.name}:latest
+
+    # Tag your local image
+    docker tag your-image:tag ${dockerhub_repository.plugin_repo.namespace}/${dockerhub_repository.plugin_repo.name}:tag
+
+    # Push to Docker Hub
+    docker push ${dockerhub_repository.plugin_repo.namespace}/${dockerhub_repository.plugin_repo.name}:tag
+
+    # View on Docker Hub
+    # ${format("https://hub.docker.com/r/%s/%s", dockerhub_repository.plugin_repo.namespace, dockerhub_repository.plugin_repo.name)}
+  EOT
+}
+
+output "integration_info" {
+  description = "Docker Hub repository integration information"
+  value = {
+    repository_name = dockerhub_repository.plugin_repo.name
+    namespace       = dockerhub_repository.plugin_repo.namespace
+    full_name       = "${dockerhub_repository.plugin_repo.namespace}/${dockerhub_repository.plugin_repo.name}"
+    url             = "https://hub.docker.com/r/${dockerhub_repository.plugin_repo.namespace}/${dockerhub_repository.plugin_repo.name}"
+  }
+}
