@@ -111,7 +111,7 @@ fn deserialize_inputs<'de, D>(deserializer: D) -> Result<Vec<InputDefinition>, D
 where
     D: serde::Deserializer<'de>,
 {
-    use serde::de::{Visitor, SeqAccess, MapAccess};
+    use serde::de::{MapAccess, SeqAccess, Visitor};
     use std::fmt;
 
     struct InputsVisitor;
@@ -355,9 +355,7 @@ pub enum InputType {
         max: Option<i64>,
     },
     /// Select input with enum options
-    Select {
-        options: Vec<EnumOption>,
-    },
+    Select { options: Vec<EnumOption> },
 }
 
 /// Enum option with display text and value
@@ -684,7 +682,6 @@ pub struct ExecutorProjectConfig {
     pub name: String,
 }
 
-
 // ============================================================================
 // Infrastructure Resource (Kubernetes-style)
 // ============================================================================
@@ -927,20 +924,24 @@ impl ResourceKindFilter {
     /// - Some(None) if template is configured but not allowed
     /// - None if no template-specific configuration exists (allow by default)
     #[allow(dead_code)]
-    pub fn get_template_config(&self, template_name: &str, template_pack_name: &str) -> Option<Option<&TemplateConfig>> {
-        if let Some(ref templates) = self.templates {
-            if let Some(config) = templates.get(template_name) {
-                // Check if template pack name matches
-                if config.template_pack_name == template_pack_name {
-                    // Return config only if allowed
-                    if config.allowed {
-                        return Some(Some(config));
-                    } else {
-                        return Some(None); // Explicitly not allowed
-                    }
+    pub fn get_template_config(
+        &self,
+        template_name: &str,
+        template_pack_name: &str,
+    ) -> Option<Option<&TemplateConfig>> {
+        if let Some(ref templates) = self.templates
+            && let Some(config) = templates.get(template_name)
+        {
+            // Check if template pack name matches
+            if config.template_pack_name == template_pack_name {
+                // Return config only if allowed
+                if config.allowed {
+                    return Some(Some(config));
+                } else {
+                    return Some(None); // Explicitly not allowed
                 }
-                // Template pack name doesn't match, treat as not configured
             }
+            // Template pack name doesn't match, treat as not configured
         }
         None // No template-specific configuration
     }
@@ -991,7 +992,10 @@ pub struct ProjectReference {
 
 impl TemplatePackResource {
     /// Load template pack resource from a .pmp.template-pack.yaml file
-    pub fn from_file(fs: &dyn crate::traits::FileSystem, path: &std::path::Path) -> anyhow::Result<Self> {
+    pub fn from_file(
+        fs: &dyn crate::traits::FileSystem,
+        path: &std::path::Path,
+    ) -> anyhow::Result<Self> {
         let content = fs.read_to_string(path)?;
         let resource: TemplatePackResource = serde_yaml::from_str(&content)?;
 
@@ -1012,7 +1016,10 @@ impl TemplatePackResource {
 
 impl TemplateResource {
     /// Load template resource from a .pmp.template.yaml file
-    pub fn from_file(fs: &dyn crate::traits::FileSystem, path: &std::path::Path) -> anyhow::Result<Self> {
+    pub fn from_file(
+        fs: &dyn crate::traits::FileSystem,
+        path: &std::path::Path,
+    ) -> anyhow::Result<Self> {
         let content = fs.read_to_string(path)?;
         let resource: TemplateResource = serde_yaml::from_str(&content)?;
 
@@ -1037,7 +1044,10 @@ impl TemplateResource {
 impl PluginResource {
     /// Load plugin resource from a .pmp.plugin.yaml file
     #[allow(dead_code)]
-    pub fn from_file(fs: &dyn crate::traits::FileSystem, path: &std::path::Path) -> anyhow::Result<Self> {
+    pub fn from_file(
+        fs: &dyn crate::traits::FileSystem,
+        path: &std::path::Path,
+    ) -> anyhow::Result<Self> {
         let content = fs.read_to_string(path)?;
         let resource: PluginResource = serde_yaml::from_str(&content)?;
 
@@ -1052,7 +1062,10 @@ impl PluginResource {
 
 impl ProjectResource {
     /// Load project resource from a .pmp.project.yaml file
-    pub fn from_file(fs: &dyn crate::traits::FileSystem, path: &std::path::Path) -> anyhow::Result<Self> {
+    pub fn from_file(
+        fs: &dyn crate::traits::FileSystem,
+        path: &std::path::Path,
+    ) -> anyhow::Result<Self> {
         let content = fs.read_to_string(path)?;
         let resource: ProjectResource = serde_yaml::from_str(&content)?;
 
@@ -1068,13 +1081,19 @@ impl ProjectResource {
 impl ProjectEnvironmentResource {
     /// Load project environment resource from a .pmp.environment.yaml file
     #[allow(dead_code)]
-    pub fn from_file(fs: &dyn crate::traits::FileSystem, path: &std::path::Path) -> anyhow::Result<Self> {
+    pub fn from_file(
+        fs: &dyn crate::traits::FileSystem,
+        path: &std::path::Path,
+    ) -> anyhow::Result<Self> {
         let content = fs.read_to_string(path)?;
         let resource: ProjectEnvironmentResource = serde_yaml::from_str(&content)?;
 
         // Validate kind
         if resource.kind != "ProjectEnvironment" {
-            anyhow::bail!("Expected kind 'ProjectEnvironment', got '{}'", resource.kind);
+            anyhow::bail!(
+                "Expected kind 'ProjectEnvironment', got '{}'",
+                resource.kind
+            );
         }
 
         Ok(resource)
@@ -1090,7 +1109,10 @@ impl ProjectEnvironmentResource {
 impl DynamicProjectEnvironmentResource {
     /// Load dynamic project environment resource from a .pmp.environment.yaml file
     /// This supports any apiVersion/kind combination (no validation)
-    pub fn from_file(fs: &dyn crate::traits::FileSystem, path: &std::path::Path) -> anyhow::Result<Self> {
+    pub fn from_file(
+        fs: &dyn crate::traits::FileSystem,
+        path: &std::path::Path,
+    ) -> anyhow::Result<Self> {
         let content = fs.read_to_string(path)?;
         let resource: DynamicProjectEnvironmentResource = serde_yaml::from_str(&content)?;
         Ok(resource)
@@ -1104,16 +1126,16 @@ impl DynamicProjectEnvironmentResource {
 
 impl InfrastructureResource {
     /// Load infrastructure resource from a .pmp.yaml file with automatic migration
-    pub fn from_file(fs: &dyn crate::traits::FileSystem, path: &std::path::Path) -> anyhow::Result<Self> {
+    pub fn from_file(
+        fs: &dyn crate::traits::FileSystem,
+        path: &std::path::Path,
+    ) -> anyhow::Result<Self> {
         let content = fs.read_to_string(path)?;
         let mut resource: InfrastructureResource = serde_yaml::from_str(&content)?;
 
         // Validate kind
         if resource.kind != "Infrastructure" {
-            anyhow::bail!(
-                "Expected kind 'Infrastructure', got '{}'",
-                resource.kind
-            );
+            anyhow::bail!("Expected kind 'Infrastructure', got '{}'", resource.kind);
         }
 
         // Validate environment names
@@ -1152,8 +1174,12 @@ impl InfrastructureResource {
 
         // Create one top-level category per resource kind
         for resource_kind in &resource.spec.resource_kinds {
-            let category_id = format!("{}_{}",
-                resource_kind.api_version.replace("/", "_").replace(".", "_"),
+            let category_id = format!(
+                "{}_{}",
+                resource_kind
+                    .api_version
+                    .replace("/", "_")
+                    .replace(".", "_"),
                 resource_kind.kind.to_lowercase()
             );
 
@@ -1171,13 +1197,13 @@ impl InfrastructureResource {
                         // Move template defaults to template_packs config
                         let pack_config = template_packs
                             .entry(template_config.template_pack_name.clone())
-                            .or_insert_with(TemplatePackConfig::default);
+                            .or_default();
 
                         pack_config.templates.insert(
                             template_name.clone(),
                             TemplateOverrideConfig {
                                 defaults: template_config.defaults.clone(),
-                            }
+                            },
                         );
                     }
                 }
@@ -1189,8 +1215,7 @@ impl InfrastructureResource {
                 name: format!("{} ({})", resource_kind.kind, resource_kind.api_version),
                 description: Some(format!(
                     "Migrated from resource kind: {}/{}",
-                    resource_kind.api_version,
-                    resource_kind.kind
+                    resource_kind.api_version, resource_kind.kind
                 )),
                 subcategories: Vec::new(),
                 templates: category_templates,
@@ -1208,12 +1233,18 @@ impl InfrastructureResource {
     /// Validate environment name format
     pub fn is_valid_environment_name(name: &str) -> bool {
         !name.is_empty()
-            && !name.chars().next().map_or(false, |c| c.is_ascii_digit())
-            && name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+            && !name.chars().next().is_some_and(|c| c.is_ascii_digit())
+            && name
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
     }
 
     /// Save the infrastructure to a .pmp.yaml file
-    pub fn save(&self, fs: &dyn crate::traits::FileSystem, path: &std::path::Path) -> anyhow::Result<()> {
+    pub fn save(
+        &self,
+        fs: &dyn crate::traits::FileSystem,
+        path: &std::path::Path,
+    ) -> anyhow::Result<()> {
         let content = serde_yaml::to_string(self)?;
         fs.write(path, &content)?;
         Ok(())
@@ -1230,7 +1261,11 @@ impl InfrastructureResource {
     }
 
     /// Recursively search for a template in the category tree
-    fn search_template_in_categories(categories: &[Category], template_pack: &str, template_name: &str) -> bool {
+    fn search_template_in_categories(
+        categories: &[Category],
+        template_pack: &str,
+        template_name: &str,
+    ) -> bool {
         for category in categories {
             // Check templates in this category
             for template in &category.templates {
@@ -1240,7 +1275,11 @@ impl InfrastructureResource {
             }
 
             // Check subcategories recursively
-            if Self::search_template_in_categories(&category.subcategories, template_pack, template_name) {
+            if Self::search_template_in_categories(
+                &category.subcategories,
+                template_pack,
+                template_name,
+            ) {
                 return true;
             }
         }
@@ -1248,8 +1287,13 @@ impl InfrastructureResource {
     }
 
     /// Get template configuration from template_packs
-    pub fn get_template_config(&self, template_pack: &str, template_name: &str) -> Option<&TemplateOverrideConfig> {
-        self.spec.template_packs
+    pub fn get_template_config(
+        &self,
+        template_pack: &str,
+        template_name: &str,
+    ) -> Option<&TemplateOverrideConfig> {
+        self.spec
+            .template_packs
             .get(template_pack)?
             .templates
             .get(template_name)
@@ -1264,191 +1308,179 @@ mod tests {
 
     #[test]
     fn test_category_structure_basic() {
-    let category = Category {
-        id: "test_category".to_string(),
-        name: "Test Category".to_string(),
-        description: Some("Test description".to_string()),
-        subcategories: vec![],
-        templates: vec![
-            CategoryTemplate {
+        let category = Category {
+            id: "test_category".to_string(),
+            name: "Test Category".to_string(),
+            description: Some("Test description".to_string()),
+            subcategories: vec![],
+            templates: vec![CategoryTemplate {
                 template_pack: "pack1".to_string(),
                 template: "template1".to_string(),
-            },
-        ],
-    };
+            }],
+        };
 
-    assert_eq!(category.id, "test_category");
-    assert_eq!(category.name, "Test Category");
-    assert_eq!(category.templates.len(), 1);
-    assert_eq!(category.subcategories.len(), 0);
-}
+        assert_eq!(category.id, "test_category");
+        assert_eq!(category.name, "Test Category");
+        assert_eq!(category.templates.len(), 1);
+        assert_eq!(category.subcategories.len(), 0);
+    }
 
-#[test]
-fn test_category_with_subcategories() {
-    let category = Category {
-        id: "parent".to_string(),
-        name: "Parent Category".to_string(),
-        description: None,
-        subcategories: vec![
-            Category {
-                id: "child1".to_string(),
-                name: "Child 1".to_string(),
-                description: None,
-                subcategories: vec![],
-                templates: vec![],
-            },
-            Category {
-                id: "child2".to_string(),
-                name: "Child 2".to_string(),
-                description: None,
-                subcategories: vec![],
-                templates: vec![],
-            },
-        ],
-        templates: vec![],
-    };
-
-    assert_eq!(category.subcategories.len(), 2);
-    assert_eq!(category.subcategories[0].id, "child1");
-    assert_eq!(category.subcategories[1].id, "child2");
-}
-
-#[test]
-fn test_is_template_in_category_tree_found() {
-    let infrastructure = InfrastructureResource {
-        api_version: "pmp.io/v1".to_string(),
-        kind: "Infrastructure".to_string(),
-        metadata: InfrastructureMetadata {
-            name: "Test".to_string(),
+    #[test]
+    fn test_category_with_subcategories() {
+        let category = Category {
+            id: "parent".to_string(),
+            name: "Parent Category".to_string(),
             description: None,
-        },
-        spec: InfrastructureSpec {
-            categories: vec![
+            subcategories: vec![
                 Category {
+                    id: "child1".to_string(),
+                    name: "Child 1".to_string(),
+                    description: None,
+                    subcategories: vec![],
+                    templates: vec![],
+                },
+                Category {
+                    id: "child2".to_string(),
+                    name: "Child 2".to_string(),
+                    description: None,
+                    subcategories: vec![],
+                    templates: vec![],
+                },
+            ],
+            templates: vec![],
+        };
+
+        assert_eq!(category.subcategories.len(), 2);
+        assert_eq!(category.subcategories[0].id, "child1");
+        assert_eq!(category.subcategories[1].id, "child2");
+    }
+
+    #[test]
+    fn test_is_template_in_category_tree_found() {
+        let infrastructure = InfrastructureResource {
+            api_version: "pmp.io/v1".to_string(),
+            kind: "Infrastructure".to_string(),
+            metadata: InfrastructureMetadata {
+                name: "Test".to_string(),
+                description: None,
+            },
+            spec: InfrastructureSpec {
+                categories: vec![Category {
                     id: "cat1".to_string(),
                     name: "Category 1".to_string(),
                     description: None,
                     subcategories: vec![],
-                    templates: vec![
-                        CategoryTemplate {
-                            template_pack: "pack1".to_string(),
-                            template: "template1".to_string(),
-                        },
-                    ],
-                },
-            ],
-            template_packs: HashMap::new(),
-            resource_kinds: vec![],
-            environments: HashMap::new(),
-            hooks: None,
-            executor: None,
-        },
-    };
+                    templates: vec![CategoryTemplate {
+                        template_pack: "pack1".to_string(),
+                        template: "template1".to_string(),
+                    }],
+                }],
+                template_packs: HashMap::new(),
+                resource_kinds: vec![],
+                environments: HashMap::new(),
+                hooks: None,
+                executor: None,
+            },
+        };
 
-    assert!(infrastructure.is_template_in_category_tree("pack1", "template1"));
-    assert!(!infrastructure.is_template_in_category_tree("pack1", "template2"));
-    assert!(!infrastructure.is_template_in_category_tree("pack2", "template1"));
-}
+        assert!(infrastructure.is_template_in_category_tree("pack1", "template1"));
+        assert!(!infrastructure.is_template_in_category_tree("pack1", "template2"));
+        assert!(!infrastructure.is_template_in_category_tree("pack2", "template1"));
+    }
 
-#[test]
-fn test_is_template_in_category_tree_nested() {
-    let infrastructure = InfrastructureResource {
-        api_version: "pmp.io/v1".to_string(),
-        kind: "Infrastructure".to_string(),
-        metadata: InfrastructureMetadata {
-            name: "Test".to_string(),
-            description: None,
-        },
-        spec: InfrastructureSpec {
-            categories: vec![
-                Category {
+    #[test]
+    fn test_is_template_in_category_tree_nested() {
+        let infrastructure = InfrastructureResource {
+            api_version: "pmp.io/v1".to_string(),
+            kind: "Infrastructure".to_string(),
+            metadata: InfrastructureMetadata {
+                name: "Test".to_string(),
+                description: None,
+            },
+            spec: InfrastructureSpec {
+                categories: vec![Category {
                     id: "parent".to_string(),
                     name: "Parent".to_string(),
                     description: None,
-                    subcategories: vec![
-                        Category {
-                            id: "child".to_string(),
-                            name: "Child".to_string(),
-                            description: None,
-                            subcategories: vec![],
-                            templates: vec![
-                                CategoryTemplate {
-                                    template_pack: "nested_pack".to_string(),
-                                    template: "nested_template".to_string(),
-                                },
-                            ],
-                        },
-                    ],
+                    subcategories: vec![Category {
+                        id: "child".to_string(),
+                        name: "Child".to_string(),
+                        description: None,
+                        subcategories: vec![],
+                        templates: vec![CategoryTemplate {
+                            template_pack: "nested_pack".to_string(),
+                            template: "nested_template".to_string(),
+                        }],
+                    }],
                     templates: vec![],
-                },
-            ],
-            template_packs: HashMap::new(),
-            resource_kinds: vec![],
-            environments: HashMap::new(),
-            hooks: None,
-            executor: None,
-        },
-    };
+                }],
+                template_packs: HashMap::new(),
+                resource_kinds: vec![],
+                environments: HashMap::new(),
+                hooks: None,
+                executor: None,
+            },
+        };
 
-    // Should find template in nested subcategory
-    assert!(infrastructure.is_template_in_category_tree("nested_pack", "nested_template"));
-}
+        // Should find template in nested subcategory
+        assert!(infrastructure.is_template_in_category_tree("nested_pack", "nested_template"));
+    }
 
-#[test]
-fn test_get_template_config_found() {
-    let mut template_packs = HashMap::new();
-    let mut pack_config = TemplatePackConfig::default();
-    pack_config.templates.insert(
-        "template1".to_string(),
-        TemplateOverrideConfig {
-            defaults: TemplateDefaults {
-                inputs: {
-                    let mut inputs = HashMap::new();
-                    inputs.insert(
-                        "input1".to_string(),
-                        InputOverride {
-                            value: serde_json::Value::String("value1".to_string()),
-                            show_as_default: true,
-                        },
-                    );
-                    inputs
+    #[test]
+    fn test_get_template_config_found() {
+        let mut template_packs = HashMap::new();
+        let mut pack_config = TemplatePackConfig::default();
+        pack_config.templates.insert(
+            "template1".to_string(),
+            TemplateOverrideConfig {
+                defaults: TemplateDefaults {
+                    inputs: {
+                        let mut inputs = HashMap::new();
+                        inputs.insert(
+                            "input1".to_string(),
+                            InputOverride {
+                                value: serde_json::Value::String("value1".to_string()),
+                                show_as_default: true,
+                            },
+                        );
+                        inputs
+                    },
                 },
             },
-        },
-    );
-    template_packs.insert("pack1".to_string(), pack_config);
+        );
+        template_packs.insert("pack1".to_string(), pack_config);
 
-    let infrastructure = InfrastructureResource {
-        api_version: "pmp.io/v1".to_string(),
-        kind: "Infrastructure".to_string(),
-        metadata: InfrastructureMetadata {
-            name: "Test".to_string(),
-            description: None,
-        },
-        spec: InfrastructureSpec {
-            categories: vec![],
-            template_packs,
-            resource_kinds: vec![],
-            environments: HashMap::new(),
-            hooks: None,
-            executor: None,
-        },
-    };
+        let infrastructure = InfrastructureResource {
+            api_version: "pmp.io/v1".to_string(),
+            kind: "Infrastructure".to_string(),
+            metadata: InfrastructureMetadata {
+                name: "Test".to_string(),
+                description: None,
+            },
+            spec: InfrastructureSpec {
+                categories: vec![],
+                template_packs,
+                resource_kinds: vec![],
+                environments: HashMap::new(),
+                hooks: None,
+                executor: None,
+            },
+        };
 
-    let config = infrastructure.get_template_config("pack1", "template1");
-    assert!(config.is_some());
-    assert_eq!(config.unwrap().defaults.inputs.len(), 1);
+        let config = infrastructure.get_template_config("pack1", "template1");
+        assert!(config.is_some());
+        assert_eq!(config.unwrap().defaults.inputs.len(), 1);
 
-    let no_config = infrastructure.get_template_config("pack1", "nonexistent");
-    assert!(no_config.is_none());
-}
+        let no_config = infrastructure.get_template_config("pack1", "nonexistent");
+        assert!(no_config.is_none());
+    }
 
-#[test]
-fn test_migration_from_resource_kinds_to_categories() {
-    let fs = Arc::new(MockFileSystem::new());
+    #[test]
+    fn test_migration_from_resource_kinds_to_categories() {
+        let fs = Arc::new(MockFileSystem::new());
 
-    // Create old format infrastructure file
-    let old_format = r#"apiVersion: pmp.io/v1
+        // Create old format infrastructure file
+        let old_format = r#"apiVersion: pmp.io/v1
 kind: Infrastructure
 metadata:
   name: Test Infrastructure
@@ -1472,41 +1504,41 @@ spec:
       description: Dev environment
 "#;
 
-    let path = std::path::PathBuf::from("/test/.pmp.infrastructure.yaml");
-    fs.write(&path, old_format).unwrap();
+        let path = std::path::PathBuf::from("/test/.pmp.infrastructure.yaml");
+        fs.write(&path, old_format).unwrap();
 
-    // Load and verify migration happens
-    let infrastructure = InfrastructureResource::from_file(&*fs, &path).unwrap();
+        // Load and verify migration happens
+        let infrastructure = InfrastructureResource::from_file(&*fs, &path).unwrap();
 
-    // Should have categories now
-    assert!(!infrastructure.spec.categories.is_empty());
-    assert_eq!(infrastructure.spec.categories.len(), 1);
+        // Should have categories now
+        assert!(!infrastructure.spec.categories.is_empty());
+        assert_eq!(infrastructure.spec.categories.len(), 1);
 
-    let category = &infrastructure.spec.categories[0];
-    assert_eq!(category.id, "pmp_io_v1_testresource");
-    assert!(category.name.contains("TestResource"));
-    assert_eq!(category.templates.len(), 1);
-    assert_eq!(category.templates[0].template_pack, "pack1");
-    assert_eq!(category.templates[0].template, "template1");
+        let category = &infrastructure.spec.categories[0];
+        assert_eq!(category.id, "pmp_io_v1_testresource");
+        assert!(category.name.contains("TestResource"));
+        assert_eq!(category.templates.len(), 1);
+        assert_eq!(category.templates[0].template_pack, "pack1");
+        assert_eq!(category.templates[0].template, "template1");
 
-    // Should have template_packs config
-    assert!(infrastructure.spec.template_packs.contains_key("pack1"));
-    let pack_config = infrastructure.spec.template_packs.get("pack1").unwrap();
-    assert!(pack_config.templates.contains_key("template1"));
+        // Should have template_packs config
+        assert!(infrastructure.spec.template_packs.contains_key("pack1"));
+        let pack_config = infrastructure.spec.template_packs.get("pack1").unwrap();
+        assert!(pack_config.templates.contains_key("template1"));
 
-    // Old resource_kinds should be cleared
-    assert!(infrastructure.spec.resource_kinds.is_empty());
+        // Old resource_kinds should be cleared
+        assert!(infrastructure.spec.resource_kinds.is_empty());
 
-    // Backup should be created
-    let backup_path = path.with_extension("yaml.backup");
-    assert!(fs.exists(&backup_path));
-}
+        // Backup should be created
+        let backup_path = path.with_extension("yaml.backup");
+        assert!(fs.exists(&backup_path));
+    }
 
-#[test]
-fn test_migration_filters_blocked_templates() {
-    let fs = Arc::new(MockFileSystem::new());
+    #[test]
+    fn test_migration_filters_blocked_templates() {
+        let fs = Arc::new(MockFileSystem::new());
 
-    let old_format = r#"apiVersion: pmp.io/v1
+        let old_format = r#"apiVersion: pmp.io/v1
 kind: Infrastructure
 metadata:
   name: Test Infrastructure
@@ -1526,29 +1558,29 @@ spec:
       name: Development
 "#;
 
-    let path = std::path::PathBuf::from("/test2/.pmp.infrastructure.yaml");
-    fs.write(&path, old_format).unwrap();
+        let path = std::path::PathBuf::from("/test2/.pmp.infrastructure.yaml");
+        fs.write(&path, old_format).unwrap();
 
-    let infrastructure = InfrastructureResource::from_file(&*fs, &path).unwrap();
+        let infrastructure = InfrastructureResource::from_file(&*fs, &path).unwrap();
 
-    // Should only include allowed template
-    assert_eq!(infrastructure.spec.categories.len(), 1);
-    let category = &infrastructure.spec.categories[0];
-    assert_eq!(category.templates.len(), 1);
-    assert_eq!(category.templates[0].template, "allowed_template");
+        // Should only include allowed template
+        assert_eq!(infrastructure.spec.categories.len(), 1);
+        let category = &infrastructure.spec.categories[0];
+        assert_eq!(category.templates.len(), 1);
+        assert_eq!(category.templates[0].template, "allowed_template");
 
-    // Template pack config should only have allowed template
-    let pack_config = infrastructure.spec.template_packs.get("pack1").unwrap();
-    assert!(pack_config.templates.contains_key("allowed_template"));
-    assert!(!pack_config.templates.contains_key("blocked_template"));
-}
+        // Template pack config should only have allowed template
+        let pack_config = infrastructure.spec.template_packs.get("pack1").unwrap();
+        assert!(pack_config.templates.contains_key("allowed_template"));
+        assert!(!pack_config.templates.contains_key("blocked_template"));
+    }
 
-#[test]
-fn test_no_migration_for_new_format() {
-    let fs = Arc::new(MockFileSystem::new());
+    #[test]
+    fn test_no_migration_for_new_format() {
+        let fs = Arc::new(MockFileSystem::new());
 
-    // Create new format infrastructure file
-    let new_format = r#"apiVersion: pmp.io/v1
+        // Create new format infrastructure file
+        let new_format = r#"apiVersion: pmp.io/v1
 kind: Infrastructure
 metadata:
   name: Test Infrastructure
@@ -1569,25 +1601,25 @@ spec:
       name: Development
 "#;
 
-    let path = std::path::PathBuf::from("/test3/.pmp.infrastructure.yaml");
-    fs.write(&path, new_format).unwrap();
+        let path = std::path::PathBuf::from("/test3/.pmp.infrastructure.yaml");
+        fs.write(&path, new_format).unwrap();
 
-    let infrastructure = InfrastructureResource::from_file(&*fs, &path).unwrap();
+        let infrastructure = InfrastructureResource::from_file(&*fs, &path).unwrap();
 
-    // Should not migrate (no backup created)
-    let backup_path = path.with_extension("yaml.backup");
-    assert!(!fs.exists(&backup_path));
+        // Should not migrate (no backup created)
+        let backup_path = path.with_extension("yaml.backup");
+        assert!(!fs.exists(&backup_path));
 
-    // Should have original categories
-    assert_eq!(infrastructure.spec.categories.len(), 1);
-    assert_eq!(infrastructure.spec.categories[0].id, "test_cat");
-}
+        // Should have original categories
+        assert_eq!(infrastructure.spec.categories.len(), 1);
+        assert_eq!(infrastructure.spec.categories[0].id, "test_cat");
+    }
 
-#[test]
-fn test_migration_handles_multiple_resource_kinds() {
-    let fs = Arc::new(MockFileSystem::new());
+    #[test]
+    fn test_migration_handles_multiple_resource_kinds() {
+        let fs = Arc::new(MockFileSystem::new());
 
-    let old_format = r#"apiVersion: pmp.io/v1
+        let old_format = r#"apiVersion: pmp.io/v1
 kind: Infrastructure
 metadata:
   name: Multi Resource Test
@@ -1602,132 +1634,144 @@ spec:
       name: Development
 "#;
 
-    let path = std::path::PathBuf::from("/test4/.pmp.infrastructure.yaml");
-    fs.write(&path, old_format).unwrap();
+        let path = std::path::PathBuf::from("/test4/.pmp.infrastructure.yaml");
+        fs.write(&path, old_format).unwrap();
 
-    let infrastructure = InfrastructureResource::from_file(&*fs, &path).unwrap();
+        let infrastructure = InfrastructureResource::from_file(&*fs, &path).unwrap();
 
-    // Should create one category per resource kind
-    assert_eq!(infrastructure.spec.categories.len(), 2);
+        // Should create one category per resource kind
+        assert_eq!(infrastructure.spec.categories.len(), 2);
 
-    let category_names: Vec<String> = infrastructure.spec.categories
-        .iter()
-        .map(|c| c.name.clone())
-        .collect();
+        let category_names: Vec<String> = infrastructure
+            .spec
+            .categories
+            .iter()
+            .map(|c| c.name.clone())
+            .collect();
 
-    assert!(category_names.iter().any(|n| n.contains("ResourceA")));
-    assert!(category_names.iter().any(|n| n.contains("ResourceB")));
-}
+        assert!(category_names.iter().any(|n| n.contains("ResourceA")));
+        assert!(category_names.iter().any(|n| n.contains("ResourceB")));
+    }
 
-#[test]
-fn test_template_in_multiple_categories() {
-    let infrastructure = InfrastructureResource {
-        api_version: "pmp.io/v1".to_string(),
-        kind: "Infrastructure".to_string(),
-        metadata: InfrastructureMetadata {
-            name: "Test".to_string(),
-            description: None,
-        },
-        spec: InfrastructureSpec {
-            categories: vec![
-                Category {
-                    id: "cat1".to_string(),
-                    name: "Category 1".to_string(),
-                    description: None,
-                    subcategories: vec![],
-                    templates: vec![
-                        CategoryTemplate {
+    #[test]
+    fn test_template_in_multiple_categories() {
+        let infrastructure = InfrastructureResource {
+            api_version: "pmp.io/v1".to_string(),
+            kind: "Infrastructure".to_string(),
+            metadata: InfrastructureMetadata {
+                name: "Test".to_string(),
+                description: None,
+            },
+            spec: InfrastructureSpec {
+                categories: vec![
+                    Category {
+                        id: "cat1".to_string(),
+                        name: "Category 1".to_string(),
+                        description: None,
+                        subcategories: vec![],
+                        templates: vec![CategoryTemplate {
                             template_pack: "pack1".to_string(),
                             template: "shared_template".to_string(),
-                        },
-                    ],
-                },
-                Category {
-                    id: "cat2".to_string(),
-                    name: "Category 2".to_string(),
-                    description: None,
-                    subcategories: vec![],
-                    templates: vec![
-                        CategoryTemplate {
+                        }],
+                    },
+                    Category {
+                        id: "cat2".to_string(),
+                        name: "Category 2".to_string(),
+                        description: None,
+                        subcategories: vec![],
+                        templates: vec![CategoryTemplate {
                             template_pack: "pack1".to_string(),
                             template: "shared_template".to_string(),
-                        },
-                    ],
-                },
-            ],
-            template_packs: HashMap::new(),
-            resource_kinds: vec![],
-            environments: HashMap::new(),
-            hooks: None,
-            executor: None,
-        },
-    };
+                        }],
+                    },
+                ],
+                template_packs: HashMap::new(),
+                resource_kinds: vec![],
+                environments: HashMap::new(),
+                hooks: None,
+                executor: None,
+            },
+        };
 
-    // Same template should be found in both categories
-    assert!(infrastructure.is_template_in_category_tree("pack1", "shared_template"));
-}
+        // Same template should be found in both categories
+        assert!(infrastructure.is_template_in_category_tree("pack1", "shared_template"));
+    }
 
-#[test]
-fn test_environment_name_validation() {
-    // Valid environment names
-    assert!(InfrastructureResource::is_valid_environment_name("dev"));
-    assert!(InfrastructureResource::is_valid_environment_name("production"));
-    assert!(InfrastructureResource::is_valid_environment_name("staging_1"));
-    assert!(InfrastructureResource::is_valid_environment_name("test123"));
-    assert!(InfrastructureResource::is_valid_environment_name("dev_env"));
+    #[test]
+    fn test_environment_name_validation() {
+        // Valid environment names
+        assert!(InfrastructureResource::is_valid_environment_name("dev"));
+        assert!(InfrastructureResource::is_valid_environment_name(
+            "production"
+        ));
+        assert!(InfrastructureResource::is_valid_environment_name(
+            "staging_1"
+        ));
+        assert!(InfrastructureResource::is_valid_environment_name("test123"));
+        assert!(InfrastructureResource::is_valid_environment_name("dev_env"));
 
-    // Invalid environment names
-    assert!(!InfrastructureResource::is_valid_environment_name("Dev")); // uppercase
-    assert!(!InfrastructureResource::is_valid_environment_name("dev-env")); // hyphen not allowed
-    assert!(!InfrastructureResource::is_valid_environment_name("123dev")); // starts with number
-    assert!(!InfrastructureResource::is_valid_environment_name("dev env")); // space
-    assert!(!InfrastructureResource::is_valid_environment_name("dev.env")); // dot
-}
+        // Invalid environment names
+        assert!(!InfrastructureResource::is_valid_environment_name("Dev")); // uppercase
+        assert!(!InfrastructureResource::is_valid_environment_name(
+            "dev-env"
+        )); // hyphen not allowed
+        assert!(!InfrastructureResource::is_valid_environment_name("123dev")); // starts with number
+        assert!(!InfrastructureResource::is_valid_environment_name(
+            "dev env"
+        )); // space
+        assert!(!InfrastructureResource::is_valid_environment_name(
+            "dev.env"
+        )); // dot
+    }
 
-#[test]
-fn test_category_template_serialization() {
-    let template = CategoryTemplate {
-        template_pack: "test-pack".to_string(),
-        template: "test-template".to_string(),
-    };
+    #[test]
+    fn test_category_template_serialization() {
+        let template = CategoryTemplate {
+            template_pack: "test-pack".to_string(),
+            template: "test-template".to_string(),
+        };
 
-    let yaml = serde_yaml::to_string(&template).unwrap();
-    assert!(yaml.contains("template_pack: test-pack"));
-    assert!(yaml.contains("template: test-template"));
+        let yaml = serde_yaml::to_string(&template).unwrap();
+        assert!(yaml.contains("template_pack: test-pack"));
+        assert!(yaml.contains("template: test-template"));
 
-    let deserialized: CategoryTemplate = serde_yaml::from_str(&yaml).unwrap();
-    assert_eq!(deserialized.template_pack, "test-pack");
-    assert_eq!(deserialized.template, "test-template");
-}
+        let deserialized: CategoryTemplate = serde_yaml::from_str(&yaml).unwrap();
+        assert_eq!(deserialized.template_pack, "test-pack");
+        assert_eq!(deserialized.template, "test-template");
+    }
 
-#[test]
-fn test_empty_categories_and_template_packs() {
-    let infrastructure = InfrastructureResource {
-        api_version: "pmp.io/v1".to_string(),
-        kind: "Infrastructure".to_string(),
-        metadata: InfrastructureMetadata {
-            name: "Empty Test".to_string(),
-            description: None,
-        },
-        spec: InfrastructureSpec {
-            categories: vec![],
-            template_packs: HashMap::new(),
-            resource_kinds: vec![],
-            environments: HashMap::new(),
-            hooks: None,
-            executor: None,
-        },
-    };
+    #[test]
+    fn test_empty_categories_and_template_packs() {
+        let infrastructure = InfrastructureResource {
+            api_version: "pmp.io/v1".to_string(),
+            kind: "Infrastructure".to_string(),
+            metadata: InfrastructureMetadata {
+                name: "Empty Test".to_string(),
+                description: None,
+            },
+            spec: InfrastructureSpec {
+                categories: vec![],
+                template_packs: HashMap::new(),
+                resource_kinds: vec![],
+                environments: HashMap::new(),
+                hooks: None,
+                executor: None,
+            },
+        };
 
-    // Should handle empty structures gracefully
-    assert!(!infrastructure.is_template_in_category_tree("any", "template"));
-    assert!(infrastructure.get_template_config("any", "template").is_none());
-}
+        // Should handle empty structures gracefully
+        assert!(!infrastructure.is_template_in_category_tree("any", "template"));
+        assert!(
+            infrastructure
+                .get_template_config("any", "template")
+                .is_none()
+        );
+    }
 
-#[test]
-fn test_input_definition_array_format_deserialization() {
-    // Test array format with various input types
-    let yaml = r#"
+    #[test]
+    fn test_input_definition_array_format_deserialization() {
+        // Test array format with various input types
+        let yaml = r#"
 apiVersion: pmp.io/v1
 kind: Template
 metadata:
@@ -1757,25 +1801,34 @@ spec:
   environments: {}
 "#;
 
-    let template: TemplateResource = serde_yaml::from_str(yaml).unwrap();
-    assert_eq!(template.spec.inputs.len(), 4);
+        let template: TemplateResource = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(template.spec.inputs.len(), 4);
 
-    // Verify inputs are in order
-    assert_eq!(template.spec.inputs[0].name, "string_input");
-    assert_eq!(template.spec.inputs[1].name, "number_input");
-    assert_eq!(template.spec.inputs[2].name, "bool_input");
-    assert_eq!(template.spec.inputs[3].name, "enum_input");
+        // Verify inputs are in order
+        assert_eq!(template.spec.inputs[0].name, "string_input");
+        assert_eq!(template.spec.inputs[1].name, "number_input");
+        assert_eq!(template.spec.inputs[2].name, "bool_input");
+        assert_eq!(template.spec.inputs[3].name, "enum_input");
 
-    // Verify values
-    assert_eq!(template.spec.inputs[0].default, Some(serde_json::Value::String("test".to_string())));
-    assert_eq!(template.spec.inputs[1].default, Some(serde_json::Value::Number(42.into())));
-    assert_eq!(template.spec.inputs[2].default, Some(serde_json::Value::Bool(true)));
-}
+        // Verify values
+        assert_eq!(
+            template.spec.inputs[0].default,
+            Some(serde_json::Value::String("test".to_string()))
+        );
+        assert_eq!(
+            template.spec.inputs[1].default,
+            Some(serde_json::Value::Number(42.into()))
+        );
+        assert_eq!(
+            template.spec.inputs[2].default,
+            Some(serde_json::Value::Bool(true))
+        );
+    }
 
-#[test]
-fn test_input_definition_object_format_deserialization() {
-    // Test legacy object format (backward compatibility)
-    let yaml = r#"
+    #[test]
+    fn test_input_definition_object_format_deserialization() {
+        // Test legacy object format (backward compatibility)
+        let yaml = r#"
 apiVersion: pmp.io/v1
 kind: Template
 metadata:
@@ -1795,18 +1848,23 @@ spec:
   environments: {}
 "#;
 
-    let template: TemplateResource = serde_yaml::from_str(yaml).unwrap();
-    assert_eq!(template.spec.inputs.len(), 2);
+        let template: TemplateResource = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(template.spec.inputs.len(), 2);
 
-    // Note: Object format doesn't guarantee order, but items should be present
-    let names: Vec<_> = template.spec.inputs.iter().map(|i| i.name.as_str()).collect();
-    assert!(names.contains(&"string_input"));
-    assert!(names.contains(&"number_input"));
-}
+        // Note: Object format doesn't guarantee order, but items should be present
+        let names: Vec<_> = template
+            .spec
+            .inputs
+            .iter()
+            .map(|i| i.name.as_str())
+            .collect();
+        assert!(names.contains(&"string_input"));
+        assert!(names.contains(&"number_input"));
+    }
 
-#[test]
-fn test_plugin_inputs_array_format() {
-    let yaml = r#"
+    #[test]
+    fn test_plugin_inputs_array_format() {
+        let yaml = r#"
 apiVersion: pmp.io/v1
 kind: Plugin
 metadata:
@@ -1823,9 +1881,9 @@ spec:
       default: 100
 "#;
 
-    let plugin: PluginResource = serde_yaml::from_str(yaml).unwrap();
-    assert_eq!(plugin.spec.inputs.len(), 2);
-    assert_eq!(plugin.spec.inputs[0].name, "plugin_input1");
-    assert_eq!(plugin.spec.inputs[1].name, "plugin_input2");
-}
+        let plugin: PluginResource = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(plugin.spec.inputs.len(), 2);
+        assert_eq!(plugin.spec.inputs[0].name, "plugin_input1");
+        assert_eq!(plugin.spec.inputs[1].name, "plugin_input2");
+    }
 }

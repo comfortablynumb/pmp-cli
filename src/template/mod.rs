@@ -3,6 +3,6 @@ pub mod metadata;
 pub mod renderer;
 pub mod utils;
 
-pub use discovery::{TemplateDiscovery, TemplatePackInfo, TemplateInfo, PluginInfo};
-pub use metadata::{ProjectResource, DynamicProjectEnvironmentResource, ProjectReference};
+pub use discovery::{PluginInfo, TemplateDiscovery, TemplateInfo, TemplatePackInfo};
+pub use metadata::{DynamicProjectEnvironmentResource, ProjectReference, ProjectResource};
 pub use renderer::TemplateRenderer;

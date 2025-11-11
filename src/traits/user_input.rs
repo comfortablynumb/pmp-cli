@@ -18,7 +18,12 @@ pub trait UserInput: Send + Sync {
     fn select(&self, prompt: &str, options: Vec<String>) -> Result<String>;
 
     /// Display a multi-selection prompt with options
-    fn multi_select(&self, prompt: &str, options: Vec<String>, defaults: Option<&[usize]>) -> Result<Vec<String>>;
+    fn multi_select(
+        &self,
+        prompt: &str,
+        options: Vec<String>,
+        defaults: Option<&[usize]>,
+    ) -> Result<Vec<String>>;
 
     /// Display a text input prompt
     fn text(&self, prompt: &str, default: Option<&str>) -> Result<String>;
@@ -37,7 +42,12 @@ impl UserInput for InquireUserInput {
         Ok(answer)
     }
 
-    fn multi_select(&self, prompt: &str, options: Vec<String>, defaults: Option<&[usize]>) -> Result<Vec<String>> {
+    fn multi_select(
+        &self,
+        prompt: &str,
+        options: Vec<String>,
+        defaults: Option<&[usize]>,
+    ) -> Result<Vec<String>> {
         use inquire::MultiSelect;
         let mut prompt_builder = MultiSelect::new(prompt, options);
         if let Some(default_indices) = defaults {
@@ -59,9 +69,7 @@ impl UserInput for InquireUserInput {
 
     fn confirm(&self, prompt: &str, default: bool) -> Result<bool> {
         use inquire::Confirm;
-        let answer = Confirm::new(prompt)
-            .with_default(default)
-            .prompt()?;
+        let answer = Confirm::new(prompt).with_default(default).prompt()?;
         Ok(answer)
     }
 }
@@ -128,7 +136,12 @@ impl UserInput for MockUserInput {
         }
     }
 
-    fn multi_select(&self, _prompt: &str, options: Vec<String>, _defaults: Option<&[usize]>) -> Result<Vec<String>> {
+    fn multi_select(
+        &self,
+        _prompt: &str,
+        options: Vec<String>,
+        _defaults: Option<&[usize]>,
+    ) -> Result<Vec<String>> {
         match self.next_response()? {
             MockResponse::MultiSelect(answers) => {
                 // Verify all answers are in the options

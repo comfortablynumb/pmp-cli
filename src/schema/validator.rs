@@ -14,13 +14,15 @@ impl SchemaValidator {
 
             // Check if empty
             if input.is_empty() {
-                ctx.output.warning("Project name is required and cannot be empty");
+                ctx.output
+                    .warning("Project name is required and cannot be empty");
                 continue;
             }
 
             // Check if starts with a number
-            if input.chars().next().map_or(false, |c| c.is_ascii_digit()) {
-                ctx.output.warning("Project name must not start with a number");
+            if input.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+                ctx.output
+                    .warning("Project name must not start with a number");
                 continue;
             }
 
@@ -29,7 +31,9 @@ impl SchemaValidator {
                 .chars()
                 .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
             {
-                ctx.output.warning("Project name must contain only lowercase letters, numbers, or underscores");
+                ctx.output.warning(
+                    "Project name must contain only lowercase letters, numbers, or underscores",
+                );
                 continue;
             }
 
@@ -48,12 +52,18 @@ mod tests {
             return Err("Project name is required and cannot be empty".to_string());
         }
 
-        if name.chars().next().map_or(false, |c| c.is_ascii_digit()) {
+        if name.chars().next().is_some_and(|c| c.is_ascii_digit()) {
             return Err("Project name must not start with a number".to_string());
         }
 
-        if !name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_') {
-            return Err("Project name must contain only lowercase letters, numbers, or underscores".to_string());
+        if !name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+        {
+            return Err(
+                "Project name must contain only lowercase letters, numbers, or underscores"
+                    .to_string(),
+            );
         }
 
         Ok(())
@@ -84,7 +94,11 @@ mod tests {
     fn test_invalid_project_name_with_hyphen() {
         let result = validate_project_name("my-project");
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("lowercase letters, numbers, or underscores"));
+        assert!(
+            result
+                .unwrap_err()
+                .contains("lowercase letters, numbers, or underscores")
+        );
 
         assert!(validate_project_name("test-case").is_err());
         assert!(validate_project_name("my-cool-project").is_err());

@@ -2,9 +2,9 @@ use super::executor::{Executor, ExecutorConfig, ProjectMetadata};
 use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::path::Path;
-use std::process::{Command, Output, Stdio, Child};
-use std::sync::{Arc, Mutex};
+use std::process::{Child, Command, Output, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 /// OpenTofu executor implementation
 pub struct OpenTofuExecutor;
@@ -30,11 +30,11 @@ impl OpenTofuExecutor {
         // Set up CTRL+C handler
         ctrlc::set_handler(move || {
             interrupted_clone.store(true, Ordering::SeqCst);
-            if let Ok(mut child_guard) = child_clone.lock() {
-                if let Some(child) = child_guard.as_mut() {
-                    // Kill the child process
-                    let _ = child.kill();
-                }
+            if let Ok(mut child_guard) = child_clone.lock()
+                && let Some(child) = child_guard.as_mut()
+            {
+                // Kill the child process
+                let _ = child.kill();
             }
             std::process::exit(130); // Standard exit code for SIGINT
         })
@@ -89,9 +89,7 @@ impl OpenTofuExecutor {
 impl Executor for OpenTofuExecutor {
     fn check_installed(&self) -> Result<bool> {
         // Try to run 'tofu --version' to check if OpenTofu is installed
-        let result = Command::new("tofu")
-            .arg("--version")
-            .output();
+        let result = Command::new("tofu").arg("--version").output();
 
         match result {
             Ok(output) => Ok(output.status.success()),
@@ -109,9 +107,15 @@ impl Executor for OpenTofuExecutor {
         Ok(output)
     }
 
-    fn plan(&self, config: &ExecutorConfig, working_dir: &str, extra_args: &[String]) -> Result<()> {
+    fn plan(
+        &self,
+        config: &ExecutorConfig,
+        working_dir: &str,
+        extra_args: &[String],
+    ) -> Result<()> {
         let command = config
-            .plan_command.as_deref()
+            .plan_command
+            .as_deref()
             .unwrap_or(self.default_plan_command());
 
         // Parse the command string into command and args
@@ -132,9 +136,15 @@ impl Executor for OpenTofuExecutor {
         Ok(())
     }
 
-    fn apply(&self, config: &ExecutorConfig, working_dir: &str, extra_args: &[String]) -> Result<()> {
+    fn apply(
+        &self,
+        config: &ExecutorConfig,
+        working_dir: &str,
+        extra_args: &[String],
+    ) -> Result<()> {
         let command = config
-            .apply_command.as_deref()
+            .apply_command
+            .as_deref()
             .unwrap_or(self.default_apply_command());
 
         // Parse the command string into command and args
@@ -155,9 +165,15 @@ impl Executor for OpenTofuExecutor {
         Ok(())
     }
 
-    fn destroy(&self, config: &ExecutorConfig, working_dir: &str, extra_args: &[String]) -> Result<()> {
+    fn destroy(
+        &self,
+        config: &ExecutorConfig,
+        working_dir: &str,
+        extra_args: &[String],
+    ) -> Result<()> {
         let command = config
-            .destroy_command.as_deref()
+            .destroy_command
+            .as_deref()
             .unwrap_or(self.default_destroy_command());
 
         // Parse the command string into command and args
@@ -194,9 +210,15 @@ impl Executor for OpenTofuExecutor {
         "tofu destroy"
     }
 
-    fn refresh(&self, config: &ExecutorConfig, working_dir: &str, extra_args: &[String]) -> Result<()> {
+    fn refresh(
+        &self,
+        config: &ExecutorConfig,
+        working_dir: &str,
+        extra_args: &[String],
+    ) -> Result<()> {
         let command = config
-            .refresh_command.as_deref()
+            .refresh_command
+            .as_deref()
             .unwrap_or(self.default_refresh_command());
 
         // Parse the command string into command and args
@@ -229,7 +251,10 @@ impl Executor for OpenTofuExecutor {
         plugins: Option<&[crate::template::metadata::AddedPlugin]>,
         template_reference_projects: &[crate::template::metadata::TemplateReferenceProject],
     ) -> Result<()> {
-        use super::backend::{generate_backend_config, generate_module_blocks, generate_data_source_backends, generate_plugin_override_variables, generate_template_data_source_backends};
+        use super::backend::{
+            generate_backend_config, generate_data_source_backends, generate_module_blocks,
+            generate_plugin_override_variables, generate_template_data_source_backends,
+        };
 
         // Generate backend HCL with project metadata for table name generation
         let backend_hcl = generate_backend_config(
@@ -242,10 +267,9 @@ impl Executor for OpenTofuExecutor {
         .context("Failed to generate backend configuration")?;
 
         // Generate data source backends for template reference projects
-        let template_data_sources_hcl = generate_template_data_source_backends(
-            template_reference_projects,
-            executor_config,
-        ).context("Failed to generate template data source backends")?;
+        let template_data_sources_hcl =
+            generate_template_data_source_backends(template_reference_projects, executor_config)
+                .context("Failed to generate template data source backends")?;
 
         // Generate data source backends for plugins with reference projects
         let plugin_data_sources_hcl = if let Some(plugin_list) = plugins {

@@ -31,8 +31,9 @@ impl CollectionManager {
     /// Load the infrastructure from a specific path
     #[allow(dead_code)]
     pub fn load_from_path(ctx: &crate::context::Context, path: &Path) -> Result<Self> {
-        let (infrastructure, root_path) = CollectionDiscovery::find_collection_in_path(&*ctx.fs, path)?
-            .context("No Infrastructure found at the specified path")?;
+        let (infrastructure, root_path) =
+            CollectionDiscovery::find_collection_in_path(&*ctx.fs, path)?
+                .context("No Infrastructure found at the specified path")?;
 
         // Discover projects in the "projects" folder
         let projects = CollectionDiscovery::discover_projects(&*ctx.fs, &*ctx.output, &root_path)?;
@@ -46,7 +47,12 @@ impl CollectionManager {
 
     /// Create a new Infrastructure at the specified path
     #[allow(dead_code)]
-    pub fn create(ctx: &crate::context::Context, path: &Path, name: String, description: Option<String>) -> Result<Self> {
+    pub fn create(
+        ctx: &crate::context::Context,
+        path: &Path,
+        name: String,
+        description: Option<String>,
+    ) -> Result<Self> {
         let pmp_file = path.join(".pmp.infrastructure.yaml");
 
         if ctx.fs.exists(&pmp_file) {
@@ -83,7 +89,8 @@ impl CollectionManager {
     /// Refresh the list of discovered projects
     #[allow(dead_code)]
     pub fn refresh_projects(&mut self, ctx: &crate::context::Context) -> Result<()> {
-        self.projects = CollectionDiscovery::discover_projects(&*ctx.fs, &*ctx.output, &self.root_path)?;
+        self.projects =
+            CollectionDiscovery::discover_projects(&*ctx.fs, &*ctx.output, &self.root_path)?;
         Ok(())
     }
 
@@ -124,5 +131,4 @@ impl CollectionManager {
     pub fn get_project_path(&self, project: &ProjectReference) -> PathBuf {
         self.root_path.join(&project.path)
     }
-
 }

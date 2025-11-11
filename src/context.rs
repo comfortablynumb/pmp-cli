@@ -1,5 +1,8 @@
 use crate::executor::{DefaultExecutorRegistry, ExecutorRegistry};
-use crate::traits::{FileSystem, Output, RealFileSystem, TerminalOutput, UserInput, InquireUserInput, CommandExecutor, RealCommandExecutor};
+use crate::traits::{
+    CommandExecutor, FileSystem, InquireUserInput, Output, RealCommandExecutor, RealFileSystem,
+    TerminalOutput, UserInput,
+};
 #[cfg(test)]
 use crate::traits::{MockCommandExecutor, MockFileSystem, MockOutput, MockUserInput};
 use std::sync::Arc;
@@ -63,5 +66,17 @@ impl Context {
 impl Default for Context {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl Clone for Context {
+    fn clone(&self) -> Self {
+        Self {
+            fs: Arc::clone(&self.fs),
+            input: Arc::clone(&self.input),
+            output: Arc::clone(&self.output),
+            command: Arc::clone(&self.command),
+            executor_registry: Arc::clone(&self.executor_registry),
+        }
     }
 }
