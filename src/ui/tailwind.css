@@ -141,6 +141,7 @@ button, [type='button'], [type='submit'] {
 .bg-gray-500 { background-color: #6b7280; }
 .bg-blue-50 { background-color: #eff6ff; }
 .bg-blue-100 { background-color: #dbeafe; }
+.bg-blue-500 { background-color: #3b82f6; }
 .bg-blue-600 { background-color: #2563eb; }
 .bg-blue-700 { background-color: #1d4ed8; }
 .bg-green-100 { background-color: #dcfce7; }
@@ -229,6 +230,7 @@ button, [type='button'], [type='submit'] {
 .shadow-lg { box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05); }
 .shadow-xl { box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04); }
 
+.hover\:bg-blue-600:hover { background-color: #2563eb; }
 .hover\:bg-blue-700:hover { background-color: #1d4ed8; }
 .hover\:bg-green-700:hover { background-color: #15803d; }
 .hover\:bg-yellow-700:hover { background-color: #a16207; }
