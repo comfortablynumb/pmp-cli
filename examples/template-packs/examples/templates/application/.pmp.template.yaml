@@ -98,4 +98,9 @@ spec:
       default: ClusterIP
       description: Kubernetes service type (ClusterIP for internal, NodePort for development, LoadBalancer for production)
 
+    - name: wait_for_rollout
+      type: boolean
+      default: false
+      description: Wait for the rollout of the deployment?
+
   environments: {}

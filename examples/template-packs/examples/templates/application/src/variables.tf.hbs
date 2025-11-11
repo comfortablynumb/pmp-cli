@@ -44,3 +44,9 @@ variable "service_type" {
     error_message = "Service type must be ClusterIP, NodePort, or LoadBalancer"
   }
 }
+
+variable "wait_for_rollout" {
+  type        = bool
+  description = "Wait for the rollout of the deployment?"
+  default     = {{bool wait_for_rollout}}
+}

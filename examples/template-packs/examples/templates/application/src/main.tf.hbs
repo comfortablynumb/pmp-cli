@@ -54,6 +54,8 @@ resource "kubernetes_deployment" "app" {
     }
   }
 
+  wait_for_rollout = var.wait_for_rollout
+
   spec {
     replicas = var.min_replicas
 
