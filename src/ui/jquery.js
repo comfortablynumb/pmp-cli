@@ -132,7 +132,8 @@
                 } else if (content instanceof Element) {
                     this.appendChild(content);
                 } else if (content instanceof PmpQuery) {
-                    content.elements.forEach(el => this.appendChild(el.cloneNode(true)));
+                    // Don't clone - move the actual elements to preserve event handlers
+                    content.elements.forEach(el => this.appendChild(el));
                 }
             });
         }
@@ -238,6 +239,24 @@
 
         get(index) {
             return index === undefined ? this.elements : this.elements[index];
+        }
+
+        ready(callback) {
+            if (typeof callback === 'function') {
+                if (document.readyState === 'loading') {
+                    document.addEventListener('DOMContentLoaded', callback);
+                } else {
+                    callback();
+                }
+            }
+            return this;
+        }
+
+        trigger(eventName) {
+            return this.each(function() {
+                const event = new Event(eventName, { bubbles: true });
+                this.dispatchEvent(event);
+            });
         }
     }
 
