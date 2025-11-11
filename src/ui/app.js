@@ -56,6 +56,57 @@ function hideModal() {
     $('#detailsModal').removeClass('flex').addClass('hidden');
 }
 
+// Console Modal
+function showConsole(title, initialMessage = '') {
+    $('#consoleTitle').text(title);
+    $('#consoleOutput').html(initialMessage || '<span class="text-gray-500">Waiting for output...</span>');
+    $('#consoleSpinner').removeClass('hidden');
+    $('#consoleActions').addClass('hidden');
+    $('#consoleModal').removeClass('hidden').addClass('flex');
+}
+
+function appendConsoleOutput(message) {
+    const $output = $('#consoleOutput');
+    const currentHtml = $output.html();
+
+    // Remove "Waiting for output..." message if present
+    if (currentHtml.includes('Waiting for output')) {
+        $output.html('');
+    }
+
+    $output.append(`<div>${escapeHtml(message)}</div>`);
+    // Auto-scroll to bottom
+    $output[0].scrollTop = $output[0].scrollHeight;
+}
+
+function finishConsole(success, finalMessage = null) {
+    $('#consoleSpinner').addClass('hidden');
+    $('#consoleActions').removeClass('hidden');
+
+    if (finalMessage) {
+        appendConsoleOutput('\n' + finalMessage);
+    }
+
+    if (success) {
+        appendConsoleOutput('\n✓ Command completed successfully');
+    } else {
+        appendConsoleOutput('\n✗ Command failed');
+    }
+}
+
+function hideConsole() {
+    $('#consoleModal').removeClass('flex').addClass('hidden');
+}
+
+function escapeHtml(unsafe) {
+    return unsafe
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+}
+
 // Directory Picker
 async function loadDrives() {
     try {
@@ -188,6 +239,9 @@ $('.tab-button').on('click', function() {
 
 // Close modal
 $('#closeModal').on('click', hideModal);
+
+// Close console
+$('#closeConsole, #closeConsoleBtn').on('click', hideConsole);
 
 // Infrastructure Tab - Browse button
 $('#browseInfraBtn').on('click', function() {
@@ -476,18 +530,36 @@ async function showProjects(infra) {
                     ${projects.length === 0 ? `
                         <p class="text-gray-500 text-center py-8">No projects found in this infrastructure</p>
                     ` : `
-                        <div class="space-y-3">
-                            ${projects.map(project => `
-                                <div class="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
-                                    <div class="flex items-center justify-between mb-2">
-                                        <h4 class="font-semibold text-lg">${project.name}</h4>
-                                        <span class="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs">${project.kind}</span>
+                        <div class="space-y-2">
+                            ${projects.map((project, idx) => `
+                                <div class="border border-gray-200 rounded p-2 hover:shadow transition-shadow">
+                                    <div class="flex items-center justify-between mb-1">
+                                        <h4 class="font-semibold text-sm">${project.name}</h4>
+                                        <span class="bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded text-xs">${project.kind}</span>
                                     </div>
-                                    <p class="text-sm text-gray-600 mb-2">${project.path}</p>
-                                    <div class="flex flex-wrap gap-1">
+                                    <p class="text-xs text-gray-500 mb-1 font-mono">${project.path}</p>
+                                    <div class="flex flex-wrap gap-1 mb-2">
                                         ${project.environments.map(env => `
-                                            <span class="bg-green-100 text-green-700 px-2 py-1 rounded text-xs">${env}</span>
+                                            <span class="bg-green-100 text-green-700 px-1.5 py-0.5 rounded text-xs">${env}</span>
                                         `).join('')}
+                                    </div>
+                                    <div class="flex flex-wrap gap-1">
+                                        <button class="project-preview-btn bg-blue-500 text-white px-2 py-1 rounded text-xs hover:bg-blue-600"
+                                                data-index="${idx}" data-path="${project.path}">
+                                            Preview
+                                        </button>
+                                        <button class="project-apply-btn bg-green-600 text-white px-2 py-1 rounded text-xs hover:bg-green-700"
+                                                data-index="${idx}" data-path="${project.path}">
+                                            Apply
+                                        </button>
+                                        <button class="project-refresh-btn bg-yellow-600 text-white px-2 py-1 rounded text-xs hover:bg-yellow-700"
+                                                data-index="${idx}" data-path="${project.path}">
+                                            Refresh
+                                        </button>
+                                        <button class="project-destroy-btn bg-red-600 text-white px-2 py-1 rounded text-xs hover:bg-red-700"
+                                                data-index="${idx}" data-path="${project.path}">
+                                            Destroy
+                                        </button>
                                     </div>
                                 </div>
                             `).join('')}
@@ -496,6 +568,31 @@ async function showProjects(infra) {
                 </div>
             `;
             showModal(`Projects in ${infra.name}`, content);
+
+            // Attach event handlers for project command buttons
+            $('.project-preview-btn').on('click', async function() {
+                const path = $(this).data('path');
+                await executeProjectCommand('preview', path, 'Preview');
+            });
+
+            $('.project-apply-btn').on('click', async function() {
+                const path = $(this).data('path');
+                if (confirm('Apply changes to this project?')) {
+                    await executeProjectCommand('apply', path, 'Apply');
+                }
+            });
+
+            $('.project-refresh-btn').on('click', async function() {
+                const path = $(this).data('path');
+                await executeProjectCommand('refresh', path, 'Refresh');
+            });
+
+            $('.project-destroy-btn').on('click', async function() {
+                const path = $(this).data('path');
+                if (confirm('⚠️ WARNING: This will destroy all resources in this project. Are you sure?')) {
+                    await executeProjectCommand('destroy', path, 'Destroy');
+                }
+            });
         } else {
             showStatus(`Error loading projects: ${response.error}`, 'error');
         }
@@ -503,6 +600,32 @@ async function showProjects(infra) {
         showStatus(`Failed to load projects: ${error.message}`, 'error');
     } finally {
         hideLoading();
+    }
+}
+
+async function executeProjectCommand(command, path, displayName) {
+    showConsole(`${displayName}: ${path}`, `Executing ${command}...`);
+
+    try {
+        let endpoint = `/api/${command}`;
+        let requestBody = { path: path, executor_args: [] };
+
+        // For destroy, add yes flag
+        if (command === 'destroy') {
+            requestBody.yes = true;
+        }
+
+        appendConsoleOutput(`> ${command} ${path}\n`);
+
+        const response = await $.post(endpoint, requestBody);
+
+        if (response.success) {
+            finishConsole(true, response.data || `${displayName} completed`);
+        } else {
+            finishConsole(false, response.error || `${displayName} failed`);
+        }
+    } catch (error) {
+        finishConsole(false, `Error: ${error.message}`);
     }
 }
 
@@ -644,6 +767,21 @@ $(document).ready(async function() {
     // Initialize infrastructure list
     renderInfrastructures();
     updateCurrentContext();
+
+    // Try to auto-load infrastructure from current directory
+    try {
+        const response = await $.get('/api/infrastructure');
+        if (response.success && response.data) {
+            infrastructures.push(response.data);
+            currentInfrastructure = response.data;
+            renderInfrastructures();
+            updateCurrentContext();
+            showStatus(`Auto-loaded infrastructure: ${response.data.name}`, 'success');
+        }
+    } catch (error) {
+        // Silently fail - no infrastructure in current directory
+        console.log('No infrastructure in current directory');
+    }
 
     // Load template packs automatically
     $('#loadTemplatePacksBtn').trigger('click');
