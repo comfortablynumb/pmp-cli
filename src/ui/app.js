@@ -76,7 +76,9 @@ function appendConsoleOutput(message) {
 
     $output.append(`<div>${escapeHtml(message)}</div>`);
     // Auto-scroll to bottom
-    $output[0].scrollTop = $output[0].scrollHeight;
+    if ($output.length > 0 && $output[0]) {
+        $output[0].scrollTop = $output[0].scrollHeight;
+    }
 }
 
 function finishConsole(success, finalMessage = null) {
@@ -530,9 +532,21 @@ async function showProjects(infra) {
                     ${projects.length === 0 ? `
                         <p class="text-gray-500 text-center py-8">No projects found in this infrastructure</p>
                     ` : `
-                        <div class="space-y-2">
+                        <div class="mb-4">
+                            <input type="text" id="projectSearch"
+                                   class="w-full border border-gray-300 rounded px-3 py-2 text-sm"
+                                   placeholder="Search projects by name, kind, or environment...">
+                        </div>
+                        <div id="projectSearchResults" class="text-xs text-gray-500 mb-2">
+                            Showing ${projects.length} project(s)
+                        </div>
+                        <div class="space-y-2" id="projectsList">
                             ${projects.map((project, idx) => `
-                                <div class="border border-gray-200 rounded p-2 hover:shadow transition-shadow">
+                                <div class="project-card border border-gray-200 rounded p-2 hover:shadow transition-shadow"
+                                     data-name="${project.name.toLowerCase()}"
+                                     data-kind="${project.kind.toLowerCase()}"
+                                     data-environments="${project.environments.join(',').toLowerCase()}"
+                                     data-path="${project.path.toLowerCase()}">
                                     <div class="flex items-center justify-between mb-1">
                                         <h4 class="font-semibold text-sm">${project.name}</h4>
                                         <span class="bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded text-xs">${project.kind}</span>
@@ -543,7 +557,7 @@ async function showProjects(infra) {
                                             <span class="bg-green-100 text-green-700 px-1.5 py-0.5 rounded text-xs">${env}</span>
                                         `).join('')}
                                     </div>
-                                    <div class="flex flex-wrap gap-1">
+                                    <div class="flex flex-wrap gap-2">
                                         <button class="project-preview-btn bg-blue-500 text-white px-2 py-1 rounded text-xs hover:bg-blue-600"
                                                 data-index="${idx}" data-path="${project.path}">
                                             Preview
@@ -592,6 +606,40 @@ async function showProjects(infra) {
                 if (confirm('⚠️ WARNING: This will destroy all resources in this project. Are you sure?')) {
                     await executeProjectCommand('destroy', path, 'Destroy');
                 }
+            });
+
+            // Attach search handler
+            $('#projectSearch').on('input', function() {
+                const searchTerm = $(this).val().toLowerCase().trim();
+                let visibleCount = 0;
+
+                $('.project-card').each(function() {
+                    const $card = $(this);
+                    const name = $card.data('name') || '';
+                    const kind = $card.data('kind') || '';
+                    const environments = $card.data('environments') || '';
+                    const path = $card.data('path') || '';
+
+                    const matches = searchTerm === '' ||
+                        name.includes(searchTerm) ||
+                        kind.includes(searchTerm) ||
+                        environments.includes(searchTerm) ||
+                        path.includes(searchTerm);
+
+                    if (matches) {
+                        $card.removeClass('hidden');
+                        visibleCount++;
+                    } else {
+                        $card.addClass('hidden');
+                    }
+                });
+
+                // Update results count
+                $('#projectSearchResults').text(
+                    visibleCount === projects.length
+                        ? `Showing ${projects.length} project(s)`
+                        : `Showing ${visibleCount} of ${projects.length} project(s)`
+                );
             });
         } else {
             showStatus(`Error loading projects: ${response.error}`, 'error');
