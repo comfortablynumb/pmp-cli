@@ -1,7 +1,0 @@
-apiVersion: pmp.io/v1
-kind: TemplatePack
-metadata:
-  name: kubernetes-workloads
-  description: Kubernetes workload templates for common deployment patterns (HTTP APIs, workers, cron jobs)
-
-spec: {}

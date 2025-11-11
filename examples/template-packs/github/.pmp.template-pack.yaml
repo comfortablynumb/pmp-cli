@@ -1,6 +1,0 @@
-apiVersion: pmp.io/v1
-kind: TemplatePack
-metadata:
-  name: github
-  description: GitHub repository management templates with comprehensive configuration options
-spec: {}

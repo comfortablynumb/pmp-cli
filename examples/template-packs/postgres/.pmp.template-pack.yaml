@@ -1,7 +1,0 @@
-apiVersion: pmp.io/v1
-kind: TemplatePack
-metadata:
-  name: postgres
-  description: Deploy PostgreSQL database on Kubernetes using Helm
-
-spec: {}

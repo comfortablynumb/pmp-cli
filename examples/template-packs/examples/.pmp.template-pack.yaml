@@ -1,6 +1,0 @@
-apiVersion: pmp.io/v1
-kind: TemplatePack
-metadata:
-  name: examples
-  description: Example template pack demonstrating pre-installed plugins and best practices
-spec: {}
