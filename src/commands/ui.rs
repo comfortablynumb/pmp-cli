@@ -703,7 +703,7 @@ async fn list_projects(
                     name: p.name.clone(),
                     description: None,
                     kind: p.kind.clone(),
-                    path: p.path.clone(),
+                    path: project_path.to_string_lossy().to_string(),
                     environments,
                 });
             }
