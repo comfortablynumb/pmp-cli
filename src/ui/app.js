@@ -1,8 +1,10 @@
 // Global state
 let templatePacks = [];
-let projects = [];
-let infrastructures = []; // Array to store multiple infrastructures
-let currentInfrastructure = null; // Currently selected infrastructure
+let infrastructures = [];
+let currentInfrastructure = null;
+let currentTemplatePack = null;
+let currentPickerPath = null;
+let pickerCallback = null;
 
 // Utility functions
 function showLoading() {
@@ -47,12 +49,84 @@ function showStatus(message, type = 'info') {
 function showModal(title, content) {
     $('#modalTitle').text(title);
     $('#modalContent').html(content);
-    $('#projectActionModal').removeClass('hidden').addClass('flex');
+    $('#detailsModal').removeClass('hidden').addClass('flex');
 }
 
 function hideModal() {
-    $('#projectActionModal').removeClass('flex').addClass('hidden');
+    $('#detailsModal').removeClass('flex').addClass('hidden');
 }
+
+// Directory Picker
+function openDirectoryPicker(callback, initialPath = null) {
+    pickerCallback = callback;
+    currentPickerPath = initialPath;
+    loadDirectoryEntries(currentPickerPath);
+    $('#directoryPickerModal').removeClass('hidden').addClass('flex');
+}
+
+function closeDirectoryPicker() {
+    $('#directoryPickerModal').removeClass('flex').addClass('hidden');
+    pickerCallback = null;
+    currentPickerPath = null;
+}
+
+async function loadDirectoryEntries(path) {
+    try {
+        const response = await $.post('/api/browse', { path: path });
+
+        if (response.success) {
+            currentPickerPath = path || response.data[0]?.path || '.';
+            $('#currentPickerPath').text(currentPickerPath);
+            renderDirectoryEntries(response.data);
+        } else {
+            showStatus(`Error browsing directory: ${response.error}`, 'error');
+        }
+    } catch (error) {
+        showStatus(`Failed to browse directory: ${error.message}`, 'error');
+    }
+}
+
+function renderDirectoryEntries(entries) {
+    const $content = $('#directoryPickerContent');
+    $content.empty();
+
+    if (entries.length === 0) {
+        $content.html('<p class="text-gray-500 text-center py-8">No directories found</p>');
+        return;
+    }
+
+    entries.forEach(entry => {
+        const $entry = $(`
+            <div class="directory-entry flex items-center gap-3 p-3 border border-gray-200 rounded-lg hover:bg-indigo-50 cursor-pointer transition-colors"
+                 data-path="${entry.path}">
+                <svg class="w-6 h-6 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path>
+                </svg>
+                <span class="flex-1 font-medium text-gray-700">${entry.name}</span>
+                <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+                </svg>
+            </div>
+        `);
+
+        $entry.on('click', function() {
+            const path = $(this).data('path');
+            loadDirectoryEntries(path);
+        });
+
+        $content.append($entry);
+    });
+}
+
+$('#closeDirectoryPicker, #cancelDirectoryPicker').on('click', closeDirectoryPicker);
+
+$('#selectCurrentDirectory').on('click', function() {
+    if (pickerCallback && currentPickerPath) {
+        pickerCallback(currentPickerPath);
+        closeDirectoryPicker();
+    }
+});
 
 // Tab switching
 $('.tab-button').on('click', function() {
@@ -70,7 +144,14 @@ $('.tab-button').on('click', function() {
 // Close modal
 $('#closeModal').on('click', hideModal);
 
-// Infrastructure Tab
+// Infrastructure Tab - Browse button
+$('#browseInfraBtn').on('click', function() {
+    openDirectoryPicker(function(path) {
+        $('#infraPath').val(path);
+    });
+});
+
+// Infrastructure Tab - Load button
 $('#addInfraBtn').on('click', async function() {
     const path = $('#infraPath').val().trim() || '.';
     showLoading();
@@ -85,6 +166,7 @@ $('#addInfraBtn').on('click', async function() {
             infrastructures.push(response.data);
             currentInfrastructure = response.data;
             renderInfrastructures();
+            updateCurrentContext();
             $('#infraPath').val('');
             showStatus(`Successfully loaded infrastructure: ${response.data.name}`, 'success');
         } else {
@@ -109,6 +191,13 @@ $('#installMethod').on('change', function() {
     }
 });
 
+// Template Packs - Browse local button
+$('#browseLocalBtn').on('click', function() {
+    openDirectoryPicker(function(path) {
+        $('#localPath').val(path);
+    });
+});
+
 // Template Packs - Git installation
 $('#installGitBtn').on('click', async function() {
     const gitUrl = $('#gitUrl').val().trim();
@@ -127,7 +216,7 @@ $('#installGitBtn').on('click', async function() {
             $('#gitUrl').val('');
             showStatus(response.data, 'success');
             // Automatically refresh the template packs list
-            $('#loadTemplatesBtn').trigger('click');
+            $('#loadTemplatePacksBtn').trigger('click');
         } else {
             showStatus(`Error: ${response.error}`, 'error');
         }
@@ -155,8 +244,6 @@ $('#installLocalBtn').on('click', async function() {
         if (response.success) {
             $('#localPath').val('');
             showStatus(response.data, 'success');
-            // Note: Local packs are not copied, they are just validated
-            // User needs to add them to template_packs_paths when using them
             showStatus(response.data + ' (Use this path in template_packs_paths to access)', 'info');
         } else {
             showStatus(`Error: ${response.error}`, 'error');
@@ -168,14 +255,14 @@ $('#installLocalBtn').on('click', async function() {
     }
 });
 
-// Templates Tab
-$('#loadTemplatesBtn').on('click', async function() {
+// Load Template Packs
+$('#loadTemplatePacksBtn').on('click', async function() {
     showLoading();
     try {
         const response = await $.get('/api/template-packs');
         if (response.success) {
             templatePacks = response.data;
-            renderTemplatePacks(templatePacks);
+            renderTemplatePacks();
             showStatus('Template packs loaded successfully', 'success');
         } else {
             showStatus(`Error: ${response.error}`, 'error');
@@ -187,413 +274,16 @@ $('#loadTemplatesBtn').on('click', async function() {
     }
 });
 
-function renderTemplatePacks(packs) {
-    const $list = $('#templatePacksList');
-    $list.empty();
-
-    if (packs.length === 0) {
-        $list.html('<p class="text-gray-500">No template packs found</p>');
-        return;
+function updateCurrentContext() {
+    let context = [];
+    if (currentInfrastructure) {
+        context.push(`Infrastructure: ${currentInfrastructure.name}`);
     }
-
-    packs.forEach(pack => {
-        const $packCard = $(`
-            <div class="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
-                <h3 class="text-xl font-semibold mb-2">${pack.name}</h3>
-                ${pack.description ? `<p class="text-gray-600 mb-3">${pack.description}</p>` : ''}
-                <div class="flex items-center justify-between">
-                    <span class="text-sm text-gray-500">${pack.templates.length} template(s)</span>
-                    <button class="view-templates-btn bg-blue-600 text-white px-3 py-1 rounded text-sm hover:bg-blue-700"
-                            data-pack="${pack.name}">
-                        View Templates
-                    </button>
-                </div>
-            </div>
-        `);
-        $list.append($packCard);
-    });
-
-    // Attach event handlers
-    $('.view-templates-btn').on('click', function() {
-        const packName = $(this).data('pack');
-        const pack = templatePacks.find(p => p.name === packName);
-        if (pack) {
-            showTemplatesModal(pack);
-        }
-    });
+    if (currentTemplatePack) {
+        context.push(`Template Pack: ${currentTemplatePack.name}`);
+    }
+    $('#currentContext').text(context.join(' | ') || 'No context');
 }
-
-function showTemplatesModal(pack) {
-    let content = `<h4 class="font-semibold mb-3">Templates in ${pack.name}</h4>`;
-
-    if (pack.templates.length === 0) {
-        content += '<p class="text-gray-500">No templates found in this pack</p>';
-    } else {
-        content += '<div class="space-y-3">';
-        pack.templates.forEach(template => {
-            content += `
-                <div class="border border-gray-200 rounded p-3">
-                    <h5 class="font-semibold">${template.name}</h5>
-                    ${template.description ? `<p class="text-sm text-gray-600 mt-1">${template.description}</p>` : ''}
-                    <div class="mt-2 text-sm">
-                        <span class="bg-blue-100 text-blue-800 px-2 py-1 rounded mr-2">Kind: ${template.kind}</span>
-                        <span class="bg-gray-100 text-gray-800 px-2 py-1 rounded mr-2">API: ${template.api_version}</span>
-                        ${template.environments.length > 0 ? `<span class="bg-green-100 text-green-800 px-2 py-1 rounded">Environments: ${template.environments.join(', ')}</span>` : ''}
-                    </div>
-                    ${template.inputs.length > 0 ? `
-                        <details class="mt-2">
-                            <summary class="text-sm text-blue-600 cursor-pointer">View Inputs (${template.inputs.length})</summary>
-                            <ul class="mt-2 ml-4 text-sm space-y-1">
-                                ${template.inputs.map(input => `
-                                    <li>
-                                        <strong>${input.name}</strong>
-                                        ${input.description ? `: ${input.description}` : ''}
-                                        ${input.default !== null && input.default !== undefined ? ` (default: ${JSON.stringify(input.default)})` : ''}
-                                    </li>
-                                `).join('')}
-                            </ul>
-                        </details>
-                    ` : ''}
-                </div>
-            `;
-        });
-        content += '</div>';
-    }
-
-    showModal(`Template Pack: ${pack.name}`, content);
-}
-
-// Projects Tab
-$('#loadProjectsBtn').on('click', loadProjects);
-$('#projectNameFilter, #projectKindFilter').on('input', loadProjects);
-
-async function loadProjects() {
-    showLoading();
-    try {
-        const nameFilter = $('#projectNameFilter').val();
-        const kindFilter = $('#projectKindFilter').val();
-
-        const params = new URLSearchParams();
-        if (nameFilter) params.append('name', nameFilter);
-        if (kindFilter) params.append('kind', kindFilter);
-
-        const response = await $.get(`/api/projects?${params.toString()}`);
-        if (response.success) {
-            projects = response.data;
-            renderProjects(projects);
-            showStatus('Projects loaded successfully', 'success');
-        } else {
-            showStatus(`Error: ${response.error}`, 'error');
-        }
-    } catch (error) {
-        showStatus(`Failed to load projects: ${error.message}`, 'error');
-    } finally {
-        hideLoading();
-    }
-}
-
-function renderProjects(projects) {
-    const $list = $('#projectsList');
-    $list.empty();
-
-    if (projects.length === 0) {
-        $list.html('<p class="text-gray-500">No projects found</p>');
-        return;
-    }
-
-    projects.forEach(project => {
-        const $projectCard = $(`
-            <div class="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
-                <div class="flex justify-between items-start mb-2">
-                    <div>
-                        <h3 class="text-xl font-semibold">${project.name}</h3>
-                        ${project.description ? `<p class="text-gray-600 mt-1">${project.description}</p>` : ''}
-                    </div>
-                    <span class="bg-purple-100 text-purple-800 px-3 py-1 rounded text-sm">${project.kind}</span>
-                </div>
-                <div class="text-sm text-gray-500 mb-3">
-                    <strong>Path:</strong> ${project.path}
-                </div>
-                ${project.environments.length > 0 ? `
-                    <div class="mb-3">
-                        <strong class="text-sm">Environments:</strong>
-                        <div class="flex flex-wrap gap-2 mt-1">
-                            ${project.environments.map(env => `
-                                <span class="bg-green-100 text-green-800 px-2 py-1 rounded text-sm">${env}</span>
-                            `).join('')}
-                        </div>
-                    </div>
-                ` : ''}
-                <div class="flex gap-2">
-                    <button class="preview-btn bg-blue-600 text-white px-3 py-1 rounded text-sm hover:bg-blue-700"
-                            data-path="${project.path}">
-                        Preview
-                    </button>
-                    <button class="apply-btn bg-green-600 text-white px-3 py-1 rounded text-sm hover:bg-green-700"
-                            data-path="${project.path}">
-                        Apply
-                    </button>
-                    <button class="refresh-btn bg-yellow-600 text-white px-3 py-1 rounded text-sm hover:bg-yellow-700"
-                            data-path="${project.path}">
-                        Refresh
-                    </button>
-                    <button class="destroy-btn bg-red-600 text-white px-3 py-1 rounded text-sm hover:bg-red-700"
-                            data-path="${project.path}">
-                        Destroy
-                    </button>
-                </div>
-            </div>
-        `);
-        $list.append($projectCard);
-    });
-
-    // Attach event handlers
-    $('.preview-btn').on('click', function() {
-        const path = $(this).data('path');
-        executeProjectAction('preview', path);
-    });
-
-    $('.apply-btn').on('click', function() {
-        const path = $(this).data('path');
-        if (confirm('Are you sure you want to apply changes to this project?')) {
-            executeProjectAction('apply', path);
-        }
-    });
-
-    $('.refresh-btn').on('click', function() {
-        const path = $(this).data('path');
-        executeProjectAction('refresh', path);
-    });
-
-    $('.destroy-btn').on('click', function() {
-        const path = $(this).data('path');
-        if (confirm('WARNING: This will destroy all resources! Are you sure?')) {
-            executeProjectAction('destroy', path, true);
-        }
-    });
-}
-
-async function executeProjectAction(action, path, confirmed = false) {
-    showLoading();
-    try {
-        const payload = {
-            path: path,
-            executor_args: []
-        };
-
-        if (action === 'destroy') {
-            payload.yes = confirmed;
-        }
-
-        const response = await $.ajax({
-            url: `/api/${action}`,
-            method: 'POST',
-            contentType: 'application/json',
-            data: JSON.stringify(payload)
-        });
-
-        if (response.success) {
-            showStatus(`${action.charAt(0).toUpperCase() + action.slice(1)} completed successfully`, 'success');
-        } else {
-            showStatus(`Error: ${response.error}`, 'error');
-        }
-    } catch (error) {
-        showStatus(`Failed to execute ${action}: ${error.responseJSON?.error || error.message}`, 'error');
-    } finally {
-        hideLoading();
-    }
-}
-
-// Generate Tab
-$('#genTemplatePack').on('change', async function() {
-    const packName = $(this).val();
-    if (!packName) {
-        $('#genTemplate').prop('disabled', true).html('<option value="">Select a template...</option>');
-        return;
-    }
-
-    showLoading();
-    try {
-        const response = await $.get(`/api/template-packs/${packName}/templates`);
-        if (response.success) {
-            const templates = response.data;
-            let options = '<option value="">Select a template...</option>';
-            templates.forEach(template => {
-                options += `<option value="${template.name}">${template.name}</option>`;
-            });
-            $('#genTemplate').prop('disabled', false).html(options);
-        } else {
-            showStatus(`Error loading templates: ${response.error}`, 'error');
-        }
-    } catch (error) {
-        showStatus(`Failed to load templates: ${error.message}`, 'error');
-    } finally {
-        hideLoading();
-    }
-});
-
-$('#genTemplate').on('change', async function() {
-    const packName = $('#genTemplatePack').val();
-    const templateName = $(this).val();
-
-    if (!packName || !templateName) {
-        $('#genEnvironmentDiv').addClass('hidden');
-        $('#genInputsDiv').empty();
-        return;
-    }
-
-    showLoading();
-    try {
-        const response = await $.get(`/api/template-packs/${packName}/templates/${templateName}`);
-        if (response.success) {
-            const template = response.data;
-
-            // Handle environments
-            if (template.environments && template.environments.length > 0) {
-                $('#genEnvironmentDiv').removeClass('hidden');
-                let envOptions = '<option value="">None</option>';
-                template.environments.forEach(env => {
-                    envOptions += `<option value="${env}">${env}</option>`;
-                });
-                $('#genEnvironment').html(envOptions);
-            } else {
-                $('#genEnvironmentDiv').addClass('hidden');
-            }
-
-            // Render inputs
-            renderGenerateInputs(template.inputs);
-        } else {
-            showStatus(`Error loading template details: ${response.error}`, 'error');
-        }
-    } catch (error) {
-        showStatus(`Failed to load template details: ${error.message}`, 'error');
-    } finally {
-        hideLoading();
-    }
-});
-
-function renderGenerateInputs(inputs) {
-    const $div = $('#genInputsDiv');
-    $div.empty();
-
-    if (inputs.length === 0) {
-        return;
-    }
-
-    $div.append('<h3 class="font-semibold text-lg mt-4 mb-2">Template Inputs</h3>');
-
-    inputs.forEach(input => {
-        if (input.name === 'name' || input.name === '_name') {
-            return; // Skip name inputs as we have a dedicated field
-        }
-
-        let inputHtml = `<div><label class="block text-sm font-medium text-gray-700 mb-2">${input.name}`;
-        if (input.description) {
-            inputHtml += ` <span class="text-gray-500 font-normal">(${input.description})</span>`;
-        }
-        inputHtml += '</label>';
-
-        if (input.enum_values && input.enum_values.length > 0) {
-            // Select input
-            inputHtml += `<select name="${input.name}" class="w-full border border-gray-300 rounded px-4 py-2">`;
-            input.enum_values.forEach(value => {
-                const selected = input.default === value ? 'selected' : '';
-                inputHtml += `<option value="${value}" ${selected}>${value}</option>`;
-            });
-            inputHtml += '</select>';
-        } else if (typeof input.default === 'boolean') {
-            // Checkbox input
-            const checked = input.default ? 'checked' : '';
-            inputHtml += `<input type="checkbox" name="${input.name}" class="rounded" ${checked}>`;
-        } else {
-            // Text/number input
-            const value = input.default !== null && input.default !== undefined ? input.default : '';
-            const type = typeof input.default === 'number' ? 'number' : 'text';
-            inputHtml += `<input type="${type}" name="${input.name}" value="${value}" class="w-full border border-gray-300 rounded px-4 py-2">`;
-        }
-
-        inputHtml += '</div>';
-        $div.append(inputHtml);
-    });
-}
-
-$('#generateForm').on('submit', async function(e) {
-    e.preventDefault();
-
-    const packName = $('#genTemplatePack').val();
-    const templateName = $('#genTemplate').val();
-    const environment = $('#genEnvironment').val();
-    const name = $('#genName').val();
-    const outputDir = $('#genOutputDir').val();
-
-    // Collect inputs
-    const inputs = { name: name };
-    $('#genInputsDiv input, #genInputsDiv select').each(function() {
-        const $input = $(this);
-        const inputName = $input.attr('name');
-        if (inputName) {
-            if ($input.attr('type') === 'checkbox') {
-                inputs[inputName] = $input.is(':checked');
-            } else if ($input.attr('type') === 'number') {
-                inputs[inputName] = parseFloat($input.val()) || 0;
-            } else {
-                inputs[inputName] = $input.val();
-            }
-        }
-    });
-
-    const payload = {
-        template_pack: packName,
-        template: templateName,
-        environment: environment || null,
-        name: name,
-        inputs: inputs,
-        output_dir: outputDir || null
-    };
-
-    showLoading();
-    try {
-        const response = await $.ajax({
-            url: '/api/generate',
-            method: 'POST',
-            contentType: 'application/json',
-            data: JSON.stringify(payload)
-        });
-
-        if (response.success) {
-            showStatus('Files generated successfully!', 'success');
-            $('#generateForm')[0].reset();
-            $('#genTemplate').prop('disabled', true);
-            $('#genEnvironmentDiv').addClass('hidden');
-            $('#genInputsDiv').empty();
-        } else {
-            showStatus(`Error: ${response.error}`, 'error');
-        }
-    } catch (error) {
-        showStatus(`Failed to generate files: ${error.responseJSON?.error || error.message}`, 'error');
-    } finally {
-        hideLoading();
-    }
-});
-
-// Infrastructure Tab
-$('#loadInfrastructureBtn').on('click', async function() {
-    showLoading();
-    try {
-        const response = await $.get('/api/infrastructure');
-        if (response.success) {
-            infrastructure = response.data;
-            renderInfrastructure(infrastructure);
-            showStatus('Infrastructure loaded successfully', 'success');
-        } else {
-            showStatus(`Error: ${response.error}`, 'error');
-        }
-    } catch (error) {
-        showStatus(`Failed to load infrastructure: ${error.message}`, 'error');
-    } finally {
-        hideLoading();
-    }
-});
 
 function renderInfrastructures() {
     const $list = $('#infrastructureList');
@@ -601,31 +291,33 @@ function renderInfrastructures() {
 
     if (infrastructures.length === 0) {
         $list.html('<p class="text-gray-500">No infrastructures loaded. Use the form above to load an infrastructure.</p>');
-        $('#currentInfra').text('No infrastructure loaded');
         return;
-    }
-
-    // Update header with current infrastructure info
-    if (currentInfrastructure) {
-        $('#currentInfra').text(`Current: ${currentInfrastructure.name} (${currentInfrastructure.environments.length} env(s))`);
     }
 
     infrastructures.forEach((infra, index) => {
         const isCurrent = currentInfrastructure && currentInfrastructure.name === infra.name;
         const $infraCard = $(`
-            <div class="border ${isCurrent ? 'border-indigo-400 bg-indigo-50' : 'border-gray-200'} rounded-lg p-4 hover:shadow-md transition-shadow">
+            <div class="border ${isCurrent ? 'border-indigo-400 bg-indigo-50' : 'border-gray-200'} rounded-lg p-4">
                 <div class="flex items-center justify-between mb-2">
                     <h3 class="text-xl font-semibold text-indigo-700">${infra.name}</h3>
-                    ${isCurrent ? '<span class="bg-indigo-600 text-white px-2 py-1 rounded text-xs">Current</span>' : ''}
+                    ${isCurrent ? '<span class="bg-indigo-600 text-white px-2 py-1 rounded text-xs">Active</span>' : ''}
                 </div>
                 ${infra.description ? `<p class="text-gray-600 mb-3">${infra.description}</p>` : ''}
-                <div class="flex items-center justify-between">
-                    <span class="text-sm text-gray-500">${infra.environments.length} environment(s), ${infra.categories.length} categor${infra.categories.length === 1 ? 'y' : 'ies'}</span>
-                    <div class="flex gap-2">
-                        ${!isCurrent ? `<button class="select-infra-btn bg-indigo-600 text-white px-3 py-1 rounded text-sm hover:bg-indigo-700" data-index="${index}">Use</button>` : ''}
-                        <button class="view-infra-btn bg-blue-600 text-white px-3 py-1 rounded text-sm hover:bg-blue-700" data-index="${index}">View Details</button>
-                        <button class="remove-infra-btn bg-red-600 text-white px-3 py-1 rounded text-sm hover:bg-red-700" data-index="${index}">Remove</button>
+                <div class="text-sm text-gray-500 mb-3">
+                    <div class="flex items-center gap-2">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                  d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path>
+                        </svg>
+                        <span class="font-mono text-xs">${infra.path}</span>
                     </div>
+                    <div class="mt-1">${infra.environments.length} environment(s), ${infra.categories.length} ${infra.categories.length === 1 ? 'category' : 'categories'}</div>
+                </div>
+                <div class="flex gap-2 flex-wrap">
+                    ${!isCurrent ? `<button class="select-infra-btn bg-indigo-600 text-white px-3 py-1 rounded text-sm hover:bg-indigo-700" data-index="${index}">Use This</button>` : ''}
+                    <button class="view-infra-btn bg-blue-600 text-white px-3 py-1 rounded text-sm hover:bg-blue-700" data-index="${index}">View Details</button>
+                    <button class="view-projects-btn bg-green-600 text-white px-3 py-1 rounded text-sm hover:bg-green-700" data-index="${index}">View Projects</button>
+                    <button class="remove-infra-btn bg-red-600 text-white px-3 py-1 rounded text-sm hover:bg-red-700" data-index="${index}">Remove</button>
                 </div>
             </div>
         `);
@@ -637,13 +329,20 @@ function renderInfrastructures() {
         const index = parseInt($(this).data('index'));
         currentInfrastructure = infrastructures[index];
         renderInfrastructures();
+        updateCurrentContext();
         showStatus(`Switched to infrastructure: ${currentInfrastructure.name}`, 'success');
     });
 
     $('.view-infra-btn').on('click', function() {
         const index = parseInt($(this).data('index'));
         const infra = infrastructures[index];
-        showInfrastructureModal(infra);
+        showInfrastructureDetails(infra);
+    });
+
+    $('.view-projects-btn').on('click', async function() {
+        const index = parseInt($(this).data('index'));
+        const infra = infrastructures[index];
+        await showProjects(infra);
     });
 
     $('.remove-infra-btn').on('click', function() {
@@ -655,15 +354,21 @@ function renderInfrastructures() {
                 currentInfrastructure = infrastructures.length > 0 ? infrastructures[0] : null;
             }
             renderInfrastructures();
+            updateCurrentContext();
             showStatus(`Removed infrastructure: ${infra.name}`, 'success');
         }
     });
 }
 
-function showInfrastructureModal(infra) {
+function showInfrastructureDetails(infra) {
     let content = `
         <div class="space-y-4">
             ${infra.description ? `<p class="text-gray-700">${infra.description}</p>` : ''}
+
+            <div>
+                <h4 class="font-semibold mb-2">Path</h4>
+                <p class="font-mono text-sm text-gray-600 bg-gray-100 p-2 rounded">${infra.path}</p>
+            </div>
 
             <div>
                 <h4 class="font-semibold mb-2">Environments</h4>
@@ -685,38 +390,6 @@ function showInfrastructureModal(infra) {
         </div>
     `;
     showModal(`Infrastructure: ${infra.name}`, content);
-}
-
-function renderInfrastructure(infra) {
-    const $div = $('#infrastructureDetails');
-    $div.empty();
-
-    let html = `
-        <div class="border border-gray-200 rounded-lg p-4">
-            <h3 class="text-xl font-semibold mb-2">${infra.name}</h3>
-            ${infra.description ? `<p class="text-gray-600 mb-4">${infra.description}</p>` : ''}
-
-            <div class="mb-4">
-                <h4 class="font-semibold mb-2">Environments</h4>
-                <div class="flex flex-wrap gap-2">
-                    ${infra.environments.map(env => `
-                        <span class="bg-green-100 text-green-800 px-3 py-1 rounded">${env}</span>
-                    `).join('')}
-                </div>
-            </div>
-
-            ${infra.categories && infra.categories.length > 0 ? `
-                <div>
-                    <h4 class="font-semibold mb-2">Categories</h4>
-                    <div class="space-y-2">
-                        ${renderCategories(infra.categories)}
-                    </div>
-                </div>
-            ` : ''}
-        </div>
-    `;
-
-    $div.html(html);
 }
 
 function renderCategories(categories, level = 0) {
@@ -741,22 +414,192 @@ function renderCategories(categories, level = 0) {
     return html;
 }
 
-// Load template packs for the generate form on page load
+async function showProjects(infra) {
+    showLoading();
+    try {
+        const params = new URLSearchParams({ path: infra.path });
+        const response = await $.get(`/api/projects?${params.toString()}`);
+
+        if (response.success) {
+            const projects = response.data;
+
+            let content = `
+                <div class="space-y-4">
+                    <p class="text-gray-600">Projects in infrastructure: <strong>${infra.name}</strong></p>
+                    <p class="text-sm text-gray-500 font-mono">${infra.path}</p>
+
+                    ${projects.length === 0 ? `
+                        <p class="text-gray-500 text-center py-8">No projects found in this infrastructure</p>
+                    ` : `
+                        <div class="space-y-3">
+                            ${projects.map(project => `
+                                <div class="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
+                                    <div class="flex items-center justify-between mb-2">
+                                        <h4 class="font-semibold text-lg">${project.name}</h4>
+                                        <span class="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs">${project.kind}</span>
+                                    </div>
+                                    <p class="text-sm text-gray-600 mb-2">${project.path}</p>
+                                    <div class="flex flex-wrap gap-1">
+                                        ${project.environments.map(env => `
+                                            <span class="bg-green-100 text-green-700 px-2 py-1 rounded text-xs">${env}</span>
+                                        `).join('')}
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    `}
+                </div>
+            `;
+            showModal(`Projects in ${infra.name}`, content);
+        } else {
+            showStatus(`Error loading projects: ${response.error}`, 'error');
+        }
+    } catch (error) {
+        showStatus(`Failed to load projects: ${error.message}`, 'error');
+    } finally {
+        hideLoading();
+    }
+}
+
+function renderTemplatePacks() {
+    const $list = $('#templatePacksList');
+    $list.empty();
+
+    if (templatePacks.length === 0) {
+        $list.html('<p class="text-gray-500">No template packs found. Install one using the form above or click Refresh.</p>');
+        return;
+    }
+
+    templatePacks.forEach((pack, index) => {
+        const isCurrent = currentTemplatePack && currentTemplatePack.name === pack.name;
+        const $packCard = $(`
+            <div class="border ${isCurrent ? 'border-purple-400 bg-purple-50' : 'border-gray-200'} rounded-lg p-4">
+                <div class="flex items-center justify-between mb-2">
+                    <h3 class="text-xl font-semibold text-purple-700">${pack.name}</h3>
+                    ${isCurrent ? '<span class="bg-purple-600 text-white px-2 py-1 rounded text-xs">Active</span>' : ''}
+                </div>
+                ${pack.description ? `<p class="text-gray-600 mb-3">${pack.description}</p>` : ''}
+                <div class="flex items-center justify-between">
+                    <span class="text-sm text-gray-500">${pack.templates.length} template(s)</span>
+                    <div class="flex gap-2">
+                        <button class="view-templates-btn bg-purple-600 text-white px-3 py-1 rounded text-sm hover:bg-purple-700"
+                                data-index="${index}">
+                            View Templates & Generate
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `);
+        $list.append($packCard);
+    });
+
+    // Attach event handlers
+    $('.view-templates-btn').on('click', function() {
+        const index = parseInt($(this).data('index'));
+        const pack = templatePacks[index];
+        currentTemplatePack = pack;
+        updateCurrentContext();
+        showTemplatesAndGenerate(pack);
+    });
+}
+
+function showTemplatesAndGenerate(pack) {
+    let content = `
+        <div class="space-y-4">
+            <p class="text-gray-700">${pack.description || ''}</p>
+
+            <div class="bg-purple-50 p-4 rounded-lg border border-purple-200">
+                <h4 class="font-semibold text-purple-800 mb-2">Templates in this pack (${pack.templates.length})</h4>
+                ${pack.templates.length === 0 ? `
+                    <p class="text-gray-500">No templates found in this pack</p>
+                ` : `
+                    <div class="space-y-3">
+                        ${pack.templates.map(template => `
+                            <div class="bg-white border border-gray-200 rounded p-3">
+                                <div class="flex items-center justify-between mb-2">
+                                    <h5 class="font-semibold">${template.name}</h5>
+                                    <span class="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs">${template.kind}</span>
+                                </div>
+                                ${template.description ? `<p class="text-sm text-gray-600 mb-2">${template.description}</p>` : ''}
+                                <div class="text-xs text-gray-500 mb-2">API: ${template.api_version}</div>
+                                ${template.environments.length > 0 ? `
+                                    <div class="text-xs text-gray-600 mb-2">
+                                        Environments: ${template.environments.join(', ')}
+                                    </div>
+                                ` : ''}
+                                ${template.inputs.length > 0 ? `
+                                    <details class="mt-2">
+                                        <summary class="text-sm text-blue-600 cursor-pointer">View Inputs (${template.inputs.length})</summary>
+                                        <ul class="mt-2 ml-4 text-sm space-y-1">
+                                            ${template.inputs.map(input => `
+                                                <li>
+                                                    <strong>${input.name}</strong>
+                                                    ${input.description ? `: ${input.description}` : ''}
+                                                    ${input.default !== null && input.default !== undefined ? ` (default: ${JSON.stringify(input.default)})` : ''}
+                                                </li>
+                                            `).join('')}
+                                        </ul>
+                                    </details>
+                                ` : ''}
+                                <div class="mt-3">
+                                    <button class="generate-btn bg-green-600 text-white px-4 py-2 rounded text-sm hover:bg-green-700"
+                                            data-pack="${pack.name}" data-template="${template.name}">
+                                        Generate from this Template
+                                    </button>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                `}
+            </div>
+        </div>
+    `;
+
+    showModal(`Template Pack: ${pack.name}`, content);
+
+    // Attach event handlers for generate buttons
+    $('.generate-btn').on('click', async function() {
+        const packName = $(this).data('pack');
+        const templateName = $(this).data('template');
+        await generateFromTemplate(packName, templateName);
+    });
+}
+
+async function generateFromTemplate(packName, templateName) {
+    const outputDir = prompt(`Enter output directory for generated files:`, './output');
+    if (!outputDir) return;
+
+    hideModal();
+    showLoading();
+
+    try {
+        const response = await $.post('/api/generate', {
+            template_pack: packName,
+            template: templateName,
+            environment: null,
+            name: 'generated',
+            inputs: {},
+            output_dir: outputDir
+        });
+
+        if (response.success) {
+            showStatus(`Successfully generated files to ${outputDir}`, 'success');
+        } else {
+            showStatus(`Error: ${response.error}`, 'error');
+        }
+    } catch (error) {
+        showStatus(`Failed to generate: ${error.message}`, 'error');
+    } finally {
+        hideLoading();
+    }
+}
+
+// Initialize on page load
 $(document).ready(async function() {
     // Initialize infrastructure list
     renderInfrastructures();
+    updateCurrentContext();
 
-    try {
-        const response = await $.get('/api/template-packs');
-        if (response.success) {
-            const packs = response.data;
-            let options = '<option value="">Select a template pack...</option>';
-            packs.forEach(pack => {
-                options += `<option value="${pack.name}">${pack.name}</option>`;
-            });
-            $('#genTemplatePack').html(options);
-        }
-    } catch (error) {
-        console.error('Failed to load template packs for generate form:', error);
-    }
+    // Load template packs automatically
+    $('#loadTemplatePacksBtn').trigger('click');
 });
