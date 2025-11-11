@@ -8,7 +8,21 @@
     class PmpQuery {
         constructor(selector) {
             if (typeof selector === 'string') {
-                this.elements = Array.from(document.querySelectorAll(selector));
+                // Check if it's HTML (starts with '<')
+                if (selector.trim().startsWith('<')) {
+                    // Create element from HTML string
+                    const template = document.createElement('template');
+                    template.innerHTML = selector.trim();
+                    this.elements = Array.from(template.content.children);
+                } else {
+                    // It's a CSS selector
+                    try {
+                        this.elements = Array.from(document.querySelectorAll(selector));
+                    } catch (e) {
+                        console.error('Invalid selector:', selector, e);
+                        this.elements = [];
+                    }
+                }
             } else if (selector instanceof Element) {
                 this.elements = [selector];
             } else if (selector instanceof NodeList || Array.isArray(selector)) {
