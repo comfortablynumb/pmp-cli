@@ -559,19 +559,19 @@ async function showProjects(infra) {
                                     </div>
                                     <div class="flex flex-wrap gap-2">
                                         <button class="project-preview-btn bg-blue-500 text-white px-2 py-1 rounded text-xs hover:bg-blue-600"
-                                                data-index="${idx}" data-path="${project.path}">
+                                                data-index="${idx}" data-path="${project.path}" data-environments='${JSON.stringify(project.environments)}'>
                                             Preview
                                         </button>
                                         <button class="project-apply-btn bg-green-600 text-white px-2 py-1 rounded text-xs hover:bg-green-700"
-                                                data-index="${idx}" data-path="${project.path}">
+                                                data-index="${idx}" data-path="${project.path}" data-environments='${JSON.stringify(project.environments)}'>
                                             Apply
                                         </button>
                                         <button class="project-refresh-btn bg-yellow-600 text-white px-2 py-1 rounded text-xs hover:bg-yellow-700"
-                                                data-index="${idx}" data-path="${project.path}">
+                                                data-index="${idx}" data-path="${project.path}" data-environments='${JSON.stringify(project.environments)}'>
                                             Refresh
                                         </button>
                                         <button class="project-destroy-btn bg-red-600 text-white px-2 py-1 rounded text-xs hover:bg-red-700"
-                                                data-index="${idx}" data-path="${project.path}">
+                                                data-index="${idx}" data-path="${project.path}" data-environments='${JSON.stringify(project.environments)}'>
                                             Destroy
                                         </button>
                                     </div>
@@ -586,25 +586,29 @@ async function showProjects(infra) {
             // Attach event handlers for project command buttons
             $('.project-preview-btn').on('click', async function() {
                 const path = $(this).data('path');
-                await executeProjectCommand('preview', path, 'Preview');
+                const environments = JSON.parse($(this).attr('data-environments') || '[]');
+                await executeProjectCommand('preview', path, environments, 'Preview');
             });
 
             $('.project-apply-btn').on('click', async function() {
                 const path = $(this).data('path');
+                const environments = JSON.parse($(this).attr('data-environments') || '[]');
                 if (confirm('Apply changes to this project?')) {
-                    await executeProjectCommand('apply', path, 'Apply');
+                    await executeProjectCommand('apply', path, environments, 'Apply');
                 }
             });
 
             $('.project-refresh-btn').on('click', async function() {
                 const path = $(this).data('path');
-                await executeProjectCommand('refresh', path, 'Refresh');
+                const environments = JSON.parse($(this).attr('data-environments') || '[]');
+                await executeProjectCommand('refresh', path, environments, 'Refresh');
             });
 
             $('.project-destroy-btn').on('click', async function() {
                 const path = $(this).data('path');
+                const environments = JSON.parse($(this).attr('data-environments') || '[]');
                 if (confirm('⚠️ WARNING: This will destroy all resources in this project. Are you sure?')) {
-                    await executeProjectCommand('destroy', path, 'Destroy');
+                    await executeProjectCommand('destroy', path, environments, 'Destroy');
                 }
             });
 
@@ -651,19 +655,49 @@ async function showProjects(infra) {
     }
 }
 
-async function executeProjectCommand(command, path, displayName) {
-    showConsole(`${displayName}: ${path}`, `Executing ${command}...`);
+async function executeProjectCommand(command, projectPath, environments, displayName) {
+    // Select environment
+    let selectedEnv = null;
+
+    if (!environments || environments.length === 0) {
+        showStatus('No environments found for this project', 'error');
+        return;
+    } else if (environments.length === 1) {
+        // Auto-select if only one environment
+        selectedEnv = environments[0];
+    } else {
+        // Prompt user to select environment
+        const envList = environments.map((env, idx) => `${idx + 1}. ${env}`).join('\n');
+        const selection = prompt(`Select environment:\n${envList}\n\nEnter number (1-${environments.length}):`);
+
+        if (!selection) {
+            return; // User cancelled
+        }
+
+        const envIndex = parseInt(selection) - 1;
+        if (envIndex < 0 || envIndex >= environments.length) {
+            showStatus('Invalid environment selection', 'error');
+            return;
+        }
+
+        selectedEnv = environments[envIndex];
+    }
+
+    // Build environment path
+    const envPath = `${projectPath}/environments/${selectedEnv}`;
+
+    showConsole(`${displayName}: ${envPath}`, `Executing ${command}...`);
 
     try {
         let endpoint = `/api/${command}`;
-        let requestBody = { path: path, executor_args: [] };
+        let requestBody = { path: envPath, executor_args: [] };
 
         // For destroy, add yes flag
         if (command === 'destroy') {
             requestBody.yes = true;
         }
 
-        appendConsoleOutput(`> ${command} ${path}\n`);
+        appendConsoleOutput(`> ${command} ${envPath}\n`);
 
         const response = await $.post(endpoint, requestBody);
 
