@@ -1,8 +1,8 @@
+use crate::template::metadata::AddedPlugin;
 use anyhow::{Context, Result};
 use serde_json::Value;
+use sha1::{Digest, Sha1};
 use std::collections::HashMap;
-use sha1::{Sha1, Digest};
-use crate::template::metadata::AddedPlugin;
 
 /// Calculate a unique table name for PostgreSQL backend based on project metadata
 /// Format: tf_{sha1_hex_lowercase}
@@ -14,7 +14,10 @@ fn calculate_table_name(
     project_name: &str,
 ) -> String {
     // Create the input string for hashing
-    let input = format!("{}_{}__{}__{}", api_version, kind, environment, project_name);
+    let input = format!(
+        "{}_{}__{}__{}",
+        api_version, kind, environment, project_name
+    );
 
     // Calculate SHA1 hash
     let mut hasher = Sha1::new();
@@ -68,12 +71,12 @@ pub fn generate_backend_config(
         .collect();
 
     // For PostgreSQL backend, auto-inject table_name if project metadata is provided
-    if backend_type == "pg" {
-        if let (Some(api_ver), Some(knd), Some(env), Some(proj)) =
-            (api_version, kind, environment, project_name) {
-            let table_name = calculate_table_name(api_ver, knd, env, proj);
-            params_map.insert("table_name".to_string(), Value::String(table_name));
-        }
+    if backend_type == "pg"
+        && let (Some(api_ver), Some(knd), Some(env), Some(proj)) =
+            (api_version, kind, environment, project_name)
+    {
+        let table_name = calculate_table_name(api_ver, knd, env, proj);
+        params_map.insert("table_name".to_string(), Value::String(table_name));
     }
 
     // Sort parameters for consistent output
@@ -155,10 +158,7 @@ fn format_hcl_value(value: &Value) -> Result<String> {
         Value::Number(n) => Ok(n.to_string()),
         Value::Bool(b) => Ok(b.to_string()),
         Value::Array(arr) => {
-            let items: Result<Vec<String>> = arr
-                .iter()
-                .map(|v| format_hcl_value(v))
-                .collect();
+            let items: Result<Vec<String>> = arr.iter().map(format_hcl_value).collect();
             Ok(format!("[{}]", items?.join(", ")))
         }
         Value::Object(obj) => {
@@ -224,7 +224,7 @@ pub fn generate_plugin_override_variables(plugins: &[AddedPlugin]) -> String {
         };
 
         // Generate variables for each required field
-        for (field_name, _field_config) in &remote_state.required_fields {
+        for field_name in remote_state.required_fields.keys() {
             let var_name = format!(
                 "pmp_plugin_{}_{}_{}_{}",
                 plugin.template_pack_name.to_lowercase(),
@@ -234,7 +234,9 @@ pub fn generate_plugin_override_variables(plugins: &[AddedPlugin]) -> String {
             );
 
             if !has_variables {
-                hcl.push_str("\n# Plugin override variables (set via TF_VAR_* environment variables)\n");
+                hcl.push_str(
+                    "\n# Plugin override variables (set via TF_VAR_* environment variables)\n",
+                );
                 has_variables = true;
             }
 
@@ -276,14 +278,20 @@ pub fn generate_module_blocks(plugins: &[AddedPlugin]) -> String {
         let (module_name, source_path) = if let Some(ref_project) = &plugin.reference_project {
             // Plugin references another project - use reference project name in path
             (
-                format!("{}_{}_{}", plugin.template_pack_name, plugin.name, ref_project.name),
-                format!("./modules/{}/{}/{}", plugin.template_pack_name, plugin.name, ref_project.name)
+                format!(
+                    "{}_{}_{}",
+                    plugin.template_pack_name, plugin.name, ref_project.name
+                ),
+                format!(
+                    "./modules/{}/{}/{}",
+                    plugin.template_pack_name, plugin.name, ref_project.name
+                ),
             )
         } else {
             // Plugin has no reference - no project name suffix needed
             (
                 format!("{}_{}", plugin.template_pack_name, plugin.name),
-                format!("./modules/{}/{}", plugin.template_pack_name, plugin.name)
+                format!("./modules/{}/{}", plugin.template_pack_name, plugin.name),
             )
         };
 
@@ -292,10 +300,9 @@ pub fn generate_module_blocks(plugins: &[AddedPlugin]) -> String {
 
         // If plugin has a reference project, pass parameters from remote state
         if let Some(ref_project) = &plugin.reference_project {
-            let data_source_name = format!("plugin_{}_{}_{}",
-                plugin.template_pack_name,
-                plugin.name,
-                ref_project.name
+            let data_source_name = format!(
+                "plugin_{}_{}_{}",
+                plugin.template_pack_name, plugin.name, ref_project.name
             );
 
             // Get plugin spec from stored data
@@ -390,10 +397,9 @@ pub fn generate_data_source_backends(
         let reference = plugin.reference_project.as_ref().unwrap();
 
         // Data source name: plugin_{template_pack_name}_{plugin_name}_{reference_project_name}
-        let data_source_name = format!("plugin_{}_{}_{}",
-            plugin.template_pack_name,
-            plugin.name,
-            reference.name
+        let data_source_name = format!(
+            "plugin_{}_{}_{}",
+            plugin.template_pack_name, plugin.name, reference.name
         );
 
         // Get backend type from executor config
@@ -413,7 +419,10 @@ pub fn generate_data_source_backends(
         )?;
 
         // Generate data source block
-        hcl.push_str(&format!("data \"terraform_remote_state\" \"{}\" {{\n", data_source_name));
+        hcl.push_str(&format!(
+            "data \"terraform_remote_state\" \"{}\" {{\n",
+            data_source_name
+        ));
         hcl.push_str(&format!("  backend = \"{}\"\n", backend_type));
 
         if !backend_config_hcl.is_empty() {
@@ -468,7 +477,10 @@ pub fn generate_template_data_source_backends(
         )?;
 
         // Generate data source block
-        hcl.push_str(&format!("data \"terraform_remote_state\" \"{}\" {{\n", data_source_name));
+        hcl.push_str(&format!(
+            "data \"terraform_remote_state\" \"{}\" {{\n",
+            data_source_name
+        ));
         hcl.push_str(&format!("  backend = \"{}\"\n", backend_type));
 
         if !backend_config_hcl.is_empty() {
@@ -527,11 +539,15 @@ fn generate_backend_config_map(
     }
 
     // Auto-inject table_name for PostgreSQL backends
-    if backend_type == "pg" {
-        if let (Some(api), Some(k), Some(env), Some(name)) = (api_version, kind, environment, project_name) {
-            let table_name = calculate_table_name(api, k, env, name);
-            config_lines.push(format!("    table_name = \"{}\"", escape_hcl_string(&table_name)));
-        }
+    if backend_type == "pg"
+        && let (Some(api), Some(k), Some(env), Some(name)) =
+            (api_version, kind, environment, project_name)
+    {
+        let table_name = calculate_table_name(api, k, env, name);
+        config_lines.push(format!(
+            "    table_name = \"{}\"",
+            escape_hcl_string(&table_name)
+        ));
     }
 
     Ok(config_lines.join("\n") + "\n")
@@ -642,8 +658,9 @@ mod tests {
             Some("pmp.io/v1"),
             Some("Database"),
             Some("development"),
-            Some("my-db")
-        ).unwrap();
+            Some("my-db"),
+        )
+        .unwrap();
 
         assert!(result.contains("backend \"pg\" {"));
         assert!(result.contains("conn_str = \"postgres://user:pass@localhost/db\""));

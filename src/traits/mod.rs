@@ -1,18 +1,18 @@
-pub mod filesystem;
-pub mod user_input;
-pub mod output;
 pub mod command;
+pub mod filesystem;
+pub mod output;
+pub mod user_input;
 
-pub use filesystem::{FileSystem, RealFileSystem};
-pub use user_input::{UserInput, InquireUserInput};
-pub use output::{Output, TerminalOutput};
 pub use command::{CommandExecutor, RealCommandExecutor};
+pub use filesystem::{FileSystem, RealFileSystem};
+pub use output::{Output, TerminalOutput};
+pub use user_input::{InquireUserInput, UserInput};
 
+#[cfg(test)]
+pub use command::MockCommandExecutor;
 #[cfg(test)]
 pub use filesystem::MockFileSystem;
 #[cfg(test)]
-pub use user_input::MockUserInput;
-#[cfg(test)]
 pub use output::MockOutput;
 #[cfg(test)]
-pub use command::MockCommandExecutor;
+pub use user_input::MockUserInput;

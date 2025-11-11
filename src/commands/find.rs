@@ -38,13 +38,12 @@ impl FindCommand {
     }
 
     /// Interactive search - ask user for search type and criteria
-    fn interactive_search<'a>(_ctx: &crate::context::Context, manager: &'a CollectionManager) -> Result<Vec<&'a ProjectReference>> {
+    fn interactive_search<'a>(
+        _ctx: &crate::context::Context,
+        manager: &'a CollectionManager,
+    ) -> Result<Vec<&'a ProjectReference>> {
         // Ask user what type of search they want to perform
-        let search_type_options = vec![
-            "Search by name",
-            "Search by kind",
-            "Show all projects"
-        ];
+        let search_type_options = vec!["Search by name", "Search by kind", "Show all projects"];
         let search_type = Select::new("How would you like to search?", search_type_options)
             .prompt()
             .context("Failed to select search type")?;
@@ -68,9 +67,13 @@ impl FindCommand {
     }
 
     /// Display the search results
-    fn display_results(ctx: &crate::context::Context, manager: &CollectionManager, projects: &[&ProjectReference]) -> Result<()> {
+    fn display_results(
+        ctx: &crate::context::Context,
+        manager: &CollectionManager,
+        projects: &[&ProjectReference],
+    ) -> Result<()> {
         use crate::collection::CollectionDiscovery;
-        use crate::template::{ProjectResource, DynamicProjectEnvironmentResource};
+        use crate::template::{DynamicProjectEnvironmentResource, ProjectResource};
 
         if projects.is_empty() {
             output::warning("No projects found.");
@@ -94,11 +97,14 @@ impl FindCommand {
                 .map(|p| format!("{} ({})", p.name, p.kind))
                 .collect();
 
-            let selected = Select::new("Select a project to view details:", project_options.clone())
-                .prompt()
-                .context("Failed to select project")?;
+            let selected =
+                Select::new("Select a project to view details:", project_options.clone())
+                    .prompt()
+                    .context("Failed to select project")?;
 
-            let index = project_options.iter().position(|opt| opt == &selected)
+            let index = project_options
+                .iter()
+                .position(|opt| opt == &selected)
                 .context("Project not found")?;
 
             sorted_projects[index]
@@ -168,7 +174,7 @@ impl FindCommand {
         }
         output::key_value(
             "Resource",
-            &format!("{}/{}", env_resource.api_version, env_resource.kind)
+            &format!("{}/{}", env_resource.api_version, env_resource.kind),
         );
         output::key_value("Executor", &env_resource.spec.executor.name);
         output::key_value("Environment path", &env_path.display().to_string());

@@ -1,5 +1,8 @@
 use crate::executor::{DefaultExecutorRegistry, ExecutorRegistry};
-use crate::traits::{FileSystem, Output, RealFileSystem, TerminalOutput, UserInput, InquireUserInput, CommandExecutor, RealCommandExecutor};
+use crate::traits::{
+    CommandExecutor, FileSystem, InquireUserInput, Output, RealCommandExecutor, RealFileSystem,
+    TerminalOutput, UserInput,
+};
 #[cfg(test)]
 use crate::traits::{MockCommandExecutor, MockFileSystem, MockOutput, MockUserInput};
 use std::sync::Arc;

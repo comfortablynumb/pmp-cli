@@ -1,7 +1,7 @@
 use crate::collection::{CollectionDiscovery, CollectionManager};
 use crate::executor::{Executor, ExecutorConfig, OpenTofuExecutor};
 use crate::hooks::HooksRunner;
-use crate::template::{ProjectResource, DynamicProjectEnvironmentResource};
+use crate::template::{DynamicProjectEnvironmentResource, ProjectResource};
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 
@@ -10,7 +10,11 @@ pub struct ApplyCommand;
 
 impl ApplyCommand {
     /// Execute the apply command
-    pub fn execute(ctx: &crate::context::Context, project_path: Option<&str>, extra_args: &[String]) -> Result<()> {
+    pub fn execute(
+        ctx: &crate::context::Context,
+        project_path: Option<&str>,
+        extra_args: &[String],
+    ) -> Result<()> {
         // Determine working directory
         let work_dir = if let Some(path) = project_path {
             PathBuf::from(path)
@@ -19,7 +23,8 @@ impl ApplyCommand {
         };
 
         // Detect context and get environment path
-        let (env_path, project_name, env_name) = Self::detect_and_select_environment(ctx, &work_dir)?;
+        let (env_path, project_name, env_name) =
+            Self::detect_and_select_environment(ctx, &work_dir)?;
 
         // Load environment resource
         let env_file = env_path.join(".pmp.environment.yaml");
@@ -54,7 +59,10 @@ impl ApplyCommand {
 
         // Check if executor is installed
         ctx.output.subsection("Prerequisites");
-        ctx.output.dimmed(&format!("Checking if {} is installed...", executor.get_name()));
+        ctx.output.dimmed(&format!(
+            "Checking if {} is installed...",
+            executor.get_name()
+        ));
 
         if !executor.check_installed()? {
             anyhow::bail!(
@@ -66,7 +74,8 @@ impl ApplyCommand {
         ctx.output.status_check(executor.get_name(), true);
 
         // Convert env_path to string for executor
-        let env_dir_str = env_path.to_str()
+        let env_dir_str = env_path
+            .to_str()
             .context("Failed to convert environment path to string")?;
 
         // Run pre-apply hooks
@@ -76,22 +85,26 @@ impl ApplyCommand {
 
         // Initialize executor
         ctx.output.subsection("Initialization");
-        ctx.output.dimmed(&format!("Initializing {}...", executor.get_name()));
+        ctx.output
+            .dimmed(&format!("Initializing {}...", executor.get_name()));
         let init_output = executor.init(env_dir_str)?;
 
         if !init_output.status.success() {
             // Display captured stdout and stderr before failing
-            if !init_output.stdout.is_empty() {
-                if let Ok(stdout_str) = String::from_utf8(init_output.stdout.clone()) {
-                    ctx.output.error(&stdout_str);
-                }
+            if !init_output.stdout.is_empty()
+                && let Ok(stdout_str) = String::from_utf8(init_output.stdout.clone())
+            {
+                ctx.output.error(&stdout_str);
             }
-            if !init_output.stderr.is_empty() {
-                if let Ok(stderr_str) = String::from_utf8(init_output.stderr.clone()) {
-                    ctx.output.error(&stderr_str);
-                }
+            if !init_output.stderr.is_empty()
+                && let Ok(stderr_str) = String::from_utf8(init_output.stderr.clone())
+            {
+                ctx.output.error(&stderr_str);
             }
-            anyhow::bail!("Initialization failed with exit code: {:?}", init_output.status.code());
+            anyhow::bail!(
+                "Initialization failed with exit code: {:?}",
+                init_output.status.code()
+            );
         }
 
         ctx.output.success("Initialization completed");
@@ -106,7 +119,8 @@ impl ApplyCommand {
 
         // Run apply
         ctx.output.subsection("Running Apply");
-        ctx.output.dimmed(&format!("Executing {} apply...", executor.get_name()));
+        ctx.output
+            .dimmed(&format!("Executing {} apply...", executor.get_name()));
         executor.apply(&execution_config, env_dir_str, extra_args)?;
 
         // Run post-apply hooks
@@ -122,7 +136,10 @@ impl ApplyCommand {
 
     /// Detect context and select project/environment
     /// Returns: (environment_path, project_name, environment_name)
-    fn detect_and_select_environment(ctx: &crate::context::Context, work_dir: &Path) -> Result<(PathBuf, String, String)> {
+    fn detect_and_select_environment(
+        ctx: &crate::context::Context,
+        work_dir: &Path,
+    ) -> Result<(PathBuf, String, String)> {
         // Check if we're in an environment directory
         if let Some(env_info) = Self::check_in_environment(ctx, work_dir)? {
             return Ok(env_info);
@@ -140,7 +157,10 @@ impl ApplyCommand {
     }
 
     /// Check if we're inside an environment directory
-    fn check_in_environment(ctx: &crate::context::Context, dir: &Path) -> Result<Option<(PathBuf, String, String)>> {
+    fn check_in_environment(
+        ctx: &crate::context::Context,
+        dir: &Path,
+    ) -> Result<Option<(PathBuf, String, String)>> {
         let env_file = dir.join(".pmp.environment.yaml");
 
         if ctx.fs.exists(&env_file) {
@@ -155,7 +175,10 @@ impl ApplyCommand {
     }
 
     /// Check if we're inside a project directory (but not in an environment)
-    fn check_in_project(ctx: &crate::context::Context, dir: &Path) -> Result<Option<(PathBuf, String)>> {
+    fn check_in_project(
+        ctx: &crate::context::Context,
+        dir: &Path,
+    ) -> Result<Option<(PathBuf, String)>> {
         let project_file = dir.join(".pmp.project.yaml");
 
         if ctx.fs.exists(&project_file) {
@@ -180,16 +203,19 @@ impl ApplyCommand {
             return Ok(environments[0].clone());
         }
 
-        let selected = ctx.input.select("Select an environment:", environments)
+        let selected = ctx
+            .input
+            .select("Select an environment:", environments)
             .context("Failed to select environment")?;
 
         Ok(selected)
     }
 
     /// Select project and environment using find/search UI
-    fn select_project_and_environment(ctx: &crate::context::Context) -> Result<(PathBuf, String, String)> {
-        let manager = CollectionManager::load(ctx)
-            .context("Failed to load collection")?;
+    fn select_project_and_environment(
+        ctx: &crate::context::Context,
+    ) -> Result<(PathBuf, String, String)> {
+        let manager = CollectionManager::load(ctx).context("Failed to load collection")?;
 
         let all_projects = manager.get_all_projects();
 
@@ -207,10 +233,14 @@ impl ApplyCommand {
             .map(|p| format!("{} ({})", p.name, p.kind))
             .collect();
 
-        let selected_project_display = ctx.input.select("Select a project:", project_options.clone())
+        let selected_project_display = ctx
+            .input
+            .select("Select a project:", project_options.clone())
             .context("Failed to select project")?;
 
-        let project_index = project_options.iter().position(|opt| opt == &selected_project_display)
+        let project_index = project_options
+            .iter()
+            .position(|opt| opt == &selected_project_display)
             .context("Project not found")?;
 
         let selected_project = sorted_projects[project_index];

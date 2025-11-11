@@ -1,10 +1,10 @@
 use anyhow::{Context, Result};
 use axum::{
+    Router,
     extract::{Json, Path, Query, State},
     http::StatusCode,
     response::{Html, IntoResponse, Response},
     routing::{get, post},
-    Router,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -132,7 +132,11 @@ struct CategoryTemplateRef {
 
 impl UiCommand {
     /// Execute the UI command
-    pub fn execute(ctx: &crate::context::Context, port: Option<u16>, host: Option<String>) -> Result<()> {
+    pub fn execute(
+        ctx: &crate::context::Context,
+        port: Option<u16>,
+        host: Option<String>,
+    ) -> Result<()> {
         // Print startup message
         ctx.output.section("PMP Web UI");
         ctx.output.dimmed("Starting HTTP server...");
@@ -156,7 +160,10 @@ impl UiCommand {
             // API routes
             .route("/api/template-packs", get(list_template_packs))
             .route("/api/template-packs/:pack/templates", get(list_templates))
-            .route("/api/template-packs/:pack/templates/:template", get(get_template_details))
+            .route(
+                "/api/template-packs/:pack/templates/:template",
+                get(get_template_details),
+            )
             .route("/api/infrastructure", get(get_infrastructure))
             .route("/api/projects", get(list_projects))
             .route("/api/projects/create", post(create_project))
@@ -175,7 +182,8 @@ impl UiCommand {
             .with_state(state);
 
         ctx.output.blank();
-        ctx.output.success(&format!("Server started at http://{}:{}", host, port));
+        ctx.output
+            .success(&format!("Server started at http://{}:{}", host, port));
         ctx.output.dimmed("Press Ctrl+C to stop");
         ctx.output.blank();
 
@@ -207,30 +215,24 @@ async fn serve_index() -> Html<&'static str> {
 
 async fn serve_static(Path(path): Path<String>) -> Response {
     match path.as_str() {
-        "tailwind.css" => {
-            (
-                StatusCode::OK,
-                [("content-type", "text/css")],
-                include_str!("../ui/tailwind.css"),
-            )
-                .into_response()
-        }
-        "jquery.js" => {
-            (
-                StatusCode::OK,
-                [("content-type", "application/javascript")],
-                include_str!("../ui/jquery.js"),
-            )
-                .into_response()
-        }
-        "app.js" => {
-            (
-                StatusCode::OK,
-                [("content-type", "application/javascript")],
-                include_str!("../ui/app.js"),
-            )
-                .into_response()
-        }
+        "tailwind.css" => (
+            StatusCode::OK,
+            [("content-type", "text/css")],
+            include_str!("../ui/tailwind.css"),
+        )
+            .into_response(),
+        "jquery.js" => (
+            StatusCode::OK,
+            [("content-type", "application/javascript")],
+            include_str!("../ui/jquery.js"),
+        )
+            .into_response(),
+        "app.js" => (
+            StatusCode::OK,
+            [("content-type", "application/javascript")],
+            include_str!("../ui/app.js"),
+        )
+            .into_response(),
         _ => (StatusCode::NOT_FOUND, "Not found").into_response(),
     }
 }
@@ -263,11 +265,12 @@ async fn list_template_packs(
             let mut pack_infos = Vec::new();
             for pack in packs {
                 // Discover templates in this pack
-                let templates_result = crate::template::TemplateDiscovery::discover_templates_in_pack(
-                    &*state.ctx.fs,
-                    &*state.ctx.output,
-                    &pack.path,
-                );
+                let templates_result =
+                    crate::template::TemplateDiscovery::discover_templates_in_pack(
+                        &*state.ctx.fs,
+                        &*state.ctx.output,
+                        &pack.path,
+                    );
 
                 let templates = match templates_result {
                     Ok(tmpl) => tmpl
@@ -330,11 +333,12 @@ async fn list_templates(
     let custom_paths_refs: Vec<&str> = custom_paths.iter().map(|s| s.as_str()).collect();
 
     // Discover template packs and find the requested one
-    let packs_result = crate::template::TemplateDiscovery::discover_template_packs_with_custom_paths(
-        &*state.ctx.fs,
-        &*state.ctx.output,
-        &custom_paths_refs,
-    );
+    let packs_result =
+        crate::template::TemplateDiscovery::discover_template_packs_with_custom_paths(
+            &*state.ctx.fs,
+            &*state.ctx.output,
+            &custom_paths_refs,
+        );
 
     match packs_result {
         Ok(packs) => {
@@ -344,11 +348,12 @@ async fn list_templates(
 
             match pack {
                 Some(p) => {
-                    let templates_result = crate::template::TemplateDiscovery::discover_templates_in_pack(
-                        &*state.ctx.fs,
-                        &*state.ctx.output,
-                        &p.path,
-                    );
+                    let templates_result =
+                        crate::template::TemplateDiscovery::discover_templates_in_pack(
+                            &*state.ctx.fs,
+                            &*state.ctx.output,
+                            &p.path,
+                        );
 
                     match templates_result {
                         Ok(templates) => {
@@ -371,7 +376,13 @@ async fn list_templates(
                                             enum_values: i.enum_values.clone(),
                                         })
                                         .collect(),
-                                    environments: t.resource.spec.environments.keys().cloned().collect(),
+                                    environments: t
+                                        .resource
+                                        .spec
+                                        .environments
+                                        .keys()
+                                        .cloned()
+                                        .collect(),
                                 })
                                 .collect();
 
@@ -417,11 +428,12 @@ async fn get_template_details(
     let custom_paths_refs: Vec<&str> = custom_paths.iter().map(|s| s.as_str()).collect();
 
     // Discover template packs and find the requested one
-    let packs_result = crate::template::TemplateDiscovery::discover_template_packs_with_custom_paths(
-        &*state.ctx.fs,
-        &*state.ctx.output,
-        &custom_paths_refs,
-    );
+    let packs_result =
+        crate::template::TemplateDiscovery::discover_template_packs_with_custom_paths(
+            &*state.ctx.fs,
+            &*state.ctx.output,
+            &custom_paths_refs,
+        );
 
     match packs_result {
         Ok(packs) => {
@@ -431,11 +443,12 @@ async fn get_template_details(
 
             match pack {
                 Some(p) => {
-                    let templates_result = crate::template::TemplateDiscovery::discover_templates_in_pack(
-                        &*state.ctx.fs,
-                        &*state.ctx.output,
-                        &p.path,
-                    );
+                    let templates_result =
+                        crate::template::TemplateDiscovery::discover_templates_in_pack(
+                            &*state.ctx.fs,
+                            &*state.ctx.output,
+                            &p.path,
+                        );
 
                     match templates_result {
                         Ok(templates) => {
@@ -462,7 +475,13 @@ async fn get_template_details(
                                                 enum_values: i.enum_values.clone(),
                                             })
                                             .collect(),
-                                        environments: t.resource.spec.environments.keys().cloned().collect(),
+                                        environments: t
+                                            .resource
+                                            .spec
+                                            .environments
+                                            .keys()
+                                            .cloned()
+                                            .collect(),
                                     };
 
                                     Json(ApiResponse {
@@ -525,14 +544,11 @@ async fn get_infrastructure(
         });
     }
 
-    match crate::template::metadata::InfrastructureResource::from_file(&*state.ctx.fs, &infra_path) {
+    match crate::template::metadata::InfrastructureResource::from_file(&*state.ctx.fs, &infra_path)
+    {
         Ok(infra) => {
-            let categories: Vec<CategoryInfo> = infra
-                .spec
-                .categories
-                .iter()
-                .map(|c| convert_category(c))
-                .collect();
+            let categories: Vec<CategoryInfo> =
+                infra.spec.categories.iter().map(convert_category).collect();
 
             let info = InfrastructureInfo {
                 name: infra.metadata.name.clone(),
@@ -602,29 +618,36 @@ async fn list_projects(
         });
     }
 
-    match crate::collection::CollectionDiscovery::discover_projects(&*state.ctx.fs, &*state.ctx.output, &current_dir) {
+    match crate::collection::CollectionDiscovery::discover_projects(
+        &*state.ctx.fs,
+        &*state.ctx.output,
+        &current_dir,
+    ) {
         Ok(projects) => {
             let mut project_infos: Vec<ProjectInfo> = Vec::new();
 
             for p in projects {
                 // Filter by name if provided
-                if let Some(ref name_filter) = params.name {
-                    if !p.name.to_lowercase().contains(&name_filter.to_lowercase()) {
-                        continue;
-                    }
+                if let Some(ref name_filter) = params.name
+                    && !p.name.to_lowercase().contains(&name_filter.to_lowercase())
+                {
+                    continue;
                 }
 
                 // Filter by kind if provided
-                if let Some(ref kind_filter) = params.kind {
-                    if p.kind != *kind_filter {
-                        continue;
-                    }
+                if let Some(ref kind_filter) = params.kind
+                    && p.kind != *kind_filter
+                {
+                    continue;
                 }
 
                 // Discover environments for this project
                 let project_path = current_dir.join(&p.path);
-                let environments = crate::collection::CollectionDiscovery::discover_environments(&*state.ctx.fs, &project_path)
-                    .unwrap_or_default();
+                let environments = crate::collection::CollectionDiscovery::discover_environments(
+                    &*state.ctx.fs,
+                    &project_path,
+                )
+                .unwrap_or_default();
 
                 project_infos.push(ProjectInfo {
                     name: p.name.clone(),
@@ -661,7 +684,9 @@ async fn create_project(
     Json(ApiResponse {
         success: false,
         data: None,
-        error: Some("Project creation via API not yet fully implemented. Use CLI for now.".to_string()),
+        error: Some(
+            "Project creation via API not yet fully implemented. Use CLI for now.".to_string(),
+        ),
     })
 }
 
@@ -720,11 +745,8 @@ async fn apply(
     State(state): State<AppState>,
     Json(req): Json<ExecutorRequest>,
 ) -> Json<ApiResponse<String>> {
-    let result = crate::commands::ApplyCommand::execute(
-        &state.ctx,
-        req.path.as_deref(),
-        &req.executor_args,
-    );
+    let result =
+        crate::commands::ApplyCommand::execute(&state.ctx, req.path.as_deref(), &req.executor_args);
 
     match result {
         Ok(_) => Json(ApiResponse {

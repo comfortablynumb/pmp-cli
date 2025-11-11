@@ -43,7 +43,8 @@ impl TemplateRenderer {
         _plugin_context: Option<(&str, &str)>,
     ) -> Result<Vec<String>> {
         // Create output directory if it doesn't exist
-        ctx.fs.create_dir_all(output_dir)
+        ctx.fs
+            .create_dir_all(output_dir)
             .context("Failed to create output directory")?;
 
         let mut generated_files = Vec::new();
@@ -63,10 +64,11 @@ impl TemplateRenderer {
         let entries = ctx.fs.walk_dir(&src_dir, 100)?;
 
         for path in entries {
-            if ctx.fs.is_file(&path) {
-                if let Some(relative_path) = self.render_file(ctx, &path, &src_dir, output_dir, variables)? {
-                    generated_files.push(relative_path);
-                }
+            if ctx.fs.is_file(&path)
+                && let Some(relative_path) =
+                    self.render_file(ctx, &path, &src_dir, output_dir, variables)?
+            {
+                generated_files.push(relative_path);
             }
         }
 
@@ -93,11 +95,19 @@ impl TemplateRenderer {
             let file_name_str = file_name.to_string_lossy();
 
             // Skip .pmp.* files - these are auto-generated or metadata
-            if file_name_str == ".pmp.yaml.hbs" || file_name_str == ".pmp.yaml"
-                || file_name_str == ".pmp.project.yaml.hbs" || file_name_str == ".pmp.project.yaml"
-                || file_name_str == ".pmp.environment.yaml.hbs" || file_name_str == ".pmp.environment.yaml"
-                || file_name_str == ".pmp.template.yaml" || file_name_str == ".pmp.plugin.yaml" {
-                ctx.output.info(&format!("  Skipped: {} (metadata/auto-generated)", file_name_str));
+            if file_name_str == ".pmp.yaml.hbs"
+                || file_name_str == ".pmp.yaml"
+                || file_name_str == ".pmp.project.yaml.hbs"
+                || file_name_str == ".pmp.project.yaml"
+                || file_name_str == ".pmp.environment.yaml.hbs"
+                || file_name_str == ".pmp.environment.yaml"
+                || file_name_str == ".pmp.template.yaml"
+                || file_name_str == ".pmp.plugin.yaml"
+            {
+                ctx.output.info(&format!(
+                    "  Skipped: {} (metadata/auto-generated)",
+                    file_name_str
+                ));
                 return Ok(None);
             }
 
@@ -117,12 +127,15 @@ impl TemplateRenderer {
 
         // Create parent directories if needed
         if let Some(parent) = output_path.parent() {
-            ctx.fs.create_dir_all(parent)
+            ctx.fs
+                .create_dir_all(parent)
                 .context("Failed to create parent directories")?;
         }
 
         // Read template content
-        let template_content = ctx.fs.read_to_string(file_path)
+        let template_content = ctx
+            .fs
+            .read_to_string(file_path)
             .with_context(|| format!("Failed to read template file: {:?}", file_path))?;
 
         // Render template
@@ -132,10 +145,12 @@ impl TemplateRenderer {
             .with_context(|| format!("Failed to render template: {:?}", file_path))?;
 
         // Write rendered content
-        ctx.fs.write(&output_path, &rendered)
+        ctx.fs
+            .write(&output_path, &rendered)
             .with_context(|| format!("Failed to write output file: {:?}", output_path))?;
 
-        ctx.output.info(&format!("  Created: {}", output_path.display()));
+        ctx.output
+            .info(&format!("  Created: {}", output_path.display()));
 
         // Return relative path from output_base_dir
         let relative_output = output_path
@@ -166,9 +181,10 @@ fn eq_helper(
     let param2 = h.param(1).and_then(|v| v.value().as_str());
 
     if let (Some(p1), Some(p2)) = (param1, param2)
-        && p1 == p2 {
-            out.write("true")?;
-        }
+        && p1 == p2
+    {
+        out.write("true")?;
+    }
 
     Ok(())
 }
@@ -187,10 +203,11 @@ fn contains_helper(
     if let (Some(arr), Some(search)) = (array, search_value) {
         for item in arr {
             if let Some(item_str) = item.as_str()
-                && item_str == search {
-                    out.write("true")?;
-                    return Ok(());
-                }
+                && item_str == search
+            {
+                out.write("true")?;
+                return Ok(());
+            }
         }
     }
 
@@ -206,14 +223,11 @@ fn k8s_name_helper(
     _: &mut RenderContext,
     out: &mut dyn Output,
 ) -> HelperResult {
-    let value = h
-        .param(0)
-        .and_then(|v| v.value().as_str())
-        .ok_or_else(|| {
-            handlebars::RenderError::from(handlebars::RenderErrorReason::Other(
-                "k8s_name requires a string parameter".to_string(),
-            ))
-        })?;
+    let value = h.param(0).and_then(|v| v.value().as_str()).ok_or_else(|| {
+        handlebars::RenderError::from(handlebars::RenderErrorReason::Other(
+            "k8s_name requires a string parameter".to_string(),
+        ))
+    })?;
 
     // Sanitize: keep only lowercase alphanumeric, '-', and '.'
     // Replace underscores with hyphens, convert to lowercase, remove invalid chars
@@ -232,7 +246,7 @@ fn k8s_name_helper(
 
     // Truncate to 253 characters (Kubernetes DNS subdomain limit)
     let result = if trimmed.len() > 253 {
-        &trimmed[..253].trim_end_matches(|c: char| !c.is_alphanumeric())
+        trimmed[..253].trim_end_matches(|c: char| !c.is_alphanumeric())
     } else {
         trimmed
     };

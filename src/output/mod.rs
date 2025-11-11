@@ -49,12 +49,20 @@ pub fn subsection(title: &str) {
 
 /// Print a key-value pair with styled key and value
 pub fn key_value(key: &str, value: &str) {
-    println!("  {} {}", format!("{}:", key).dimmed(), value.bright_white());
+    println!(
+        "  {} {}",
+        format!("{}:", key).dimmed(),
+        value.bright_white()
+    );
 }
 
 /// Print a key-value pair where the value is highlighted
 pub fn key_value_highlight(key: &str, value: &str) {
-    println!("  {} {}", format!("{}:", key).dimmed(), value.bright_cyan().bold());
+    println!(
+        "  {} {}",
+        format!("{}:", key).dimmed(),
+        value.bright_cyan().bold()
+    );
 }
 
 /// Print a label with colored value
@@ -125,18 +133,23 @@ pub fn list_item_colored(text: &str, color: LabelColor) {
 /// Print a summary box with a title and items
 pub fn summary_box(title: &str, items: &[(String, String)]) {
     println!("\n{}", title.bright_cyan().bold());
-    println!("{}", "┌".dimmed().to_string() + &"─".repeat(48).dimmed().to_string() + &"┐".dimmed().to_string());
+    println!(
+        "{}",
+        "┌".dimmed().to_string() + &"─".repeat(48).dimmed().to_string() + &"┐".dimmed().to_string()
+    );
     for (key, value) in items {
         let line = format!("│ {}: {}", key, value);
         let padding = 50_usize.saturating_sub(line.len() - 2); // Subtract ANSI codes approximation
-        println!(
-            "{} {} {}",
-            "│".dimmed(),
-            format!("{}: {}", key.dimmed(), value.bright_white()),
-            format!("{:width$}│", "", width = padding).dimmed()
-        );
+        let key_value_str = format!("{}: {}", key.dimmed(), value.bright_white());
+        let padding_str = format!("{:width$}│", "", width = padding)
+            .dimmed()
+            .to_string();
+        println!("{} {} {}", "│".dimmed(), key_value_str, padding_str);
     }
-    println!("{}", "└".dimmed().to_string() + &"─".repeat(48).dimmed().to_string() + &"┘".dimmed().to_string());
+    println!(
+        "{}",
+        "└".dimmed().to_string() + &"─".repeat(48).dimmed().to_string() + &"┘".dimmed().to_string()
+    );
 }
 
 /// Print a horizontal separator
@@ -182,7 +195,11 @@ pub fn progress(current: usize, total: usize, item_name: &str) {
 
 /// Print a resource card (for project/template display)
 pub fn resource_card(name: &str, kind: &str, description: Option<&str>) {
-    println!("\n{} {}", "▸".bright_blue().bold(), name.bright_cyan().bold());
+    println!(
+        "\n{} {}",
+        "▸".bright_blue().bold(),
+        name.bright_cyan().bold()
+    );
     println!("  {} {}", "Kind:".dimmed(), kind.bright_magenta());
     if let Some(desc) = description {
         println!("  {} {}", "Description:".dimmed(), desc.bright_white());
@@ -210,7 +227,11 @@ pub fn status_check(item: &str, available: bool) {
 
 /// Print environment badge
 pub fn environment_badge(env_name: &str) {
-    println!("  {} {}", "Environment:".dimmed(), env_name.bright_green().bold());
+    println!(
+        "  {} {}",
+        "Environment:".dimmed(),
+        env_name.bright_green().bold()
+    );
 }
 
 /// Print a table header

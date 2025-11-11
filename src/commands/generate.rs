@@ -16,7 +16,8 @@ impl GenerateCommand {
         template_packs_paths: Option<&str>,
     ) -> Result<()> {
         ctx.output.section("Generate from Template");
-        ctx.output.dimmed("Generate files from a template without creating a project structure.");
+        ctx.output
+            .dimmed("Generate files from a template without creating a project structure.");
 
         // Step 1: Discover template packs (NO infrastructure filtering)
         // Parse flag paths (colon-separated)
@@ -53,7 +54,10 @@ impl GenerateCommand {
         }
 
         ctx.output.blank();
-        ctx.output.info(&format!("Found {} template pack(s)", all_template_packs.len()));
+        ctx.output.info(&format!(
+            "Found {} template pack(s)",
+            all_template_packs.len()
+        ));
 
         // Step 2: Select template pack (with optional CLI flag)
         let selected_pack = if let Some(pack_name) = template_pack {
@@ -66,7 +70,8 @@ impl GenerateCommand {
             // Only one pack, use it automatically
             let pack = all_template_packs.into_iter().next().unwrap();
             ctx.output.subsection("Template Pack");
-            ctx.output.key_value_highlight("Pack", &pack.resource.metadata.name);
+            ctx.output
+                .key_value_highlight("Pack", &pack.resource.metadata.name);
             if let Some(desc) = &pack.resource.metadata.description {
                 ctx.output.key_value("Description", desc);
             }
@@ -101,7 +106,8 @@ impl GenerateCommand {
             let pack = sorted_packs.into_iter().nth(pack_index).unwrap();
 
             ctx.output.subsection("Selected Template Pack");
-            ctx.output.key_value_highlight("Pack", &pack.resource.metadata.name);
+            ctx.output
+                .key_value_highlight("Pack", &pack.resource.metadata.name);
             if let Some(desc) = &pack.resource.metadata.description {
                 ctx.output.key_value("Description", desc);
             }
@@ -152,7 +158,8 @@ impl GenerateCommand {
             ctx.output.subsection("Select a template");
 
             let mut sorted_templates = available_templates;
-            sorted_templates.sort_by(|a, b| a.resource.metadata.name.cmp(&b.resource.metadata.name));
+            sorted_templates
+                .sort_by(|a, b| a.resource.metadata.name.cmp(&b.resource.metadata.name));
 
             let template_options: Vec<String> = sorted_templates
                 .iter()
@@ -191,7 +198,8 @@ impl GenerateCommand {
         // Step 5: Handle environment selection if template has environment-specific inputs
         let selected_environment = if !selected_template.resource.spec.environments.is_empty() {
             ctx.output.subsection("Select an environment context");
-            ctx.output.dimmed("This template has environment-specific configurations.");
+            ctx.output
+                .dimmed("This template has environment-specific configurations.");
 
             // Get environment keys and sort them
             let mut env_keys: Vec<String> = selected_template
@@ -224,25 +232,25 @@ impl GenerateCommand {
 
         // Step 6: Prompt for a name (used as project identifier in templates)
         ctx.output.subsection("Generation Configuration");
-        let name = SchemaValidator::prompt_for_project_name(ctx)
-            .context("Failed to get name")?;
+        let name = SchemaValidator::prompt_for_project_name(ctx).context("Failed to get name")?;
 
         // Step 7: Collect inputs based on template's input definitions
         ctx.output.subsection("Template Inputs");
-        ctx.output.dimmed("Please provide the following information:");
+        ctx.output
+            .dimmed("Please provide the following information:");
 
         // Start with base inputs from template spec
         let mut merged_inputs = selected_template.resource.spec.inputs.clone();
 
         // Override with environment-specific inputs if an environment was selected
-        if let Some(ref env) = selected_environment {
-            if let Some(env_overrides) = selected_template.resource.spec.environments.get(env) {
-                for env_input in &env_overrides.overrides.inputs {
-                    // Remove any existing input with the same name
-                    merged_inputs.retain(|input_def| input_def.name != env_input.name);
-                    // Add the environment-specific input
-                    merged_inputs.push(env_input.clone());
-                }
+        if let Some(ref env) = selected_environment
+            && let Some(env_overrides) = selected_template.resource.spec.environments.get(env)
+        {
+            for env_input in &env_overrides.overrides.inputs {
+                // Remove any existing input with the same name
+                merged_inputs.retain(|input_def| input_def.name != env_input.name);
+                // Add the environment-specific input
+                merged_inputs.push(env_input.clone());
             }
         }
 
@@ -252,7 +260,10 @@ impl GenerateCommand {
 
         // Step 8: Add internal fields for template rendering
         if let Some(ref env) = selected_environment {
-            inputs.insert("environment".to_string(), serde_json::Value::String(env.clone()));
+            inputs.insert(
+                "environment".to_string(),
+                serde_json::Value::String(env.clone()),
+            );
         }
         inputs.insert(
             "resource_api_version".to_string(),
@@ -272,12 +283,10 @@ impl GenerateCommand {
 
         // Create output directory if it doesn't exist
         if !ctx.fs.exists(&output_path) {
-            ctx.fs
-                .create_dir_all(&output_path)
-                .context(format!(
-                    "Failed to create output directory: {}",
-                    output_path.display()
-                ))?;
+            ctx.fs.create_dir_all(&output_path).context(format!(
+                "Failed to create output directory: {}",
+                output_path.display()
+            ))?;
         }
 
         // Step 10: Render template into output directory
@@ -287,10 +296,7 @@ impl GenerateCommand {
         let template_src = &selected_template.path;
 
         if !ctx.fs.exists(template_src) {
-            anyhow::bail!(
-                "Template directory not found: {}",
-                template_src.display()
-            );
+            anyhow::bail!("Template directory not found: {}", template_src.display());
         }
 
         let _generated_files = renderer
@@ -301,7 +307,8 @@ impl GenerateCommand {
         ctx.output.success("Files generated successfully!");
 
         ctx.output.subsection("Generation Details");
-        ctx.output.key_value("Template Pack", &selected_pack.resource.metadata.name);
+        ctx.output
+            .key_value("Template Pack", &selected_pack.resource.metadata.name);
         ctx.output
             .key_value_highlight("Template", &selected_template.resource.metadata.name);
         ctx.output.key_value("Name", &name);
@@ -424,13 +431,19 @@ impl GenerateCommand {
                 }
                 _ => {
                     // Fallback to string input
-                    let answer = ctx.input.text(description, None).context("Failed to get input")?;
+                    let answer = ctx
+                        .input
+                        .text(description, None)
+                        .context("Failed to get input")?;
                     Ok(serde_json::Value::String(answer))
                 }
             }
         } else {
             // No default, prompt for string
-            let answer = ctx.input.text(description, None).context("Failed to get input")?;
+            let answer = ctx
+                .input
+                .text(description, None)
+                .context("Failed to get input")?;
             Ok(serde_json::Value::String(answer))
         }
     }
@@ -442,7 +455,9 @@ mod tests {
     use crate::context::Context;
     use crate::executor::registry::DefaultExecutorRegistry;
     use crate::traits::user_input::MockResponse;
-    use crate::traits::{FileSystem, MockCommandExecutor, MockFileSystem, MockOutput, MockUserInput};
+    use crate::traits::{
+        FileSystem, MockCommandExecutor, MockFileSystem, MockOutput, MockUserInput,
+    };
     use std::path::PathBuf;
     use std::sync::Arc;
 
@@ -536,14 +551,18 @@ spec:
         // Run generate command
         let result = GenerateCommand::execute(
             &ctx,
-            Some("test-pack"),   // template pack
+            Some("test-pack"),     // template pack
             Some("test-template"), // template
-            None,                // output dir (current dir)
-            None,                // template packs paths
+            None,                  // output dir (current dir)
+            None,                  // template packs paths
         );
 
         // Verify command succeeded
-        assert!(result.is_ok(), "Generate command should succeed: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "Generate command should succeed: {:?}",
+            result
+        );
     }
 
     #[test]
@@ -607,16 +626,15 @@ spec:
         let ctx = create_test_context(Arc::clone(&fs), input);
 
         // Run generate command
-        let result = GenerateCommand::execute(
-            &ctx,
-            Some("test-pack"),
-            Some("env-template"),
-            None,
-            None,
-        );
+        let result =
+            GenerateCommand::execute(&ctx, Some("test-pack"), Some("env-template"), None, None);
 
         // Verify command succeeded
-        assert!(result.is_ok(), "Generate command with environment should succeed: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "Generate command with environment should succeed: {:?}",
+            result
+        );
     }
 
     #[test]

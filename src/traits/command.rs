@@ -64,7 +64,7 @@ impl CommandExecutor for RealCommandExecutor {
 
         #[cfg(not(target_os = "windows"))]
         let output = Command::new("sh")
-            .args(&["-c", command])
+            .args(["-c", command])
             .current_dir(working_dir)
             .output()?;
 
@@ -138,7 +138,12 @@ impl CommandExecutor for MockCommandExecutor {
         })
     }
 
-    fn execute_interactive(&self, command: &str, _args: &[&str], _working_dir: &Path) -> Result<i32> {
+    fn execute_interactive(
+        &self,
+        command: &str,
+        _args: &[&str],
+        _working_dir: &Path,
+    ) -> Result<i32> {
         let mut outputs = self.outputs.lock().unwrap();
 
         if let Some(result) = outputs.iter().position(|r| r.command == command) {
@@ -195,14 +200,12 @@ mod tests {
 
     #[test]
     fn test_mock_executor_returns_configured_output() {
-        let executor = MockCommandExecutor::with_outputs(vec![
-            MockCommandResult {
-                command: "test".to_string(),
-                exit_code: 0,
-                stdout: "success".to_string(),
-                stderr: String::new(),
-            },
-        ]);
+        let executor = MockCommandExecutor::with_outputs(vec![MockCommandResult {
+            command: "test".to_string(),
+            exit_code: 0,
+            stdout: "success".to_string(),
+            stderr: String::new(),
+        }]);
 
         let output = executor.execute("test", &[], &PathBuf::from(".")).unwrap();
         assert_eq!(String::from_utf8_lossy(&output.stdout), "success");
@@ -211,22 +214,24 @@ mod tests {
     #[test]
     fn test_mock_executor_default_success() {
         let executor = MockCommandExecutor::new();
-        let output = executor.execute("unknown", &[], &PathBuf::from(".")).unwrap();
+        let output = executor
+            .execute("unknown", &[], &PathBuf::from("."))
+            .unwrap();
         assert!(output.status.success());
     }
 
     #[test]
     fn test_mock_executor_interactive() {
-        let executor = MockCommandExecutor::with_outputs(vec![
-            MockCommandResult {
-                command: "test".to_string(),
-                exit_code: 42,
-                stdout: String::new(),
-                stderr: String::new(),
-            },
-        ]);
+        let executor = MockCommandExecutor::with_outputs(vec![MockCommandResult {
+            command: "test".to_string(),
+            exit_code: 42,
+            stdout: String::new(),
+            stderr: String::new(),
+        }]);
 
-        let code = executor.execute_interactive("test", &[], &PathBuf::from(".")).unwrap();
+        let code = executor
+            .execute_interactive("test", &[], &PathBuf::from("."))
+            .unwrap();
         assert_eq!(code, 42);
     }
 }

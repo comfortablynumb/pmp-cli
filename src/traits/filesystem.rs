@@ -43,8 +43,7 @@ pub struct RealFileSystem;
 
 impl FileSystem for RealFileSystem {
     fn read_to_string(&self, path: &Path) -> Result<String> {
-        std::fs::read_to_string(path)
-            .with_context(|| format!("Failed to read file: {:?}", path))
+        std::fs::read_to_string(path).with_context(|| format!("Failed to read file: {:?}", path))
     }
 
     fn write(&self, path: &Path, contents: &str) -> Result<()> {
@@ -54,8 +53,7 @@ impl FileSystem for RealFileSystem {
                 .with_context(|| format!("Failed to create parent directory: {:?}", parent))?;
         }
 
-        std::fs::write(path, contents)
-            .with_context(|| format!("Failed to write file: {:?}", path))
+        std::fs::write(path, contents).with_context(|| format!("Failed to write file: {:?}", path))
     }
 
     fn create_dir_all(&self, path: &Path) -> Result<()> {
@@ -69,8 +67,7 @@ impl FileSystem for RealFileSystem {
     }
 
     fn remove_file(&self, path: &Path) -> Result<()> {
-        std::fs::remove_file(path)
-            .with_context(|| format!("Failed to remove file: {:?}", path))
+        std::fs::remove_file(path).with_context(|| format!("Failed to remove file: {:?}", path))
     }
 
     fn exists(&self, path: &Path) -> bool {
@@ -174,12 +171,18 @@ impl FileSystem for MockFileSystem {
     }
 
     fn create_dir_all(&self, path: &Path) -> Result<()> {
-        self.directories.write().unwrap().insert(path.to_path_buf(), ());
+        self.directories
+            .write()
+            .unwrap()
+            .insert(path.to_path_buf(), ());
 
         // Also add parent directories
         let mut current = path;
         while let Some(parent) = current.parent() {
-            self.directories.write().unwrap().insert(parent.to_path_buf(), ());
+            self.directories
+                .write()
+                .unwrap()
+                .insert(parent.to_path_buf(), ());
             current = parent;
         }
 

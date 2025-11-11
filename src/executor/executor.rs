@@ -39,25 +39,41 @@ pub trait Executor: Send + Sync {
     /// Uses custom command from config if provided, otherwise uses default
     /// Runs interactively with inherited stdio for user interaction
     /// Additional args can be passed via extra_args (e.g., from -- separator)
-    fn plan(&self, config: &ExecutorConfig, working_dir: &str, extra_args: &[String]) -> Result<()>;
+    fn plan(&self, config: &ExecutorConfig, working_dir: &str, extra_args: &[String])
+    -> Result<()>;
 
     /// Execute the apply command (apply changes)
     /// Uses custom command from config if provided, otherwise uses default
     /// Runs interactively with inherited stdio for user interaction
     /// Additional args can be passed via extra_args (e.g., from -- separator)
-    fn apply(&self, config: &ExecutorConfig, working_dir: &str, extra_args: &[String]) -> Result<()>;
+    fn apply(
+        &self,
+        config: &ExecutorConfig,
+        working_dir: &str,
+        extra_args: &[String],
+    ) -> Result<()>;
 
     /// Execute the destroy command (destroy infrastructure)
     /// Uses custom command from config if provided, otherwise uses default
     /// Runs interactively with inherited stdio for user interaction
     /// Additional args can be passed via extra_args (e.g., from -- separator)
-    fn destroy(&self, config: &ExecutorConfig, working_dir: &str, extra_args: &[String]) -> Result<()>;
+    fn destroy(
+        &self,
+        config: &ExecutorConfig,
+        working_dir: &str,
+        extra_args: &[String],
+    ) -> Result<()>;
 
     /// Execute the refresh command (update state with real infrastructure)
     /// Uses custom command from config if provided, otherwise uses default
     /// Runs interactively with inherited stdio for user interaction
     /// Additional args can be passed via extra_args (e.g., from -- separator)
-    fn refresh(&self, config: &ExecutorConfig, working_dir: &str, extra_args: &[String]) -> Result<()>;
+    fn refresh(
+        &self,
+        config: &ExecutorConfig,
+        working_dir: &str,
+        extra_args: &[String],
+    ) -> Result<()>;
 
     /// Get the name of this executor (e.g., "opentofu", "terraform")
     fn get_name(&self) -> &str;

@@ -37,7 +37,10 @@ pub fn interpolate_env_variables(input: &str) -> Result<String> {
     }
 
     if !errors.is_empty() {
-        anyhow::bail!("Environment variable interpolation errors: {}", errors.join(", "));
+        anyhow::bail!(
+            "Environment variable interpolation errors: {}",
+            errors.join(", ")
+        );
     }
 
     Ok(result)
@@ -124,9 +127,7 @@ pub fn interpolate_all(input: &str, variables: &HashMap<String, Value>) -> Resul
 #[allow(dead_code)]
 pub fn interpolate_value(value: &Value, variables: &HashMap<String, Value>) -> Result<Value> {
     match value {
-        Value::String(s) => {
-            Ok(Value::String(interpolate_variables(s, variables)?))
-        }
+        Value::String(s) => Ok(Value::String(interpolate_variables(s, variables)?)),
         Value::Object(map) => {
             let mut result = serde_json::Map::new();
             for (key, val) in map {
@@ -150,9 +151,7 @@ pub fn interpolate_value(value: &Value, variables: &HashMap<String, Value>) -> R
 /// Recursively interpolates both ${env:...} and ${var:...} patterns in string values
 pub fn interpolate_value_all(value: &Value, variables: &HashMap<String, Value>) -> Result<Value> {
     match value {
-        Value::String(s) => {
-            Ok(Value::String(interpolate_all(s, variables)?))
-        }
+        Value::String(s) => Ok(Value::String(interpolate_all(s, variables)?)),
         Value::Object(map) => {
             let mut result = serde_json::Map::new();
             for (key, val) in map {
@@ -209,7 +208,12 @@ mod tests {
 
         let result = interpolate_variables("project-${var:_name}", &vars);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Variable '_name' not found"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Variable '_name' not found")
+        );
     }
 
     #[test]
@@ -271,7 +275,12 @@ mod tests {
     fn test_interpolate_env_missing_variable() {
         let result = interpolate_env_variables("namespace-${env:NONEXISTENT_VAR}");
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Environment variable 'NONEXISTENT_VAR' not found"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Environment variable 'NONEXISTENT_VAR' not found")
+        );
     }
 
     #[test]

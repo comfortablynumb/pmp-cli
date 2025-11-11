@@ -90,9 +90,7 @@ mod tests {
 
     impl MockExecutor {
         fn new(name: impl Into<String>) -> Self {
-            Self {
-                name: name.into(),
-            }
+            Self { name: name.into() }
         }
     }
 
@@ -110,19 +108,39 @@ mod tests {
                 .context("Failed to execute test command")
         }
 
-        fn plan(&self, _config: &ExecutorConfig, _working_dir: &str, _extra_args: &[String]) -> Result<()> {
+        fn plan(
+            &self,
+            _config: &ExecutorConfig,
+            _working_dir: &str,
+            _extra_args: &[String],
+        ) -> Result<()> {
             Ok(())
         }
 
-        fn apply(&self, _config: &ExecutorConfig, _working_dir: &str, _extra_args: &[String]) -> Result<()> {
+        fn apply(
+            &self,
+            _config: &ExecutorConfig,
+            _working_dir: &str,
+            _extra_args: &[String],
+        ) -> Result<()> {
             Ok(())
         }
 
-        fn destroy(&self, _config: &ExecutorConfig, _working_dir: &str, _extra_args: &[String]) -> Result<()> {
+        fn destroy(
+            &self,
+            _config: &ExecutorConfig,
+            _working_dir: &str,
+            _extra_args: &[String],
+        ) -> Result<()> {
             Ok(())
         }
 
-        fn refresh(&self, _config: &ExecutorConfig, _working_dir: &str, _extra_args: &[String]) -> Result<()> {
+        fn refresh(
+            &self,
+            _config: &ExecutorConfig,
+            _working_dir: &str,
+            _extra_args: &[String],
+        ) -> Result<()> {
             Ok(())
         }
 

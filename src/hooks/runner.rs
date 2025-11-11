@@ -17,8 +17,9 @@ impl HooksRunner {
         for (index, hook_command) in hooks.iter().enumerate() {
             println!("  [{}] Executing: {}", index + 1, hook_command);
 
-            let output = Self::execute_command(hook_command, working_dir)
-                .with_context(|| format!("Failed to execute {} hook: {}", hook_type, hook_command))?;
+            let output = Self::execute_command(hook_command, working_dir).with_context(|| {
+                format!("Failed to execute {} hook: {}", hook_type, hook_command)
+            })?;
 
             if !output.status.success() {
                 let stderr = String::from_utf8_lossy(&output.stderr);
