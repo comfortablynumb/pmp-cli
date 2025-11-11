@@ -17,7 +17,7 @@
                     <p class="text-xs text-indigo-100">Infrastructure as Code Management</p>
                 </div>
                 <div class="text-xs text-right">
-                    <div id="currentInfra" class="text-indigo-100"></div>
+                    <div id="currentContext" class="text-indigo-100"></div>
                 </div>
             </div>
         </div>
@@ -33,12 +33,6 @@
                 </button>
                 <button class="tab-button px-4 py-2 font-semibold text-gray-600 hover:text-indigo-600 whitespace-nowrap" data-tab="template-packs">
                     📦 Template Packs
-                </button>
-                <button class="tab-button px-4 py-2 font-semibold text-gray-600 hover:text-indigo-600 whitespace-nowrap" data-tab="projects">
-                    📁 Projects
-                </button>
-                <button class="tab-button px-4 py-2 font-semibold text-gray-600 hover:text-indigo-600 whitespace-nowrap" data-tab="generate">
-                    ⚡ Generate
                 </button>
             </div>
         </div>
@@ -56,15 +50,18 @@
                     <h3 class="font-semibold mb-3 text-indigo-800">Add Infrastructure</h3>
                     <div class="space-y-3">
                         <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-2">Infrastructure Directory Path</label>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Infrastructure Directory</label>
                             <div class="flex gap-2">
-                                <input type="text" id="infraPath" class="flex-1 border border-gray-300 rounded px-4 py-2"
-                                       placeholder="/path/to/infrastructure or leave empty for current directory">
+                                <input type="text" id="infraPath" readonly class="flex-1 border border-gray-300 rounded px-4 py-2 bg-gray-50 cursor-pointer"
+                                       placeholder="Click Browse to select directory">
+                                <button id="browseInfraBtn" class="bg-gray-600 text-white px-6 py-2 rounded hover:bg-gray-700 whitespace-nowrap">
+                                    Browse...
+                                </button>
                                 <button id="addInfraBtn" class="bg-indigo-600 text-white px-6 py-2 rounded hover:bg-indigo-700 whitespace-nowrap">
                                     Load Infrastructure
                                 </button>
                             </div>
-                            <p class="text-xs text-gray-500 mt-1">Path to directory containing .pmp.infrastructure.yaml</p>
+                            <p class="text-xs text-gray-500 mt-1">Select directory containing .pmp.infrastructure.yaml</p>
                         </div>
                     </div>
                 </div>
@@ -79,7 +76,7 @@
         <div id="template-packs-tab" class="tab-content hidden">
             <div class="bg-white rounded-lg shadow-md p-6">
                 <h2 class="text-2xl font-bold mb-4 text-purple-700">📦 Template Packs</h2>
-                <p class="text-gray-600 mb-4">Manage and install template packs for your projects</p>
+                <p class="text-gray-600 mb-4">Browse template packs and generate projects from templates</p>
 
                 <div class="mb-6 p-4 bg-purple-50 rounded-lg border border-purple-200">
                     <h3 class="font-semibold mb-3 text-purple-800">Install Template Pack</h3>
@@ -98,133 +95,93 @@
                                 <input type="text" id="gitUrl" class="flex-1 border border-gray-300 rounded px-4 py-2"
                                        placeholder="https://github.com/user/template-pack.git">
                                 <button id="installGitBtn" class="bg-purple-600 text-white px-6 py-2 rounded hover:bg-purple-700 whitespace-nowrap">
-                                    Clone & Install
+                                    Clone Repository
                                 </button>
                             </div>
-                            <p class="text-xs text-gray-500 mt-1">Will clone to ~/.pmp/template-packs/</p>
                         </div>
 
                         <div id="localInstallDiv" class="hidden">
                             <label class="block text-sm font-medium text-gray-700 mb-2">Local Directory Path</label>
                             <div class="flex gap-2">
-                                <input type="text" id="localPath" class="flex-1 border border-gray-300 rounded px-4 py-2"
-                                       placeholder="/path/to/template-pack">
+                                <input type="text" id="localPath" readonly class="flex-1 border border-gray-300 rounded px-4 py-2 bg-gray-50 cursor-pointer"
+                                       placeholder="Click Browse to select directory">
+                                <button id="browseLocalBtn" class="bg-gray-600 text-white px-6 py-2 rounded hover:bg-gray-700 whitespace-nowrap">
+                                    Browse...
+                                </button>
                                 <button id="installLocalBtn" class="bg-purple-600 text-white px-6 py-2 rounded hover:bg-purple-700 whitespace-nowrap">
-                                    Load Pack
+                                    Validate Pack
                                 </button>
                             </div>
-                            <p class="text-xs text-gray-500 mt-1">Path to directory containing .pmp.template-pack.yaml</p>
                         </div>
                     </div>
                 </div>
 
                 <div class="mb-4">
-                    <h3 class="font-semibold mb-2 text-gray-700">Installed Template Packs</h3>
-                    <button id="loadTemplatesBtn" class="bg-purple-600 text-white px-4 py-2 rounded hover:bg-purple-700 text-sm">
-                        Refresh List
+                    <button id="loadTemplatePacksBtn" class="bg-purple-600 text-white px-6 py-2 rounded hover:bg-purple-700">
+                        Refresh Template Packs
                     </button>
                 </div>
 
                 <div id="templatePacksList" class="space-y-4">
-                    <!-- Template packs will be loaded here -->
+                    <!-- Template packs will be shown here -->
                 </div>
             </div>
         </div>
 
-        <!-- Projects Tab -->
-        <div id="projects-tab" class="tab-content hidden">
-            <div class="bg-white rounded-lg shadow-md p-6">
-                <h2 class="text-2xl font-bold mb-4 text-blue-700">📁 Projects</h2>
-                <p class="text-gray-600 mb-4">Manage your infrastructure projects</p>
+        <!-- Loading Spinner -->
+        <div id="loadingSpinner" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 items-center justify-center">
+            <div class="bg-white rounded-lg p-6 shadow-xl">
+                <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto"></div>
+                <p class="mt-4 text-gray-700 font-semibold">Loading...</p>
+            </div>
+        </div>
 
-                <div class="flex gap-4 mb-4">
-                    <button id="loadProjectsBtn" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">
-                        Load Projects
+        <!-- Directory Picker Modal -->
+        <div id="directoryPickerModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
+            <div class="bg-white rounded-lg shadow-xl max-w-3xl w-full mx-4 max-h-[80vh] flex flex-col">
+                <div class="p-4 border-b flex justify-between items-center">
+                    <h3 class="text-xl font-semibold">Select Directory</h3>
+                    <button id="closeDirectoryPicker" class="text-gray-500 hover:text-gray-700">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                        </svg>
                     </button>
-                    <input type="text" id="projectNameFilter" placeholder="Filter by name..."
-                           class="border border-gray-300 rounded px-4 py-2 flex-1">
-                    <input type="text" id="projectKindFilter" placeholder="Filter by kind..."
-                           class="border border-gray-300 rounded px-4 py-2 flex-1">
                 </div>
-
-                <div id="projectsList" class="space-y-4">
-                    <!-- Projects will be loaded here -->
+                <div class="p-4 border-b bg-gray-50">
+                    <div class="flex items-center gap-2">
+                        <span class="text-sm font-medium text-gray-700">Current Path:</span>
+                        <span id="currentPickerPath" class="text-sm text-indigo-600 font-mono"></span>
+                    </div>
                 </div>
-            </div>
-        </div>
-
-        <!-- Generate Tab -->
-        <div id="generate-tab" class="tab-content hidden">
-            <div class="bg-white rounded-lg shadow-md p-6">
-                <h2 class="text-2xl font-bold mb-4 text-green-700">⚡ Generate from Template</h2>
-                <p class="text-gray-600 mb-4">Generate files from a template without creating a project structure</p>
-
-                <form id="generateForm" class="space-y-4">
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-2">Template Pack</label>
-                        <select id="genTemplatePack" class="w-full border border-gray-300 rounded px-4 py-2" required>
-                            <option value="">Select a template pack...</option>
-                        </select>
-                    </div>
-
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-2">Template</label>
-                        <select id="genTemplate" class="w-full border border-gray-300 rounded px-4 py-2" required disabled>
-                            <option value="">Select a template...</option>
-                        </select>
-                    </div>
-
-                    <div id="genEnvironmentDiv" class="hidden">
-                        <label class="block text-sm font-medium text-gray-700 mb-2">Environment</label>
-                        <select id="genEnvironment" class="w-full border border-gray-300 rounded px-4 py-2">
-                            <option value="">Select an environment...</option>
-                        </select>
-                    </div>
-
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-2">Name</label>
-                        <input type="text" id="genName" class="w-full border border-gray-300 rounded px-4 py-2"
-                               required pattern="[a-z0-9-]+"
-                               placeholder="my-project">
-                        <p class="text-sm text-gray-500 mt-1">Only lowercase letters, numbers, and hyphens</p>
-                    </div>
-
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-2">Output Directory</label>
-                        <input type="text" id="genOutputDir" class="w-full border border-gray-300 rounded px-4 py-2"
-                               placeholder="./output (leave empty for current directory)">
-                    </div>
-
-                    <div id="genInputsDiv" class="space-y-3">
-                        <!-- Dynamic inputs will be added here -->
-                    </div>
-
-                    <button type="submit" class="bg-green-600 text-white px-6 py-2 rounded hover:bg-green-700">
-                        Generate Files
+                <div id="directoryPickerContent" class="flex-1 overflow-y-auto p-4">
+                    <!-- Directory entries will be shown here -->
+                </div>
+                <div class="p-4 border-t bg-gray-50 flex justify-end gap-2">
+                    <button id="cancelDirectoryPicker" class="bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600">
+                        Cancel
                     </button>
-                </form>
+                    <button id="selectCurrentDirectory" class="bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700">
+                        Select This Directory
+                    </button>
+                </div>
             </div>
         </div>
-    </div>
 
-    <!-- Modal for Project Actions -->
-    <div id="projectActionModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50">
-        <div class="bg-white rounded-lg shadow-xl p-6 max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
-            <div class="flex justify-between items-center mb-4">
-                <h3 id="modalTitle" class="text-xl font-bold"></h3>
-                <button id="closeModal" class="text-gray-400 hover:text-gray-600 text-2xl">&times;</button>
+        <!-- Modal for viewing details -->
+        <div id="detailsModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
+            <div class="bg-white rounded-lg shadow-xl max-w-4xl w-full mx-4 max-h-[80vh] flex flex-col">
+                <div class="p-4 border-b flex justify-between items-center">
+                    <h3 id="modalTitle" class="text-xl font-semibold"></h3>
+                    <button id="closeModal" class="text-gray-500 hover:text-gray-700">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                        </svg>
+                    </button>
+                </div>
+                <div id="modalContent" class="flex-1 overflow-y-auto p-6">
+                    <!-- Content will be inserted here -->
+                </div>
             </div>
-            <div id="modalContent" class="space-y-4">
-                <!-- Modal content will be loaded here -->
-            </div>
-        </div>
-    </div>
-
-    <!-- Loading Spinner -->
-    <div id="loadingSpinner" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50">
-        <div class="bg-white rounded-lg p-8 flex flex-col items-center">
-            <div class="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-blue-600 mb-4"></div>
-            <p class="text-gray-700 font-medium">Loading...</p>
         </div>
     </div>
 

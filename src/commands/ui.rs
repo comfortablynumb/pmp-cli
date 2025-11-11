@@ -64,6 +64,7 @@ struct DestroyRequest {
 struct FindRequest {
     name: Option<String>,
     kind: Option<String>,
+    path: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -81,11 +82,23 @@ struct InstallLocalPackRequest {
     local_path: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct BrowseDirectoryRequest {
+    path: Option<String>,
+}
+
 #[derive(Debug, Serialize)]
 struct ApiResponse<T> {
     success: bool,
     data: Option<T>,
     error: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct DirectoryEntry {
+    name: String,
+    path: String,
+    is_dir: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -126,6 +139,7 @@ struct ProjectInfo {
 struct InfrastructureInfo {
     name: String,
     description: Option<String>,
+    path: String,
     environments: Vec<String>,
     categories: Vec<CategoryInfo>,
 }
@@ -186,6 +200,7 @@ impl UiCommand {
             )
             .route("/api/infrastructure", get(get_infrastructure))
             .route("/api/infrastructure/load", post(load_infrastructure))
+            .route("/api/browse", post(browse_directory))
             .route("/api/projects", get(list_projects))
             .route("/api/projects/create", post(create_project))
             .route("/api/generate", post(generate))
@@ -574,6 +589,7 @@ async fn get_infrastructure(
             let info = InfrastructureInfo {
                 name: infra.metadata.name.clone(),
                 description: infra.metadata.description.clone(),
+                path: current_dir.to_string_lossy().to_string(),
                 environments: infra.spec.environments.keys().cloned().collect(),
                 categories,
             };
@@ -617,19 +633,25 @@ async fn list_projects(
     State(state): State<AppState>,
     Query(params): Query<FindRequest>,
 ) -> Json<ApiResponse<Vec<ProjectInfo>>> {
-    // Try to discover projects in current directory
-    let current_dir = match std::env::current_dir() {
-        Ok(dir) => dir,
-        Err(e) => {
-            return Json(ApiResponse {
-                success: false,
-                data: None,
-                error: Some(format!("Failed to get current directory: {}", e)),
-            });
+    use std::path::PathBuf;
+
+    // Use provided path or current directory
+    let base_dir = if let Some(ref path_str) = params.path {
+        PathBuf::from(path_str)
+    } else {
+        match std::env::current_dir() {
+            Ok(dir) => dir,
+            Err(e) => {
+                return Json(ApiResponse {
+                    success: false,
+                    data: None,
+                    error: Some(format!("Failed to get current directory: {}", e)),
+                });
+            }
         }
     };
 
-    let projects_dir = current_dir.join("projects");
+    let projects_dir = base_dir.join("projects");
 
     if !state.ctx.fs.exists(&projects_dir) {
         return Json(ApiResponse {
@@ -642,7 +664,7 @@ async fn list_projects(
     match crate::collection::CollectionDiscovery::discover_projects(
         &*state.ctx.fs,
         &*state.ctx.output,
-        &current_dir,
+        &base_dir,
     ) {
         Ok(projects) => {
             let mut project_infos: Vec<ProjectInfo> = Vec::new();
@@ -663,7 +685,7 @@ async fn list_projects(
                 }
 
                 // Discover environments for this project
-                let project_path = current_dir.join(&p.path);
+                let project_path = base_dir.join(&p.path);
                 let environments = crate::collection::CollectionDiscovery::discover_environments(
                     &*state.ctx.fs,
                     &project_path,
@@ -832,6 +854,88 @@ async fn refresh(
     }
 }
 
+async fn browse_directory(
+    State(state): State<AppState>,
+    Json(req): Json<BrowseDirectoryRequest>,
+) -> Json<ApiResponse<Vec<DirectoryEntry>>> {
+    use std::path::PathBuf;
+
+    // Default to home directory if no path provided
+    let base_path = if let Some(ref path_str) = req.path {
+        PathBuf::from(path_str)
+    } else {
+        dirs::home_dir().unwrap_or_else(|| PathBuf::from("."))
+    };
+
+    // Verify the path exists and is a directory
+    if !state.ctx.fs.exists(&base_path) {
+        return Json(ApiResponse {
+            success: false,
+            data: None,
+            error: Some(format!("Path does not exist: {}", base_path.display())),
+        });
+    }
+
+    if !state.ctx.fs.is_dir(&base_path) {
+        return Json(ApiResponse {
+            success: false,
+            data: None,
+            error: Some(format!("Path is not a directory: {}", base_path.display())),
+        });
+    }
+
+    // Read directory entries
+    match state.ctx.fs.read_dir(&base_path) {
+        Ok(entries) => {
+            let mut directory_entries = Vec::new();
+
+            // Add parent directory entry if not at root
+            if let Some(parent) = base_path.parent() {
+                directory_entries.push(DirectoryEntry {
+                    name: "..".to_string(),
+                    path: parent.to_string_lossy().to_string(),
+                    is_dir: true,
+                });
+            }
+
+            for path in entries {
+                let is_dir = state.ctx.fs.is_dir(&path);
+
+                // Only show directories
+                if is_dir && let Some(name) = path.file_name() {
+                    directory_entries.push(DirectoryEntry {
+                        name: name.to_string_lossy().to_string(),
+                        path: path.to_string_lossy().to_string(),
+                        is_dir,
+                    });
+                }
+            }
+
+            // Sort directories alphabetically
+            directory_entries.sort_by(|a, b| {
+                if a.name == ".." {
+                    std::cmp::Ordering::Less
+                } else if b.name == ".." {
+                    std::cmp::Ordering::Greater
+                } else {
+                    a.name.cmp(&b.name)
+                }
+            });
+
+            Json(ApiResponse {
+                success: true,
+                data: Some(directory_entries),
+                error: None,
+            })
+        }
+        Err(e) => Json(ApiResponse {
+            success: false,
+            data: None,
+            error: Some(format!("Failed to read directory: {}", e)),
+        }),
+    }
+}
+
 async fn load_infrastructure(
     State(state): State<AppState>,
     Json(req): Json<LoadInfrastructureRequest>,
@@ -844,7 +948,7 @@ async fn load_infrastructure(
     let yaml_path = if state.ctx.fs.is_dir(&infra_path) {
         infra_path.join(".pmp.infrastructure.yaml")
     } else {
-        infra_path
+        infra_path.clone()
     };
 
     // Verify the file exists
@@ -865,9 +969,21 @@ async fn load_infrastructure(
             let categories: Vec<CategoryInfo> =
                 infra.spec.categories.iter().map(convert_category).collect();
 
+            // Get the directory path of the infrastructure
+            let infra_dir = if state.ctx.fs.is_dir(&infra_path) {
+                infra_path.to_string_lossy().to_string()
+            } else {
+                infra_path
+                    .parent()
+                    .unwrap_or(&infra_path)
+                    .to_string_lossy()
+                    .to_string()
+            };
+
             let info = InfrastructureInfo {
                 name: infra.metadata.name.clone(),
                 description: infra.metadata.description.clone(),
+                path: infra_dir,
                 environments: infra.spec.environments.keys().cloned().collect(),
                 categories,
             };
