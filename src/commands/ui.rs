@@ -66,6 +66,21 @@ struct FindRequest {
     kind: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct LoadInfrastructureRequest {
+    path: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct InstallGitPackRequest {
+    git_url: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct InstallLocalPackRequest {
+    local_path: String,
+}
+
 #[derive(Debug, Serialize)]
 struct ApiResponse<T> {
     success: bool,
@@ -164,7 +179,13 @@ impl UiCommand {
                 "/api/template-packs/:pack/templates/:template",
                 get(get_template_details),
             )
+            .route("/api/template-packs/install-git", post(install_git_pack))
+            .route(
+                "/api/template-packs/install-local",
+                post(install_local_pack),
+            )
             .route("/api/infrastructure", get(get_infrastructure))
+            .route("/api/infrastructure/load", post(load_infrastructure))
             .route("/api/projects", get(list_projects))
             .route("/api/projects/create", post(create_project))
             .route("/api/generate", post(generate))
@@ -807,6 +828,230 @@ async fn refresh(
             success: false,
             data: None,
             error: Some(e.to_string()),
+        }),
+    }
+}
+
+async fn load_infrastructure(
+    State(state): State<AppState>,
+    Json(req): Json<LoadInfrastructureRequest>,
+) -> Json<ApiResponse<InfrastructureInfo>> {
+    use std::path::PathBuf;
+
+    let infra_path = PathBuf::from(&req.path);
+
+    // Check if path is a directory - if so, look for .pmp.infrastructure.yaml inside
+    let yaml_path = if state.ctx.fs.is_dir(&infra_path) {
+        infra_path.join(".pmp.infrastructure.yaml")
+    } else {
+        infra_path
+    };
+
+    // Verify the file exists
+    if !state.ctx.fs.exists(&yaml_path) {
+        return Json(ApiResponse {
+            success: false,
+            data: None,
+            error: Some(format!(
+                "Infrastructure file not found at: {}",
+                yaml_path.display()
+            )),
+        });
+    }
+
+    // Load the infrastructure
+    match crate::template::metadata::InfrastructureResource::from_file(&*state.ctx.fs, &yaml_path) {
+        Ok(infra) => {
+            let categories: Vec<CategoryInfo> =
+                infra.spec.categories.iter().map(convert_category).collect();
+
+            let info = InfrastructureInfo {
+                name: infra.metadata.name.clone(),
+                description: infra.metadata.description.clone(),
+                environments: infra.spec.environments.keys().cloned().collect(),
+                categories,
+            };
+
+            Json(ApiResponse {
+                success: true,
+                data: Some(info),
+                error: None,
+            })
+        }
+        Err(e) => Json(ApiResponse {
+            success: false,
+            data: None,
+            error: Some(format!("Failed to load infrastructure: {}", e)),
+        }),
+    }
+}
+
+async fn install_git_pack(
+    State(state): State<AppState>,
+    Json(req): Json<InstallGitPackRequest>,
+) -> Json<ApiResponse<String>> {
+    // Validate Git URL
+    if req.git_url.is_empty() {
+        return Json(ApiResponse {
+            success: false,
+            data: None,
+            error: Some("Git URL cannot be empty".to_string()),
+        });
+    }
+
+    // Extract repository name from URL (e.g., https://github.com/user/repo.git -> repo)
+    let repo_name = req
+        .git_url
+        .trim_end_matches(".git")
+        .split('/')
+        .next_back()
+        .unwrap_or("template-pack")
+        .to_string();
+
+    // Get home directory for template packs
+    let home_dir = match dirs::home_dir() {
+        Some(dir) => dir,
+        None => {
+            return Json(ApiResponse {
+                success: false,
+                data: None,
+                error: Some("Could not determine home directory".to_string()),
+            });
+        }
+    };
+
+    let template_packs_dir = home_dir.join(".pmp").join("template-packs");
+    let target_path = template_packs_dir.join(&repo_name);
+
+    // Create template packs directory if it doesn't exist
+    if !state.ctx.fs.exists(&template_packs_dir)
+        && let Err(e) = state.ctx.fs.create_dir_all(&template_packs_dir)
+    {
+        return Json(ApiResponse {
+            success: false,
+            data: None,
+            error: Some(format!("Failed to create template packs directory: {}", e)),
+        });
+    }
+
+    // Check if pack already exists
+    if state.ctx.fs.exists(&target_path) {
+        return Json(ApiResponse {
+            success: false,
+            data: None,
+            error: Some(format!(
+                "Template pack '{}' already exists at {}. Please remove it first or use a different name.",
+                repo_name,
+                target_path.display()
+            )),
+        });
+    }
+
+    // Clone the repository
+    let output = state.ctx.command.execute(
+        "git",
+        &["clone", &req.git_url, target_path.to_str().unwrap()],
+        &template_packs_dir,
+    );
+
+    match output {
+        Ok(result) => {
+            if result.status.success() {
+                // Verify that .pmp.template-pack.yaml exists
+                let pack_yaml = target_path.join(".pmp.template-pack.yaml");
+                if !state.ctx.fs.exists(&pack_yaml) {
+                    // Cleanup the cloned directory
+                    let _ = state.ctx.fs.remove_dir_all(&target_path);
+                    return Json(ApiResponse {
+                        success: false,
+                        data: None,
+                        error: Some(
+                            "Cloned repository is not a valid template pack (missing .pmp.template-pack.yaml)"
+                                .to_string(),
+                        ),
+                    });
+                }
+
+                Json(ApiResponse {
+                    success: true,
+                    data: Some(format!(
+                        "Successfully cloned template pack '{}' to {}",
+                        repo_name,
+                        target_path.display()
+                    )),
+                    error: None,
+                })
+            } else {
+                let error_msg = String::from_utf8_lossy(&result.stderr).to_string();
+                Json(ApiResponse {
+                    success: false,
+                    data: None,
+                    error: Some(format!("Git clone failed: {}", error_msg)),
+                })
+            }
+        }
+        Err(e) => Json(ApiResponse {
+            success: false,
+            data: None,
+            error: Some(format!("Failed to execute git clone: {}", e)),
+        }),
+    }
+}
+
+async fn install_local_pack(
+    State(state): State<AppState>,
+    Json(req): Json<InstallLocalPackRequest>,
+) -> Json<ApiResponse<String>> {
+    use std::path::PathBuf;
+
+    let local_path = PathBuf::from(&req.local_path);
+
+    // Verify the path exists
+    if !state.ctx.fs.exists(&local_path) {
+        return Json(ApiResponse {
+            success: false,
+            data: None,
+            error: Some(format!("Path does not exist: {}", local_path.display())),
+        });
+    }
+
+    // Verify it's a directory
+    if !state.ctx.fs.is_dir(&local_path) {
+        return Json(ApiResponse {
+            success: false,
+            data: None,
+            error: Some(format!("Path is not a directory: {}", local_path.display())),
+        });
+    }
+
+    // Verify .pmp.template-pack.yaml exists
+    let pack_yaml = local_path.join(".pmp.template-pack.yaml");
+    if !state.ctx.fs.exists(&pack_yaml) {
+        return Json(ApiResponse {
+            success: false,
+            data: None,
+            error: Some(
+                "Directory is not a valid template pack (missing .pmp.template-pack.yaml)"
+                    .to_string(),
+            ),
+        });
+    }
+
+    // Try to load the template pack to validate it
+    match crate::template::metadata::TemplatePackResource::from_file(&*state.ctx.fs, &pack_yaml) {
+        Ok(pack) => Json(ApiResponse {
+            success: true,
+            data: Some(format!(
+                "Successfully loaded template pack '{}' from {}",
+                pack.metadata.name,
+                local_path.display()
+            )),
+            error: None,
+        }),
+        Err(e) => Json(ApiResponse {
+            success: false,
+            data: None,
+            error: Some(format!("Failed to load template pack: {}", e)),
         }),
     }
 }

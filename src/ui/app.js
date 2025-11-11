@@ -1,7 +1,8 @@
 // Global state
 let templatePacks = [];
 let projects = [];
-let infrastructure = null;
+let infrastructures = []; // Array to store multiple infrastructures
+let currentInfrastructure = null; // Currently selected infrastructure
 
 // Utility functions
 function showLoading() {
@@ -58,8 +59,8 @@ $('.tab-button').on('click', function() {
     const tab = $(this).data('tab');
 
     // Update tab buttons
-    $('.tab-button').removeClass('border-blue-600 text-blue-600').addClass('text-gray-600');
-    $(this).removeClass('text-gray-600').addClass('border-blue-600 text-blue-600');
+    $('.tab-button').removeClass('border-indigo-600 text-indigo-600').addClass('text-gray-600');
+    $(this).removeClass('text-gray-600').addClass('border-indigo-600 text-indigo-600');
 
     // Update tab content
     $('.tab-content').addClass('hidden');
@@ -68,6 +69,104 @@ $('.tab-button').on('click', function() {
 
 // Close modal
 $('#closeModal').on('click', hideModal);
+
+// Infrastructure Tab
+$('#addInfraBtn').on('click', async function() {
+    const path = $('#infraPath').val().trim() || '.';
+    showLoading();
+
+    try {
+        const response = await $.post('/api/infrastructure/load', {
+            path: path
+        });
+
+        if (response.success) {
+            // Add to infrastructures list
+            infrastructures.push(response.data);
+            currentInfrastructure = response.data;
+            renderInfrastructures();
+            $('#infraPath').val('');
+            showStatus(`Successfully loaded infrastructure: ${response.data.name}`, 'success');
+        } else {
+            showStatus(`Error: ${response.error}`, 'error');
+        }
+    } catch (error) {
+        showStatus(`Failed to load infrastructure: ${error.message}`, 'error');
+    } finally {
+        hideLoading();
+    }
+});
+
+// Template Packs Tab - Installation method toggle
+$('#installMethod').on('change', function() {
+    const method = $(this).val();
+    if (method === 'git') {
+        $('#gitInstallDiv').removeClass('hidden');
+        $('#localInstallDiv').addClass('hidden');
+    } else {
+        $('#gitInstallDiv').addClass('hidden');
+        $('#localInstallDiv').removeClass('hidden');
+    }
+});
+
+// Template Packs - Git installation
+$('#installGitBtn').on('click', async function() {
+    const gitUrl = $('#gitUrl').val().trim();
+    if (!gitUrl) {
+        showStatus('Please enter a Git URL', 'warning');
+        return;
+    }
+
+    showLoading();
+    try {
+        const response = await $.post('/api/template-packs/install-git', {
+            git_url: gitUrl
+        });
+
+        if (response.success) {
+            $('#gitUrl').val('');
+            showStatus(response.data, 'success');
+            // Automatically refresh the template packs list
+            $('#loadTemplatesBtn').trigger('click');
+        } else {
+            showStatus(`Error: ${response.error}`, 'error');
+        }
+    } catch (error) {
+        showStatus(`Failed to clone repository: ${error.message}`, 'error');
+    } finally {
+        hideLoading();
+    }
+});
+
+// Template Packs - Local installation
+$('#installLocalBtn').on('click', async function() {
+    const localPath = $('#localPath').val().trim();
+    if (!localPath) {
+        showStatus('Please enter a local path', 'warning');
+        return;
+    }
+
+    showLoading();
+    try {
+        const response = await $.post('/api/template-packs/install-local', {
+            local_path: localPath
+        });
+
+        if (response.success) {
+            $('#localPath').val('');
+            showStatus(response.data, 'success');
+            // Note: Local packs are not copied, they are just validated
+            // User needs to add them to template_packs_paths when using them
+            showStatus(response.data + ' (Use this path in template_packs_paths to access)', 'info');
+        } else {
+            showStatus(`Error: ${response.error}`, 'error');
+        }
+    } catch (error) {
+        showStatus(`Failed to load template pack: ${error.message}`, 'error');
+    } finally {
+        hideLoading();
+    }
+});
 
 // Templates Tab
 $('#loadTemplatesBtn').on('click', async function() {
@@ -496,6 +595,98 @@ $('#loadInfrastructureBtn').on('click', async function() {
     }
 });
 
+function renderInfrastructures() {
+    const $list = $('#infrastructureList');
+    $list.empty();
+
+    if (infrastructures.length === 0) {
+        $list.html('<p class="text-gray-500">No infrastructures loaded. Use the form above to load an infrastructure.</p>');
+        $('#currentInfra').text('No infrastructure loaded');
+        return;
+    }
+
+    // Update header with current infrastructure info
+    if (currentInfrastructure) {
+        $('#currentInfra').text(`Current: ${currentInfrastructure.name} (${currentInfrastructure.environments.length} env(s))`);
+    }
+
+    infrastructures.forEach((infra, index) => {
+        const isCurrent = currentInfrastructure && currentInfrastructure.name === infra.name;
+        const $infraCard = $(`
+            <div class="border ${isCurrent ? 'border-indigo-400 bg-indigo-50' : 'border-gray-200'} rounded-lg p-4 hover:shadow-md transition-shadow">
+                <div class="flex items-center justify-between mb-2">
+                    <h3 class="text-xl font-semibold text-indigo-700">${infra.name}</h3>
+                    ${isCurrent ? '<span class="bg-indigo-600 text-white px-2 py-1 rounded text-xs">Current</span>' : ''}
+                </div>
+                ${infra.description ? `<p class="text-gray-600 mb-3">${infra.description}</p>` : ''}
+                <div class="flex items-center justify-between">
+                    <span class="text-sm text-gray-500">${infra.environments.length} environment(s), ${infra.categories.length} categor${infra.categories.length === 1 ? 'y' : 'ies'}</span>
+                    <div class="flex gap-2">
+                        ${!isCurrent ? `<button class="select-infra-btn bg-indigo-600 text-white px-3 py-1 rounded text-sm hover:bg-indigo-700" data-index="${index}">Use</button>` : ''}
+                        <button class="view-infra-btn bg-blue-600 text-white px-3 py-1 rounded text-sm hover:bg-blue-700" data-index="${index}">View Details</button>
+                        <button class="remove-infra-btn bg-red-600 text-white px-3 py-1 rounded text-sm hover:bg-red-700" data-index="${index}">Remove</button>
+                    </div>
+                </div>
+            </div>
+        `);
+        $list.append($infraCard);
+    });
+
+    // Attach event handlers
+    $('.select-infra-btn').on('click', function() {
+        const index = parseInt($(this).data('index'));
+        currentInfrastructure = infrastructures[index];
+        renderInfrastructures();
+        showStatus(`Switched to infrastructure: ${currentInfrastructure.name}`, 'success');
+    });
+
+    $('.view-infra-btn').on('click', function() {
+        const index = parseInt($(this).data('index'));
+        const infra = infrastructures[index];
+        showInfrastructureModal(infra);
+    });
+
+    $('.remove-infra-btn').on('click', function() {
+        const index = parseInt($(this).data('index'));
+        const infra = infrastructures[index];
+        if (confirm(`Remove infrastructure "${infra.name}"?`)) {
+            infrastructures.splice(index, 1);
+            if (currentInfrastructure && currentInfrastructure.name === infra.name) {
+                currentInfrastructure = infrastructures.length > 0 ? infrastructures[0] : null;
+            }
+            renderInfrastructures();
+            showStatus(`Removed infrastructure: ${infra.name}`, 'success');
+        }
+    });
+}
+
+function showInfrastructureModal(infra) {
+    let content = `
+        <div class="space-y-4">
+            ${infra.description ? `<p class="text-gray-700">${infra.description}</p>` : ''}
+
+            <div>
+                <h4 class="font-semibold mb-2">Environments</h4>
+                <div class="flex flex-wrap gap-2">
+                    ${infra.environments.map(env => `
+                        <span class="bg-green-100 text-green-800 px-3 py-1 rounded">${env}</span>
+                    `).join('')}
+                </div>
+            </div>
+
+            ${infra.categories && infra.categories.length > 0 ? `
+                <div>
+                    <h4 class="font-semibold mb-2">Categories</h4>
+                    <div class="space-y-2">
+                        ${renderCategories(infra.categories)}
+                    </div>
+                </div>
+            ` : ''}
+        </div>
+    `;
+    showModal(`Infrastructure: ${infra.name}`, content);
+}
+
 function renderInfrastructure(infra) {
     const $div = $('#infrastructureDetails');
     $div.empty();
@@ -552,6 +743,9 @@ function renderCategories(categories, level = 0) {
 
 // Load template packs for the generate form on page load
 $(document).ready(async function() {
+    // Initialize infrastructure list
+    renderInfrastructures();
+
     try {
         const response = await $.get('/api/template-packs');
         if (response.success) {
