@@ -65,3 +65,15 @@ impl Default for Context {
         Self::new()
     }
 }
+
+impl Clone for Context {
+    fn clone(&self) -> Self {
+        Self {
+            fs: Arc::clone(&self.fs),
+            input: Arc::clone(&self.input),
+            output: Arc::clone(&self.output),
+            command: Arc::clone(&self.command),
+            executor_registry: Arc::clone(&self.executor_registry),
+        }
+    }
+}

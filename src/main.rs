@@ -10,7 +10,7 @@ mod traits;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use commands::{ApplyCommand, CreateCommand, DestroyCommand, FindCommand, GenerateCommand, InitCommand, PreviewCommand, RefreshCommand, UpdateCommand};
+use commands::{ApplyCommand, CreateCommand, DestroyCommand, FindCommand, GenerateCommand, InitCommand, PreviewCommand, RefreshCommand, UiCommand, UpdateCommand};
 
 #[derive(Parser)]
 #[command(name = "pmp")]
@@ -146,6 +146,18 @@ enum Commands {
         #[arg(short, long)]
         template_packs_paths: Option<String>,
     },
+
+    /// Start the web UI server
+    #[command(long_about = "Start the web UI server\n\nProvides a web-based interface for managing PMP projects, templates, and infrastructure.\nThe UI exposes all CLI functionality through an intuitive web interface.\n\nExamples:\n  pmp ui\n  pmp ui --port 3000\n  pmp ui --host 0.0.0.0 --port 8080")]
+    Ui {
+        /// Port to bind the server to (defaults to 8080)
+        #[arg(short, long)]
+        port: Option<u16>,
+
+        /// Host to bind the server to (defaults to 127.0.0.1)
+        #[arg(long)]
+        host: Option<String>,
+    },
 }
 
 fn main() -> Result<()> {
@@ -183,6 +195,9 @@ fn main() -> Result<()> {
         }
         Commands::Update { path, template_packs_paths } => {
             UpdateCommand::execute(&ctx, path.as_deref(), template_packs_paths.as_deref())?;
+        }
+        Commands::Ui { port, host } => {
+            UiCommand::execute(&ctx, port, host)?;
         }
     }
 

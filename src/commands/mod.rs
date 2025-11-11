@@ -6,6 +6,7 @@ pub mod generate;
 pub mod init;
 pub mod preview;
 pub mod refresh;
+pub mod ui;
 pub mod update;
 
 pub use apply::ApplyCommand;
@@ -16,4 +17,5 @@ pub use generate::GenerateCommand;
 pub use init::InitCommand;
 pub use preview::PreviewCommand;
 pub use refresh::RefreshCommand;
+pub use ui::UiCommand;
 pub use update::UpdateCommand;

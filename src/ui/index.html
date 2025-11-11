@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PMP - Poor Man's Platform</title>
+    <link rel="stylesheet" href="/static/tailwind.css">
+    <script src="/static/jquery.js"></script>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <!-- Header -->
+    <header class="bg-blue-600 text-white shadow-lg">
+        <div class="container mx-auto px-4 py-6">
+            <h1 class="text-3xl font-bold">PMP Web Interface</h1>
+            <p class="text-blue-100 mt-1">Poor Man's Platform - Infrastructure as Code Management</p>
+        </div>
+    </header>
+
+    <!-- Main Container -->
+    <div class="container mx-auto px-4 py-8">
+        <!-- Navigation Tabs -->
+        <div class="bg-white rounded-lg shadow-md mb-6">
+            <div class="flex border-b">
+                <button class="tab-button px-6 py-3 font-semibold border-b-2 border-blue-600 text-blue-600" data-tab="templates">
+                    Templates
+                </button>
+                <button class="tab-button px-6 py-3 font-semibold text-gray-600 hover:text-blue-600" data-tab="projects">
+                    Projects
+                </button>
+                <button class="tab-button px-6 py-3 font-semibold text-gray-600 hover:text-blue-600" data-tab="generate">
+                    Generate
+                </button>
+                <button class="tab-button px-6 py-3 font-semibold text-gray-600 hover:text-blue-600" data-tab="infrastructure">
+                    Infrastructure
+                </button>
+            </div>
+        </div>
+
+        <!-- Status Message Area -->
+        <div id="statusMessage" class="hidden mb-6"></div>
+
+        <!-- Templates Tab -->
+        <div id="templates-tab" class="tab-content">
+            <div class="bg-white rounded-lg shadow-md p-6">
+                <h2 class="text-2xl font-bold mb-4">Template Packs</h2>
+                <p class="text-gray-600 mb-4">Browse and explore available template packs</p>
+
+                <button id="loadTemplatesBtn" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 mb-4">
+                    Load Template Packs
+                </button>
+
+                <div id="templatePacksList" class="space-y-4">
+                    <!-- Template packs will be loaded here -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Projects Tab -->
+        <div id="projects-tab" class="tab-content hidden">
+            <div class="bg-white rounded-lg shadow-md p-6">
+                <h2 class="text-2xl font-bold mb-4">Projects</h2>
+                <p class="text-gray-600 mb-4">Manage your infrastructure projects</p>
+
+                <div class="flex gap-4 mb-4">
+                    <button id="loadProjectsBtn" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">
+                        Load Projects
+                    </button>
+                    <input type="text" id="projectNameFilter" placeholder="Filter by name..."
+                           class="border border-gray-300 rounded px-4 py-2 flex-1">
+                    <input type="text" id="projectKindFilter" placeholder="Filter by kind..."
+                           class="border border-gray-300 rounded px-4 py-2 flex-1">
+                </div>
+
+                <div id="projectsList" class="space-y-4">
+                    <!-- Projects will be loaded here -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Generate Tab -->
+        <div id="generate-tab" class="tab-content hidden">
+            <div class="bg-white rounded-lg shadow-md p-6">
+                <h2 class="text-2xl font-bold mb-4">Generate from Template</h2>
+                <p class="text-gray-600 mb-4">Generate files from a template without creating a project structure</p>
+
+                <form id="generateForm" class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Template Pack</label>
+                        <select id="genTemplatePack" class="w-full border border-gray-300 rounded px-4 py-2" required>
+                            <option value="">Select a template pack...</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Template</label>
+                        <select id="genTemplate" class="w-full border border-gray-300 rounded px-4 py-2" required disabled>
+                            <option value="">Select a template...</option>
+                        </select>
+                    </div>
+
+                    <div id="genEnvironmentDiv" class="hidden">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Environment</label>
+                        <select id="genEnvironment" class="w-full border border-gray-300 rounded px-4 py-2">
+                            <option value="">Select an environment...</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Name</label>
+                        <input type="text" id="genName" class="w-full border border-gray-300 rounded px-4 py-2"
+                               required pattern="[a-z0-9-]+"
+                               placeholder="my-project">
+                        <p class="text-sm text-gray-500 mt-1">Only lowercase letters, numbers, and hyphens</p>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Output Directory</label>
+                        <input type="text" id="genOutputDir" class="w-full border border-gray-300 rounded px-4 py-2"
+                               placeholder="./output (leave empty for current directory)">
+                    </div>
+
+                    <div id="genInputsDiv" class="space-y-3">
+                        <!-- Dynamic inputs will be added here -->
+                    </div>
+
+                    <button type="submit" class="bg-green-600 text-white px-6 py-2 rounded hover:bg-green-700">
+                        Generate Files
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Infrastructure Tab -->
+        <div id="infrastructure-tab" class="tab-content hidden">
+            <div class="bg-white rounded-lg shadow-md p-6">
+                <h2 class="text-2xl font-bold mb-4">Infrastructure</h2>
+                <p class="text-gray-600 mb-4">View infrastructure configuration</p>
+
+                <button id="loadInfrastructureBtn" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 mb-4">
+                    Load Infrastructure
+                </button>
+
+                <div id="infrastructureDetails" class="space-y-4">
+                    <!-- Infrastructure details will be loaded here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for Project Actions -->
+    <div id="projectActionModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50">
+        <div class="bg-white rounded-lg shadow-xl p-6 max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+            <div class="flex justify-between items-center mb-4">
+                <h3 id="modalTitle" class="text-xl font-bold"></h3>
+                <button id="closeModal" class="text-gray-400 hover:text-gray-600 text-2xl">&times;</button>
+            </div>
+            <div id="modalContent" class="space-y-4">
+                <!-- Modal content will be loaded here -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading Spinner -->
+    <div id="loadingSpinner" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50">
+        <div class="bg-white rounded-lg p-8 flex flex-col items-center">
+            <div class="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-blue-600 mb-4"></div>
+            <p class="text-gray-700 font-medium">Loading...</p>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
