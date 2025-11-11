@@ -7,31 +7,38 @@
     <link rel="stylesheet" href="/static/tailwind.css">
     <script src="/static/jquery.js"></script>
 </head>
-<body class="bg-gray-50 min-h-screen">
+<body class="bg-gradient-to-br from-gray-50 to-gray-100 min-h-screen">
     <!-- Header -->
-    <header class="bg-blue-600 text-white shadow-lg">
-        <div class="container mx-auto px-4 py-6">
-            <h1 class="text-3xl font-bold">PMP Web Interface</h1>
-            <p class="text-blue-100 mt-1">Poor Man's Platform - Infrastructure as Code Management</p>
+    <header class="bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-500 text-white shadow-lg">
+        <div class="container mx-auto px-4 py-3">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h1 class="text-xl font-bold">PMP Web Interface</h1>
+                    <p class="text-xs text-indigo-100">Infrastructure as Code Management</p>
+                </div>
+                <div class="text-xs text-right">
+                    <div id="currentInfra" class="text-indigo-100"></div>
+                </div>
+            </div>
         </div>
     </header>
 
     <!-- Main Container -->
-    <div class="container mx-auto px-4 py-8">
+    <div class="container mx-auto px-4 py-6">
         <!-- Navigation Tabs -->
         <div class="bg-white rounded-lg shadow-md mb-6">
-            <div class="flex border-b">
-                <button class="tab-button px-6 py-3 font-semibold border-b-2 border-blue-600 text-blue-600" data-tab="templates">
-                    Templates
+            <div class="flex border-b overflow-x-auto">
+                <button class="tab-button px-4 py-2 font-semibold border-b-2 border-indigo-600 text-indigo-600 whitespace-nowrap" data-tab="infrastructure">
+                    🏗️ Infrastructure
                 </button>
-                <button class="tab-button px-6 py-3 font-semibold text-gray-600 hover:text-blue-600" data-tab="projects">
-                    Projects
+                <button class="tab-button px-4 py-2 font-semibold text-gray-600 hover:text-indigo-600 whitespace-nowrap" data-tab="template-packs">
+                    📦 Template Packs
                 </button>
-                <button class="tab-button px-6 py-3 font-semibold text-gray-600 hover:text-blue-600" data-tab="generate">
-                    Generate
+                <button class="tab-button px-4 py-2 font-semibold text-gray-600 hover:text-indigo-600 whitespace-nowrap" data-tab="projects">
+                    📁 Projects
                 </button>
-                <button class="tab-button px-6 py-3 font-semibold text-gray-600 hover:text-blue-600" data-tab="infrastructure">
-                    Infrastructure
+                <button class="tab-button px-4 py-2 font-semibold text-gray-600 hover:text-indigo-600 whitespace-nowrap" data-tab="generate">
+                    ⚡ Generate
                 </button>
             </div>
         </div>
@@ -39,15 +46,84 @@
         <!-- Status Message Area -->
         <div id="statusMessage" class="hidden mb-6"></div>
 
-        <!-- Templates Tab -->
-        <div id="templates-tab" class="tab-content">
+        <!-- Infrastructure Tab -->
+        <div id="infrastructure-tab" class="tab-content">
             <div class="bg-white rounded-lg shadow-md p-6">
-                <h2 class="text-2xl font-bold mb-4">Template Packs</h2>
-                <p class="text-gray-600 mb-4">Browse and explore available template packs</p>
+                <h2 class="text-2xl font-bold mb-4 text-indigo-700">📂 Infrastructure Projects</h2>
+                <p class="text-gray-600 mb-4">Manage your infrastructure projects and configurations</p>
 
-                <button id="loadTemplatesBtn" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 mb-4">
-                    Load Template Packs
-                </button>
+                <div class="mb-6 p-4 bg-indigo-50 rounded-lg border border-indigo-200">
+                    <h3 class="font-semibold mb-3 text-indigo-800">Add Infrastructure</h3>
+                    <div class="space-y-3">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Infrastructure Directory Path</label>
+                            <div class="flex gap-2">
+                                <input type="text" id="infraPath" class="flex-1 border border-gray-300 rounded px-4 py-2"
+                                       placeholder="/path/to/infrastructure or leave empty for current directory">
+                                <button id="addInfraBtn" class="bg-indigo-600 text-white px-6 py-2 rounded hover:bg-indigo-700 whitespace-nowrap">
+                                    Load Infrastructure
+                                </button>
+                            </div>
+                            <p class="text-xs text-gray-500 mt-1">Path to directory containing .pmp.infrastructure.yaml</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="infrastructureList" class="space-y-4">
+                    <!-- Loaded infrastructures will be shown here -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Template Packs Tab -->
+        <div id="template-packs-tab" class="tab-content hidden">
+            <div class="bg-white rounded-lg shadow-md p-6">
+                <h2 class="text-2xl font-bold mb-4 text-purple-700">📦 Template Packs</h2>
+                <p class="text-gray-600 mb-4">Manage and install template packs for your projects</p>
+
+                <div class="mb-6 p-4 bg-purple-50 rounded-lg border border-purple-200">
+                    <h3 class="font-semibold mb-3 text-purple-800">Install Template Pack</h3>
+                    <div class="space-y-3">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Installation Method</label>
+                            <select id="installMethod" class="w-full border border-gray-300 rounded px-4 py-2 mb-3">
+                                <option value="git">Clone from Git URL</option>
+                                <option value="local">Load from Local Path</option>
+                            </select>
+                        </div>
+
+                        <div id="gitInstallDiv">
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Git Repository URL</label>
+                            <div class="flex gap-2">
+                                <input type="text" id="gitUrl" class="flex-1 border border-gray-300 rounded px-4 py-2"
+                                       placeholder="https://github.com/user/template-pack.git">
+                                <button id="installGitBtn" class="bg-purple-600 text-white px-6 py-2 rounded hover:bg-purple-700 whitespace-nowrap">
+                                    Clone & Install
+                                </button>
+                            </div>
+                            <p class="text-xs text-gray-500 mt-1">Will clone to ~/.pmp/template-packs/</p>
+                        </div>
+
+                        <div id="localInstallDiv" class="hidden">
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Local Directory Path</label>
+                            <div class="flex gap-2">
+                                <input type="text" id="localPath" class="flex-1 border border-gray-300 rounded px-4 py-2"
+                                       placeholder="/path/to/template-pack">
+                                <button id="installLocalBtn" class="bg-purple-600 text-white px-6 py-2 rounded hover:bg-purple-700 whitespace-nowrap">
+                                    Load Pack
+                                </button>
+                            </div>
+                            <p class="text-xs text-gray-500 mt-1">Path to directory containing .pmp.template-pack.yaml</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mb-4">
+                    <h3 class="font-semibold mb-2 text-gray-700">Installed Template Packs</h3>
+                    <button id="loadTemplatesBtn" class="bg-purple-600 text-white px-4 py-2 rounded hover:bg-purple-700 text-sm">
+                        Refresh List
+                    </button>
+                </div>
 
                 <div id="templatePacksList" class="space-y-4">
                     <!-- Template packs will be loaded here -->
@@ -58,7 +134,7 @@
         <!-- Projects Tab -->
         <div id="projects-tab" class="tab-content hidden">
             <div class="bg-white rounded-lg shadow-md p-6">
-                <h2 class="text-2xl font-bold mb-4">Projects</h2>
+                <h2 class="text-2xl font-bold mb-4 text-blue-700">📁 Projects</h2>
                 <p class="text-gray-600 mb-4">Manage your infrastructure projects</p>
 
                 <div class="flex gap-4 mb-4">
@@ -80,7 +156,7 @@
         <!-- Generate Tab -->
         <div id="generate-tab" class="tab-content hidden">
             <div class="bg-white rounded-lg shadow-md p-6">
-                <h2 class="text-2xl font-bold mb-4">Generate from Template</h2>
+                <h2 class="text-2xl font-bold mb-4 text-green-700">⚡ Generate from Template</h2>
                 <p class="text-gray-600 mb-4">Generate files from a template without creating a project structure</p>
 
                 <form id="generateForm" class="space-y-4">
@@ -127,22 +203,6 @@
                         Generate Files
                     </button>
                 </form>
-            </div>
-        </div>
-
-        <!-- Infrastructure Tab -->
-        <div id="infrastructure-tab" class="tab-content hidden">
-            <div class="bg-white rounded-lg shadow-md p-6">
-                <h2 class="text-2xl font-bold mb-4">Infrastructure</h2>
-                <p class="text-gray-600 mb-4">View infrastructure configuration</p>
-
-                <button id="loadInfrastructureBtn" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 mb-4">
-                    Load Infrastructure
-                </button>
-
-                <div id="infrastructureDetails" class="space-y-4">
-                    <!-- Infrastructure details will be loaded here -->
-                </div>
             </div>
         </div>
     </div>
