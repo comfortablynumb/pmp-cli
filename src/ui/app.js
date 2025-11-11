@@ -57,9 +57,41 @@ function hideModal() {
 }
 
 // Directory Picker
+async function loadDrives() {
+    try {
+        const response = await $.get('/api/drives');
+
+        if (response.success && response.data && response.data.length > 0) {
+            // Show drive selector
+            $('#driveSelector').removeClass('hidden');
+
+            // Populate drive options
+            const $select = $('#driveSelect');
+            $select.empty();
+
+            response.data.forEach(drive => {
+                $select.append(`<option value="${drive.path}">${drive.name}</option>`);
+            });
+
+            // Set up change handler
+            $select.off('change').on('change', function() {
+                const selectedPath = $(this).val();
+                loadDirectoryEntries(selectedPath);
+            });
+        } else {
+            // Hide drive selector if no drives available
+            $('#driveSelector').addClass('hidden');
+        }
+    } catch (error) {
+        console.error('Failed to load drives:', error);
+        $('#driveSelector').addClass('hidden');
+    }
+}
+
 function openDirectoryPicker(callback, initialPath = null) {
     pickerCallback = callback;
     currentPickerPath = initialPath;
+    loadDrives();
     loadDirectoryEntries(currentPickerPath);
     $('#directoryPickerModal').removeClass('hidden').addClass('flex');
 }
@@ -78,6 +110,19 @@ async function loadDirectoryEntries(path) {
             currentPickerPath = path || response.data[0]?.path || '.';
             $('#currentPickerPath').text(currentPickerPath);
             renderDirectoryEntries(response.data);
+
+            // Update drive selector to match current path (if on Windows)
+            const $driveSelect = $('#driveSelect');
+            if ($driveSelect.length > 0) {
+                // Try to match the current path to a drive
+                $driveSelect.find('option').each(function() {
+                    const drivePath = $(this).val();
+                    if (currentPickerPath.startsWith(drivePath)) {
+                        $driveSelect.val(drivePath);
+                        return false; // break
+                    }
+                });
+            }
         } else {
             showStatus(`Error browsing directory: ${response.error}`, 'error');
         }
