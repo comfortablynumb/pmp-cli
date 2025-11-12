@@ -176,15 +176,17 @@ impl UiCommand {
         ctx.output.section("PMP Web UI");
 
         // Check for infrastructure in current directory
-        let current_dir = std::env::current_dir()
-            .context("Failed to get current directory")?;
+        let current_dir = std::env::current_dir().context("Failed to get current directory")?;
         let infra_path = current_dir.join(".pmp.infrastructure.yaml");
 
         if !ctx.fs.exists(&infra_path) {
-            ctx.output.error("No infrastructure project found in current directory");
-            ctx.output.dimmed(&format!("Expected file: {}", infra_path.display()));
+            ctx.output
+                .error("No infrastructure project found in current directory");
+            ctx.output
+                .dimmed(&format!("Expected file: {}", infra_path.display()));
             ctx.output.blank();
-            ctx.output.dimmed("The UI command must be run from an infrastructure project directory.");
+            ctx.output
+                .dimmed("The UI command must be run from an infrastructure project directory.");
             ctx.output.dimmed("Create one first using 'pmp init' or navigate to an existing infrastructure project.");
             return Err(anyhow::anyhow!("No infrastructure project found"));
         }
@@ -193,7 +195,8 @@ impl UiCommand {
         crate::template::metadata::InfrastructureResource::from_file(&*ctx.fs, &infra_path)
             .context("Failed to load infrastructure file")?;
 
-        ctx.output.success(&format!("Found infrastructure: {}", infra_path.display()));
+        ctx.output
+            .success(&format!("Found infrastructure: {}", infra_path.display()));
         ctx.output.dimmed("Starting HTTP server...");
 
         let port = port.unwrap_or(8080);
