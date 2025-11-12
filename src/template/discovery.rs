@@ -105,8 +105,8 @@ impl TemplateDiscovery {
     ) -> Result<Vec<TemplatePackInfo>> {
         let mut template_packs = Vec::new();
 
-        // Walk through subdirectories looking for .pmp.template-pack.yaml files
-        let entries = fs.walk_dir(base_path, 2)?;
+        // Walk through subdirectories recursively looking for .pmp.template-pack.yaml files
+        let entries = fs.walk_dir(base_path, 100)?;
 
         for entry_path in entries {
             if fs.is_file(&entry_path)
@@ -146,8 +146,8 @@ impl TemplateDiscovery {
             return Ok(templates);
         }
 
-        // Walk through template subdirectories looking for .pmp.template.yaml files
-        let entries = fs.walk_dir(&templates_dir, 2)?;
+        // Walk through template subdirectories recursively looking for .pmp.template.yaml files
+        let entries = fs.walk_dir(&templates_dir, 100)?;
 
         for entry_path in entries {
             if fs.is_file(&entry_path)
@@ -189,8 +189,8 @@ impl TemplateDiscovery {
             return Ok(plugins);
         }
 
-        // Walk through plugin subdirectories looking for .pmp.plugin.yaml files
-        let entries = fs.walk_dir(&plugins_dir, 2)?;
+        // Walk through plugin subdirectories recursively looking for .pmp.plugin.yaml files
+        let entries = fs.walk_dir(&plugins_dir, 100)?;
 
         for entry_path in entries {
             if fs.is_file(&entry_path)
@@ -286,8 +286,8 @@ impl TemplateDiscovery {
     ) -> Result<Vec<TemplateInfo>> {
         let mut templates = Vec::new();
 
-        // Walk through subdirectories looking for .pmp.template.yaml files
-        let entries = fs.walk_dir(base_path, 2)?;
+        // Walk through subdirectories recursively looking for .pmp.template.yaml files
+        let entries = fs.walk_dir(base_path, 100)?;
 
         for entry_path in entries {
             if fs.is_file(&entry_path)

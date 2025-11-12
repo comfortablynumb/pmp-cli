@@ -12,6 +12,10 @@ pub enum OutputMessage {
     Subsection(String),
     KeyValue(String, String),
     Dimmed(String),
+    DarkYellow(String),
+    Cyan(String),
+    BrightWhite(String),
+    Lavender(String),
     Blank,
 }
 
@@ -44,6 +48,21 @@ pub trait Output: Send + Sync {
 
     /// Print a dimmed/muted message
     fn dimmed(&self, message: &str);
+
+    /// Print a message in dark yellow
+    #[allow(dead_code)]
+    fn dark_yellow(&self, message: &str);
+
+    /// Print a message in bright cyan (for highlighting URLs, paths, etc.)
+    #[allow(dead_code)]
+    fn cyan(&self, message: &str);
+
+    /// Print a message in bright white (for titles and emphasis)
+    #[allow(dead_code)]
+    fn bright_white(&self, message: &str);
+
+    /// Print a message in lavender/light purple (for values like URLs, paths, etc.)
+    fn lavender(&self, message: &str);
 
     /// Print a blank line
     fn blank(&self);
@@ -93,6 +112,22 @@ impl Output for TerminalOutput {
 
     fn dimmed(&self, message: &str) {
         crate::output::dimmed(message);
+    }
+
+    fn dark_yellow(&self, message: &str) {
+        crate::output::dark_yellow(message);
+    }
+
+    fn cyan(&self, message: &str) {
+        crate::output::cyan(message);
+    }
+
+    fn bright_white(&self, message: &str) {
+        crate::output::bright_white(message);
+    }
+
+    fn lavender(&self, message: &str) {
+        crate::output::lavender(message);
     }
 
     fn blank(&self) {
@@ -203,6 +238,10 @@ impl MockOutput {
                 OutputMessage::Subsection(s) => format!("\n--- {} ---", s),
                 OutputMessage::KeyValue(k, v) => format!("{}: {}", k, v),
                 OutputMessage::Dimmed(s) => s.clone(),
+                OutputMessage::DarkYellow(s) => s.clone(),
+                OutputMessage::Cyan(s) => s.clone(),
+                OutputMessage::BrightWhite(s) => s.clone(),
+                OutputMessage::Lavender(s) => s.clone(),
                 OutputMessage::Blank => String::new(),
             })
             .collect::<Vec<_>>()
@@ -279,6 +318,34 @@ impl Output for MockOutput {
             .lock()
             .unwrap()
             .push(OutputMessage::Dimmed(message.to_string()));
+    }
+
+    fn dark_yellow(&self, message: &str) {
+        self.messages
+            .lock()
+            .unwrap()
+            .push(OutputMessage::DarkYellow(message.to_string()));
+    }
+
+    fn cyan(&self, message: &str) {
+        self.messages
+            .lock()
+            .unwrap()
+            .push(OutputMessage::Cyan(message.to_string()));
+    }
+
+    fn bright_white(&self, message: &str) {
+        self.messages
+            .lock()
+            .unwrap()
+            .push(OutputMessage::BrightWhite(message.to_string()));
+    }
+
+    fn lavender(&self, message: &str) {
+        self.messages
+            .lock()
+            .unwrap()
+            .push(OutputMessage::Lavender(message.to_string()));
     }
 
     fn blank(&self) {

@@ -205,57 +205,13 @@ function renderProjects(projectsToRender) {
                         <span class="bg-green-100 text-green-700 px-1.5 py-0.5 rounded text-xs">${env}</span>
                     `).join('')}
                 </div>
-                <div class="flex flex-wrap gap-2">
-                    <button class="project-preview-btn bg-blue-500 text-white px-2 py-1 rounded text-xs hover:bg-blue-600"
-                            data-path="${project.path}" data-environments='${JSON.stringify(project.environments)}'>
-                        Preview
-                    </button>
-                    <button class="project-apply-btn bg-green-600 text-white px-2 py-1 rounded text-xs hover:bg-green-700"
-                            data-path="${project.path}" data-environments='${JSON.stringify(project.environments)}'>
-                        Apply
-                    </button>
-                    <button class="project-refresh-btn bg-yellow-600 text-white px-2 py-1 rounded text-xs hover:bg-yellow-700"
-                            data-path="${project.path}" data-environments='${JSON.stringify(project.environments)}'>
-                        Refresh
-                    </button>
-                    <button class="project-destroy-btn bg-red-600 text-white px-2 py-1 rounded text-xs hover:bg-red-700"
-                            data-path="${project.path}" data-environments='${JSON.stringify(project.environments)}'>
-                        Destroy
-                    </button>
-                </div>
+                <!-- Action buttons removed - UI is read-only -->
             </div>
         `);
         $list.append($card);
     });
 
-    // Attach event handlers
-    $('.project-preview-btn').on('click', async function() {
-        const path = $(this).data('path');
-        const environments = JSON.parse($(this).attr('data-environments') || '[]');
-        await executeProjectCommand('preview', path, environments, 'Preview');
-    });
-
-    $('.project-apply-btn').on('click', async function() {
-        const path = $(this).data('path');
-        const environments = JSON.parse($(this).attr('data-environments') || '[]');
-        if (confirm('Apply changes to this project?')) {
-            await executeProjectCommand('apply', path, environments, 'Apply');
-        }
-    });
-
-    $('.project-refresh-btn').on('click', async function() {
-        const path = $(this).data('path');
-        const environments = JSON.parse($(this).attr('data-environments') || '[]');
-        await executeProjectCommand('refresh', path, environments, 'Refresh');
-    });
-
-    $('.project-destroy-btn').on('click', async function() {
-        const path = $(this).data('path');
-        const environments = JSON.parse($(this).attr('data-environments') || '[]');
-        if (confirm('⚠️ WARNING: This will destroy all resources in this project. Are you sure?')) {
-            await executeProjectCommand('destroy', path, environments, 'Destroy');
-        }
-    });
+    // Event handlers removed - UI is read-only
 }
 
 // Search functionality
@@ -345,11 +301,7 @@ async function executeProjectCommand(command, projectPath, environments, display
     }
 }
 
-// Create project button
-$('#createProjectBtn').on('click', function() {
-    showStatus('Project creation UI coming soon...', 'info');
-    // TODO: Implement project creation modal
-});
+// Create project button removed - UI is read-only
 
 // Initialize on page load
 $(document).ready(async function() {

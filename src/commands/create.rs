@@ -507,11 +507,26 @@ impl CreateCommand {
         )
         .context("Failed to discover template packs")?;
 
-        if all_template_packs.is_empty() {
-            anyhow::bail!(
-                "No template packs found. Please create template packs in ~/.pmp/template-packs or .pmp/template-packs"
-            );
+        // Check if template packs exist, offer installation if not
+        if !crate::template::check_and_offer_installation(
+            &*ctx.fs,
+            &*ctx.output,
+            &all_template_packs,
+        )? {
+            anyhow::bail!("Cannot proceed without template packs.");
         }
+
+        // Re-discover template packs after potential installation
+        let all_template_packs = if all_template_packs.is_empty() {
+            TemplateDiscovery::discover_template_packs_with_custom_paths(
+                &*ctx.fs,
+                &*ctx.output,
+                &custom_paths,
+            )
+            .context("Failed to re-discover template packs after installation")?
+        } else {
+            all_template_packs
+        };
 
         // Step 4: Build flat list of allowed templates from category tree
         let allowed_templates =

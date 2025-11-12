@@ -102,6 +102,23 @@ impl InitCommand {
         )
         .context("Failed to discover template packs")?;
 
+        // Check if template packs exist, offer installation if not
+        // Note: init allows continuing without template packs, so we don't bail if user declines
+        let _ =
+            crate::template::check_and_offer_installation(&*ctx.fs, &*ctx.output, &template_packs)?;
+
+        // Re-discover template packs after potential installation
+        let template_packs = if template_packs.is_empty() {
+            TemplateDiscovery::discover_template_packs_with_custom_paths(
+                &*ctx.fs,
+                &*ctx.output,
+                &custom_paths,
+            )
+            .context("Failed to re-discover template packs after installation")?
+        } else {
+            template_packs
+        };
+
         // Step 4: Build template selection options organized by pack
         let mut template_options: Vec<String> = Vec::new();
         let mut template_map: HashMap<String, (String, String, String, String)> = HashMap::new(); // key -> (pack_name, template_name, api_version, kind)

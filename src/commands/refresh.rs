@@ -15,6 +15,26 @@ impl RefreshCommand {
         project_path: Option<&str>,
         extra_args: &[String],
     ) -> Result<()> {
+        // Check for template packs before proceeding
+        let env_paths: Vec<String> = std::env::var("PMP_TEMPLATE_PACKS_PATHS")
+            .ok()
+            .map(|p| crate::template::discovery::parse_colon_separated_paths(&p))
+            .unwrap_or_default();
+        let custom_paths: Vec<&str> = env_paths.iter().map(|s| s.as_str()).collect();
+
+        let template_packs =
+            crate::template::TemplateDiscovery::discover_template_packs_with_custom_paths(
+                &*ctx.fs,
+                &*ctx.output,
+                &custom_paths,
+            )
+            .context("Failed to discover template packs")?;
+
+        if !crate::template::check_and_offer_installation(&*ctx.fs, &*ctx.output, &template_packs)?
+        {
+            anyhow::bail!("Cannot proceed without template packs.");
+        }
+
         // Determine working directory
         let work_dir = if let Some(path) = project_path {
             PathBuf::from(path)
