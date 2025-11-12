@@ -791,21 +791,34 @@ async fn preview(
     State(state): State<AppState>,
     Json(req): Json<ExecutorRequest>,
 ) -> Json<ApiResponse<String>> {
+    use crate::traits::output::MockOutput;
+    use std::sync::Arc;
+
+    // Create a buffered output to capture command output
+    let buffered_output = Arc::new(MockOutput::new());
+
+    // Create a temporary context with buffered output
+    let mut temp_ctx = (*state.ctx).clone();
+    temp_ctx.output = buffered_output.clone();
+
     let result = crate::commands::PreviewCommand::execute(
-        &state.ctx,
+        &temp_ctx,
         req.path.as_deref(),
         &req.executor_args,
     );
 
+    // Get captured output
+    let output_text = buffered_output.to_text();
+
     match result {
         Ok(_) => Json(ApiResponse {
             success: true,
-            data: Some("Preview completed successfully".to_string()),
+            data: Some(output_text),
             error: None,
         }),
         Err(e) => Json(ApiResponse {
             success: false,
-            data: None,
+            data: Some(output_text),
             error: Some(e.to_string()),
         }),
     }
@@ -815,18 +828,27 @@ async fn apply(
     State(state): State<AppState>,
     Json(req): Json<ExecutorRequest>,
 ) -> Json<ApiResponse<String>> {
+    use crate::traits::output::MockOutput;
+    use std::sync::Arc;
+
+    let buffered_output = Arc::new(MockOutput::new());
+    let mut temp_ctx = (*state.ctx).clone();
+    temp_ctx.output = buffered_output.clone();
+
     let result =
-        crate::commands::ApplyCommand::execute(&state.ctx, req.path.as_deref(), &req.executor_args);
+        crate::commands::ApplyCommand::execute(&temp_ctx, req.path.as_deref(), &req.executor_args);
+
+    let output_text = buffered_output.to_text();
 
     match result {
         Ok(_) => Json(ApiResponse {
             success: true,
-            data: Some("Apply completed successfully".to_string()),
+            data: Some(output_text),
             error: None,
         }),
         Err(e) => Json(ApiResponse {
             success: false,
-            data: None,
+            data: Some(output_text),
             error: Some(e.to_string()),
         }),
     }
@@ -836,22 +858,31 @@ async fn destroy(
     State(state): State<AppState>,
     Json(req): Json<DestroyRequest>,
 ) -> Json<ApiResponse<String>> {
+    use crate::traits::output::MockOutput;
+    use std::sync::Arc;
+
+    let buffered_output = Arc::new(MockOutput::new());
+    let mut temp_ctx = (*state.ctx).clone();
+    temp_ctx.output = buffered_output.clone();
+
     let result = crate::commands::DestroyCommand::execute(
-        &state.ctx,
+        &temp_ctx,
         req.path.as_deref(),
         req.yes,
         &req.executor_args,
     );
 
+    let output_text = buffered_output.to_text();
+
     match result {
         Ok(_) => Json(ApiResponse {
             success: true,
-            data: Some("Destroy completed successfully".to_string()),
+            data: Some(output_text),
             error: None,
         }),
         Err(e) => Json(ApiResponse {
             success: false,
-            data: None,
+            data: Some(output_text),
             error: Some(e.to_string()),
         }),
     }
@@ -861,21 +892,30 @@ async fn refresh(
     State(state): State<AppState>,
     Json(req): Json<ExecutorRequest>,
 ) -> Json<ApiResponse<String>> {
+    use crate::traits::output::MockOutput;
+    use std::sync::Arc;
+
+    let buffered_output = Arc::new(MockOutput::new());
+    let mut temp_ctx = (*state.ctx).clone();
+    temp_ctx.output = buffered_output.clone();
+
     let result = crate::commands::RefreshCommand::execute(
-        &state.ctx,
+        &temp_ctx,
         req.path.as_deref(),
         &req.executor_args,
     );
 
+    let output_text = buffered_output.to_text();
+
     match result {
         Ok(_) => Json(ApiResponse {
             success: true,
-            data: Some("Refresh completed successfully".to_string()),
+            data: Some(output_text),
             error: None,
         }),
         Err(e) => Json(ApiResponse {
             success: false,
-            data: None,
+            data: Some(output_text),
             error: Some(e.to_string()),
         }),
     }

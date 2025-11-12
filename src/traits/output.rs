@@ -187,6 +187,27 @@ impl MockOutput {
     pub fn clear(&self) {
         self.messages.lock().unwrap().clear();
     }
+
+    /// Get all messages formatted as text
+    pub fn to_text(&self) -> String {
+        self.messages
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|msg| match msg {
+                OutputMessage::Success(s) => format!("✓ {}", s),
+                OutputMessage::Error(s) => format!("✗ {}", s),
+                OutputMessage::Warning(s) => format!("⚠ {}", s),
+                OutputMessage::Info(s) => s.clone(),
+                OutputMessage::Section(s) => format!("\n=== {} ===", s),
+                OutputMessage::Subsection(s) => format!("\n--- {} ---", s),
+                OutputMessage::KeyValue(k, v) => format!("{}: {}", k, v),
+                OutputMessage::Dimmed(s) => s.clone(),
+                OutputMessage::Blank => String::new(),
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
 }
 
 impl Default for MockOutput {
