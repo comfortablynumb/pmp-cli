@@ -326,10 +326,19 @@ async function executeProjectCommand(command, projectPath, environments, display
 
         const response = await $.post(endpoint, requestBody);
 
+        // Append the actual command output
+        if (response.data) {
+            appendConsoleOutput(response.data);
+        }
+
         if (response.success) {
-            finishConsole(true, response.data || `${displayName} completed`);
+            finishConsole(true, null); // Don't add extra message, output is already shown
         } else {
-            finishConsole(false, response.error || `${displayName} failed`);
+            // Show error message if command failed
+            if (response.error) {
+                appendConsoleOutput('\n' + response.error);
+            }
+            finishConsole(false, null);
         }
     } catch (error) {
         finishConsole(false, `Error: ${error.message}`);
