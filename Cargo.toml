@@ -1,5 +1,5 @@
 [package]
-name = "pmp"
+name = "pmp-cli"
 version = "0.1.0"
 edition = "2024"
 authors = ["PMP Contributors"]

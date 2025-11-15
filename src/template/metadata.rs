@@ -148,6 +148,7 @@ where
                     enum_values: input_spec.enum_values,
                     default: input_spec.default,
                     description: input_spec.description,
+                    validation: input_spec.validation,
                 });
             }
             Ok(inputs)
@@ -345,17 +346,59 @@ pub struct ResourceDefinition {
 pub enum InputType {
     /// String input (default)
     String,
-    /// Boolean (yes/no) input
+    /// Boolean (yes/no) input - implemented as select with Yes/No options
     Boolean,
-    /// Number input with optional min/max constraints
+    /// Number input with optional constraints
     Number {
         #[serde(skip_serializing_if = "Option::is_none")]
-        min: Option<i64>,
+        min: Option<f64>,
         #[serde(skip_serializing_if = "Option::is_none")]
-        max: Option<i64>,
+        max: Option<f64>,
+        /// If true, only allows integer values (default: false)
+        #[serde(default, skip_serializing_if = "is_false")]
+        integer: bool,
     },
-    /// Select input with enum options
+    /// Select input with enum options (single selection)
     Select { options: Vec<EnumOption> },
+    /// Multi-select input allowing multiple selections
+    MultiSelect {
+        options: Vec<EnumOption>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        min: Option<usize>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        max: Option<usize>,
+    },
+    /// Password input (hidden text)
+    Password,
+    /// Project selector - allows selecting a project based on filters
+    #[serde(rename = "project_select")]
+    ProjectSelect {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        api_version: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        kind: Option<String>,
+        #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
+        labels: std::collections::HashMap<String, String>,
+    },
+    /// Multi-project selector - allows selecting multiple projects
+    #[serde(rename = "multiproject_select")]
+    MultiProjectSelect {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        api_version: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        kind: Option<String>,
+        #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
+        labels: std::collections::HashMap<String, String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        min: Option<usize>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        max: Option<usize>,
+    },
+}
+
+/// Helper function for serde to determine if a bool is false
+fn is_false(b: &bool) -> bool {
+    !b
 }
 
 /// Enum option with display text and value
@@ -365,6 +408,50 @@ pub struct EnumOption {
     pub label: String,
     /// Actual value used in templates
     pub value: String,
+}
+
+/// Validation rules for inputs
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct InputValidation {
+    /// URL validation - checks if the input is a valid URL
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<UrlValidation>,
+
+    /// Email validation - checks if the input is a valid email
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub email: bool,
+
+    /// Confirmation validation - asks for the same value again and compares
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub confirm: bool,
+
+    /// Minimum value/length validation
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min: Option<f64>,
+
+    /// Maximum value/length validation
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max: Option<f64>,
+
+    /// Regex pattern validation
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub regex: Option<String>,
+
+    /// Custom validation error message
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_message: Option<String>,
+}
+
+/// URL validation configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UrlValidation {
+    /// Whether to make an HTTP request to verify the URL is accessible
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub check_reachable: bool,
+
+    /// Allowed URL schemes (e.g., ["http", "https"])
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allowed_schemes: Vec<String>,
 }
 
 /// Input specification for a template input
@@ -385,6 +472,10 @@ pub struct InputSpec {
     /// Description of the input
     #[serde(default)]
     pub description: Option<String>,
+
+    /// Validation rules
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub validation: Option<InputValidation>,
 }
 
 /// Input definition with a name (used in array format)
@@ -408,6 +499,10 @@ pub struct InputDefinition {
     /// Description of the input
     #[serde(default)]
     pub description: Option<String>,
+
+    /// Validation rules
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub validation: Option<InputValidation>,
 }
 
 impl InputDefinition {
@@ -418,6 +513,7 @@ impl InputDefinition {
             enum_values: self.enum_values.clone(),
             default: self.default.clone(),
             description: self.description.clone(),
+            validation: self.validation.clone(),
         }
     }
 }

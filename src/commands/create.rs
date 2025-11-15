@@ -1480,16 +1480,23 @@ impl CreateCommand {
                 Ok(Value::String(answer))
             }
             InputType::Boolean => {
+                // Implement as select with Yes/No options
+                let options = vec!["Yes".to_string(), "No".to_string()];
                 let default_bool = default.and_then(|v| v.as_bool()).unwrap_or(false);
-                let answer = ctx
+                let default_str = if default_bool { "Yes" } else { "No" };
+
+                let prompt_text = format!("{} [default: {}]", description, default_str);
+                let selected = ctx
                     .input
-                    .confirm(description, default_bool)
+                    .select(&prompt_text, options)
                     .context("Failed to get input")?;
-                Ok(Value::Bool(answer))
+
+                Ok(Value::Bool(selected == "Yes"))
             }
-            InputType::Number { min, max } => {
-                let default_num = default.and_then(|v| v.as_i64());
-                let prompt_text = Self::build_number_prompt(description, default_num, *min, *max);
+            InputType::Number { min, max, integer } => {
+                let default_num = default.and_then(|v| v.as_f64());
+                let prompt_text =
+                    Self::build_number_prompt(description, default_num, *min, *max, *integer);
 
                 loop {
                     let answer = ctx
@@ -1497,26 +1504,56 @@ impl CreateCommand {
                         .text(&prompt_text, default_num.map(|n| n.to_string()).as_deref())
                         .context("Failed to get input")?;
 
-                    match answer.parse::<i64>() {
-                        Ok(num) => {
-                            // Validate range
-                            if let Some(min_val) = min
-                                && num < *min_val
-                            {
-                                ctx.output.warning(&format!("Value must be >= {}", min_val));
+                    if *integer {
+                        // Parse as integer
+                        match answer.parse::<i64>() {
+                            Ok(num) => {
+                                let num_f64 = num as f64;
+                                // Validate range
+                                if let Some(min_val) = min
+                                    && num_f64 < *min_val
+                                {
+                                    ctx.output.warning(&format!("Value must be >= {}", min_val));
+                                    continue;
+                                }
+                                if let Some(max_val) = max
+                                    && num_f64 > *max_val
+                                {
+                                    ctx.output.warning(&format!("Value must be <= {}", max_val));
+                                    continue;
+                                }
+                                return Ok(Value::Number(num.into()));
+                            }
+                            Err(_) => {
+                                ctx.output.warning("Please enter a valid integer");
                                 continue;
                             }
-                            if let Some(max_val) = max
-                                && num > *max_val
-                            {
-                                ctx.output.warning(&format!("Value must be <= {}", max_val));
-                                continue;
-                            }
-                            return Ok(Value::Number(num.into()));
                         }
-                        Err(_) => {
-                            ctx.output.warning("Please enter a valid integer");
-                            continue;
+                    } else {
+                        // Parse as float
+                        match answer.parse::<f64>() {
+                            Ok(num) => {
+                                // Validate range
+                                if let Some(min_val) = min
+                                    && num < *min_val
+                                {
+                                    ctx.output.warning(&format!("Value must be >= {}", min_val));
+                                    continue;
+                                }
+                                if let Some(max_val) = max
+                                    && num > *max_val
+                                {
+                                    ctx.output.warning(&format!("Value must be <= {}", max_val));
+                                    continue;
+                                }
+                                return Ok(Value::Number(
+                                    serde_json::Number::from_f64(num).context("Invalid number")?,
+                                ));
+                            }
+                            Err(_) => {
+                                ctx.output.warning("Please enter a valid number");
+                                continue;
+                            }
                         }
                     }
                 }
@@ -1547,19 +1584,110 @@ impl CreateCommand {
 
                 Ok(Value::String(selected_option.value.clone()))
             }
+            InputType::MultiSelect { options, min, max } => {
+                // Build list of display labels
+                let labels: Vec<String> = options.iter().map(|opt| opt.label.clone()).collect();
+
+                // Find default indices if there's a default value
+                let default_indices = if let Some(Value::Array(defaults)) = default {
+                    let indices: Vec<usize> = defaults
+                        .iter()
+                        .filter_map(|v| v.as_str())
+                        .filter_map(|val| options.iter().position(|opt| opt.value == val))
+                        .collect();
+                    Some(indices)
+                } else {
+                    None
+                };
+
+                let prompt_text = Self::build_multiselect_prompt(description, *min, *max);
+
+                loop {
+                    let selected_labels = ctx
+                        .input
+                        .multi_select(&prompt_text, labels.clone(), default_indices.as_deref())
+                        .context("Failed to get input")?;
+
+                    // Validate min/max selections
+                    if let Some(min_val) = min
+                        && selected_labels.len() < *min_val
+                    {
+                        ctx.output
+                            .warning(&format!("Please select at least {} option(s)", min_val));
+                        continue;
+                    }
+                    if let Some(max_val) = max
+                        && selected_labels.len() > *max_val
+                    {
+                        ctx.output
+                            .warning(&format!("Please select at most {} option(s)", max_val));
+                        continue;
+                    }
+
+                    // Find the corresponding values
+                    let selected_values: Vec<Value> = selected_labels
+                        .iter()
+                        .filter_map(|label| {
+                            options
+                                .iter()
+                                .find(|opt| &opt.label == label)
+                                .map(|opt| Value::String(opt.value.clone()))
+                        })
+                        .collect();
+
+                    return Ok(Value::Array(selected_values));
+                }
+            }
+            InputType::Password => {
+                let answer = ctx
+                    .input
+                    .password(description)
+                    .context("Failed to get input")?;
+                Ok(Value::String(answer))
+            }
+            InputType::ProjectSelect {
+                api_version,
+                kind,
+                labels,
+            } => Self::prompt_for_project_select(
+                ctx,
+                description,
+                api_version.as_deref(),
+                kind.as_deref(),
+                labels,
+                false,
+            ),
+            InputType::MultiProjectSelect {
+                api_version,
+                kind,
+                labels,
+                min,
+                max,
+            } => Self::prompt_for_multiproject_select(
+                ctx,
+                description,
+                api_version.as_deref(),
+                kind.as_deref(),
+                labels,
+                *min,
+                *max,
+            ),
         }
     }
 
     /// Build a number prompt with range information
     fn build_number_prompt(
         description: &str,
-        default: Option<i64>,
-        min: Option<i64>,
-        max: Option<i64>,
+        default: Option<f64>,
+        min: Option<f64>,
+        max: Option<f64>,
+        integer: bool,
     ) -> String {
         let mut prompt = description.to_string();
 
         let mut constraints = Vec::new();
+        let type_str = if integer { "integer" } else { "number" };
+
         if let Some(min_val) = min {
             constraints.push(format!("min: {}", min_val));
         }
@@ -1574,13 +1702,221 @@ impl CreateCommand {
         };
 
         let constraint_text = if !constraints.is_empty() {
-            format!("{} - {}", constraints.join(", "), default_part)
+            format!(
+                "{}, {} - {}",
+                type_str,
+                constraints.join(", "),
+                default_part
+            )
         } else {
-            default_part
+            format!("{} - {}", type_str, default_part)
         };
 
         prompt.push_str(&format!(" [{}]", constraint_text));
         prompt
+    }
+
+    /// Build a multiselect prompt with selection constraints
+    fn build_multiselect_prompt(
+        description: &str,
+        min: Option<usize>,
+        max: Option<usize>,
+    ) -> String {
+        let mut prompt = description.to_string();
+
+        let mut constraints = Vec::new();
+        if let Some(min_val) = min {
+            constraints.push(format!("min: {}", min_val));
+        }
+        if let Some(max_val) = max {
+            constraints.push(format!("max: {}", max_val));
+        }
+
+        if !constraints.is_empty() {
+            prompt.push_str(&format!(" [{}]", constraints.join(", ")));
+        }
+
+        prompt
+    }
+
+    /// Prompt for project selection based on filters
+    fn prompt_for_project_select(
+        ctx: &crate::context::Context,
+        description: &str,
+        api_version: Option<&str>,
+        kind: Option<&str>,
+        labels: &std::collections::HashMap<String, String>,
+        _allow_multiple: bool,
+    ) -> Result<Value> {
+        // Get collection root
+        let collection_root = std::env::current_dir().context("Failed to get current directory")?;
+
+        // Discover all projects
+        let all_projects =
+            CollectionDiscovery::discover_projects(&*ctx.fs, &*ctx.output, &collection_root)?;
+
+        // Filter projects based on criteria
+        let filtered_projects: Vec<_> = all_projects
+            .iter()
+            .filter(|project| {
+                // Filter by kind if specified
+                if let Some(k) = kind
+                    && &project.kind != k
+                {
+                    return false;
+                }
+
+                // Filter by api_version and labels by checking environments
+                let project_path = collection_root.join(&project.path);
+                let environments_dir = project_path.join("environments");
+
+                if let Ok(env_entries) = ctx.fs.read_dir(&environments_dir) {
+                    for env_path in env_entries {
+                        let env_file = env_path.join(".pmp.environment.yaml");
+                        if ctx.fs.exists(&env_file) {
+                            if let Ok(env_resource) = crate::template::metadata::DynamicProjectEnvironmentResource::from_file(&*ctx.fs, &env_file) {
+                                // Check api_version if specified
+                                if let Some(av) = api_version
+                                    && env_resource.api_version != av
+                                {
+                                    continue;
+                                }
+
+                                // TODO: Check labels if specified (labels not yet implemented in ProjectSpec)
+                                // For now, ignore label filtering
+                                let _ = labels;
+
+                                return true; // At least one environment matches
+                            }
+                        }
+                    }
+                }
+
+                false
+            })
+            .collect();
+
+        if filtered_projects.is_empty() {
+            anyhow::bail!("No projects found matching the specified criteria");
+        }
+
+        // Build selection options
+        let project_names: Vec<String> = filtered_projects
+            .iter()
+            .map(|p| format!("{} ({})", p.name, p.kind))
+            .collect();
+
+        let selected = ctx
+            .input
+            .select(description, project_names)
+            .context("Failed to select project")?;
+
+        // Extract project name from selection
+        let project_name = selected.split(" (").next().unwrap_or(&selected).to_string();
+
+        Ok(Value::String(project_name))
+    }
+
+    /// Prompt for multiple project selection based on filters
+    fn prompt_for_multiproject_select(
+        ctx: &crate::context::Context,
+        description: &str,
+        api_version: Option<&str>,
+        kind: Option<&str>,
+        labels: &std::collections::HashMap<String, String>,
+        min: Option<usize>,
+        max: Option<usize>,
+    ) -> Result<Value> {
+        // Get collection root
+        let collection_root = std::env::current_dir().context("Failed to get current directory")?;
+
+        // Discover all projects
+        let all_projects =
+            CollectionDiscovery::discover_projects(&*ctx.fs, &*ctx.output, &collection_root)?;
+
+        // Filter projects based on criteria (same logic as single select)
+        let filtered_projects: Vec<_> = all_projects
+            .iter()
+            .filter(|project| {
+                if let Some(k) = kind
+                    && &project.kind != k
+                {
+                    return false;
+                }
+
+                let project_path = collection_root.join(&project.path);
+                let environments_dir = project_path.join("environments");
+
+                if let Ok(env_entries) = ctx.fs.read_dir(&environments_dir) {
+                    for env_path in env_entries {
+                        let env_file = env_path.join(".pmp.environment.yaml");
+                        if ctx.fs.exists(&env_file) {
+                            if let Ok(env_resource) = crate::template::metadata::DynamicProjectEnvironmentResource::from_file(&*ctx.fs, &env_file) {
+                                if let Some(av) = api_version
+                                    && env_resource.api_version != av
+                                {
+                                    continue;
+                                }
+
+                                // TODO: Check labels if specified (labels not yet implemented in ProjectSpec)
+                                // For now, ignore label filtering
+                                let _ = labels;
+
+                                return true;
+                            }
+                        }
+                    }
+                }
+
+                false
+            })
+            .collect();
+
+        if filtered_projects.is_empty() {
+            anyhow::bail!("No projects found matching the specified criteria");
+        }
+
+        // Build selection options
+        let project_names: Vec<String> = filtered_projects
+            .iter()
+            .map(|p| format!("{} ({})", p.name, p.kind))
+            .collect();
+
+        let prompt_text = Self::build_multiselect_prompt(description, min, max);
+
+        loop {
+            let selected_projects = ctx
+                .input
+                .multi_select(&prompt_text, project_names.clone(), None)
+                .context("Failed to select projects")?;
+
+            // Validate min/max selections
+            if let Some(min_val) = min
+                && selected_projects.len() < min_val
+            {
+                ctx.output
+                    .warning(&format!("Please select at least {} project(s)", min_val));
+                continue;
+            }
+            if let Some(max_val) = max
+                && selected_projects.len() > max_val
+            {
+                ctx.output
+                    .warning(&format!("Please select at most {} project(s)", max_val));
+                continue;
+            }
+
+            // Extract project names from selections
+            let project_names: Vec<Value> = selected_projects
+                .iter()
+                .map(|s| {
+                    let name = s.split(" (").next().unwrap_or(s).to_string();
+                    Value::String(name)
+                })
+                .collect();
+
+            return Ok(Value::Array(project_names));
+        }
     }
 
     /// Check if project labels match the required label selector
@@ -3081,7 +3417,7 @@ spec:
             "📄 test-template - Test template".to_string(),
         )); // template selection
         input.add_response(MockResponse::Text("test_project".to_string())); // project name
-        input.add_response(MockResponse::Confirm(true)); // enable_monitoring
+        input.add_response(MockResponse::Select("Yes".to_string())); // enable_monitoring (boolean as select)
         input.add_response(MockResponse::Confirm(false)); // apply after create
 
         let ctx = create_test_context(Arc::clone(&fs), input);

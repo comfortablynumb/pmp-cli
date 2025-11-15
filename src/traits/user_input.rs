@@ -9,6 +9,7 @@ pub enum MockResponse {
     Select(String),
     MultiSelect(Vec<String>),
     Text(String),
+    Password(String),
     Confirm(bool),
 }
 
@@ -27,6 +28,9 @@ pub trait UserInput: Send + Sync {
 
     /// Display a text input prompt
     fn text(&self, prompt: &str, default: Option<&str>) -> Result<String>;
+
+    /// Display a password input prompt (hidden text)
+    fn password(&self, prompt: &str) -> Result<String>;
 
     /// Display a confirmation prompt (yes/no)
     fn confirm(&self, prompt: &str, default: bool) -> Result<bool>;
@@ -64,6 +68,12 @@ impl UserInput for InquireUserInput {
             text_prompt = text_prompt.with_default(default_val);
         }
         let answer = text_prompt.prompt()?;
+        Ok(answer)
+    }
+
+    fn password(&self, prompt: &str) -> Result<String> {
+        use inquire::Password;
+        let answer = Password::new(prompt).without_confirmation().prompt()?;
         Ok(answer)
     }
 
@@ -164,6 +174,13 @@ impl UserInput for MockUserInput {
         match self.next_response()? {
             MockResponse::Text(answer) => Ok(answer),
             _ => anyhow::bail!("Expected Text response but got a different type"),
+        }
+    }
+
+    fn password(&self, _prompt: &str) -> Result<String> {
+        match self.next_response()? {
+            MockResponse::Password(answer) => Ok(answer),
+            _ => anyhow::bail!("Expected Password response but got a different type"),
         }
     }
 
