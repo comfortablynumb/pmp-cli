@@ -12,9 +12,9 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use commands::{
     ApplyCommand, CiCommand, CloneCommand, CreateCommand, DepsCommand, DestroyCommand,
-    DriftCommand, EnvCommand, FindCommand, GenerateCommand, GraphCommand, InitCommand,
-    PolicyCommand, PreviewCommand, RefreshCommand, StateCommand, TemplateCommand, UiCommand,
-    UpdateCommand,
+    DevExCommand, DriftCommand, EnvCommand, FindCommand, GenerateCommand, GraphCommand,
+    InitCommand, PolicyCommand, PreviewCommand, ProviderCommand, RefreshCommand, StateCommand,
+    TemplateCommand, TemplateMgmtCommand, TestCommand, UiCommand, UpdateCommand,
 };
 
 #[derive(Parser)]
@@ -283,6 +283,42 @@ enum Commands {
     Env {
         #[command(subcommand)]
         command: EnvSubcommands,
+    },
+
+    /// Testing and validation
+    #[command(
+        long_about = "Run tests and validate infrastructure\n\nSubcommands:\n- test: Run integration tests\n- validate-plan: Validate plan syntax and semantics\n- dry-run: Simulate apply without changes\n- cost-estimate: Estimate infrastructure costs\n- compliance-report: Generate compliance reports\n\nExamples:\n  pmp test\n  pmp test validate-plan\n  pmp test dry-run\n  pmp test cost-estimate --format json\n  pmp test compliance-report soc2"
+    )]
+    Test {
+        #[command(subcommand)]
+        command: TestSubcommands,
+    },
+
+    /// Developer experience tools
+    #[command(
+        long_about = "Tools for exploring and working with infrastructure\n\nSubcommands:\n- shell: Interactive shell\n- docs: Generate documentation\n- graph-viz: Visualize dependency graphs\n- export: Export to other formats\n- import: Import existing infrastructure\n\nExamples:\n  pmp devex shell\n  pmp devex docs --format markdown --output README.md\n  pmp devex graph-viz --format mermaid\n  pmp devex export helm --output chart.yaml\n  pmp devex import terraform ./existing-infra"
+    )]
+    DevEx {
+        #[command(subcommand)]
+        command: DevExSubcommands,
+    },
+
+    /// Template management
+    #[command(
+        long_about = "Manage and develop templates\n\nSubcommands:\n- validate: Validate template definitions\n- test: Test template rendering\n- publish: Publish template to registry\n- clone: Clone and customize templates\n- plugin-develop: Develop new plugins\n\nExamples:\n  pmp template-mgmt validate my-pack my-template\n  pmp template-mgmt test my-pack my-template\n  pmp template-mgmt publish my-pack --version 1.0.0\n  pmp template-mgmt clone source-pack source-template target-pack target-template\n  pmp template-mgmt plugin-develop my-pack my-plugin"
+    )]
+    TemplateMgmt {
+        #[command(subcommand)]
+        command: TemplateMgmtSubcommands,
+    },
+
+    /// Multi-cloud provider extensions
+    #[command(
+        long_about = "Manage cloud providers and plugins\n\nSubcommands:\n- install: Install provider plugin\n- connect: Configure cloud credentials\n- secrets: Manage secrets\n- cost-optimize: Analyze cost optimization\n\nExamples:\n  pmp provider install aws vpc\n  pmp provider connect aws --profile default\n  pmp provider secrets list\n  pmp provider cost-optimize --format json"
+    )]
+    Provider {
+        #[command(subcommand)]
+        command: ProviderSubcommands,
     },
 }
 
@@ -589,6 +625,293 @@ enum EnvSubcommands {
     },
 }
 
+#[derive(Subcommand)]
+enum TestSubcommands {
+    /// Run integration tests
+    #[command(
+        long_about = "Run integration tests for infrastructure\n\nExample:\n  pmp test test\n  pmp test test --path ./my-project/environments/dev"
+    )]
+    Test {
+        /// Path to test (defaults to current directory)
+        #[arg(short, long)]
+        path: Option<String>,
+
+        /// Test pattern filter
+        #[arg(short = 't', long)]
+        test_pattern: Option<String>,
+    },
+
+    /// Validate plan
+    #[command(long_about = "Validate plan without executing\n\nExample:\n  pmp test validate-plan")]
+    ValidatePlan {
+        /// Path to validate (defaults to current directory)
+        #[arg(short, long)]
+        path: Option<String>,
+    },
+
+    /// Dry run
+    #[command(long_about = "Simulate apply without making changes\n\nExample:\n  pmp test dry-run")]
+    DryRun {
+        /// Path to run (defaults to current directory)
+        #[arg(short, long)]
+        path: Option<String>,
+    },
+
+    /// Cost estimate
+    #[command(
+        long_about = "Generate cost estimate with breakdown\n\nExample:\n  pmp test cost-estimate --format json"
+    )]
+    CostEstimate {
+        /// Path to estimate (defaults to current directory)
+        #[arg(short, long)]
+        path: Option<String>,
+
+        /// Output file
+        #[arg(short, long)]
+        output: Option<String>,
+
+        /// Output format (text, json, yaml)
+        #[arg(short, long)]
+        format: Option<String>,
+    },
+
+    /// Compliance report
+    #[command(
+        long_about = "Generate compliance report\n\nExample:\n  pmp test compliance-report soc2"
+    )]
+    ComplianceReport {
+        /// Compliance framework (soc2, hipaa, pci-dss)
+        framework: String,
+
+        /// Path to check (defaults to current directory)
+        #[arg(short, long)]
+        path: Option<String>,
+
+        /// Output file
+        #[arg(short, long)]
+        output: Option<String>,
+
+        /// Output format (text, json, yaml)
+        #[arg(short, long)]
+        format: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum DevExSubcommands {
+    /// Interactive shell
+    #[command(
+        long_about = "Launch interactive shell for exploring projects\n\nExample:\n  pmp devex shell"
+    )]
+    Shell,
+
+    /// Generate documentation
+    #[command(
+        long_about = "Generate documentation from infrastructure\n\nExample:\n  pmp devex docs --format markdown --output README.md"
+    )]
+    Docs {
+        /// Path to document (defaults to current directory)
+        #[arg(short, long)]
+        path: Option<String>,
+
+        /// Output file
+        #[arg(short, long)]
+        output: Option<String>,
+
+        /// Output format (markdown, html)
+        #[arg(short, long)]
+        format: Option<String>,
+    },
+
+    /// Visualize dependency graph
+    #[command(
+        long_about = "Visualize dependency graphs\n\nExample:\n  pmp devex graph-viz --format mermaid"
+    )]
+    GraphViz {
+        /// Output file
+        #[arg(short, long)]
+        output: Option<String>,
+
+        /// Output format (mermaid, graphviz, dot)
+        #[arg(short, long)]
+        format: Option<String>,
+    },
+
+    /// Export infrastructure
+    #[command(
+        long_about = "Export infrastructure to other formats\n\nExample:\n  pmp devex export helm --output chart.yaml"
+    )]
+    Export {
+        /// Target format (helm, cloudformation, pulumi)
+        target_format: String,
+
+        /// Path to export (defaults to current directory)
+        #[arg(short, long)]
+        path: Option<String>,
+
+        /// Output file
+        #[arg(short, long)]
+        output: Option<String>,
+    },
+
+    /// Import existing infrastructure
+    #[command(
+        long_about = "Import existing infrastructure into PMP\n\nExample:\n  pmp devex import terraform ./existing-infra"
+    )]
+    Import {
+        /// Source format (terraform, helm, cloudformation)
+        source_format: String,
+
+        /// Source path
+        source_path: String,
+
+        /// Project name
+        #[arg(short, long)]
+        project_name: String,
+
+        /// Environment
+        #[arg(short, long)]
+        environment: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum TemplateMgmtSubcommands {
+    /// Validate template
+    #[command(
+        long_about = "Validate template definitions\n\nExample:\n  pmp template-mgmt validate my-pack my-template"
+    )]
+    Validate {
+        /// Template pack name
+        template_pack: String,
+
+        /// Template name
+        template_name: String,
+    },
+
+    /// Test template rendering
+    #[command(
+        long_about = "Test template rendering with sample data\n\nExample:\n  pmp template-mgmt test my-pack my-template"
+    )]
+    Test {
+        /// Template pack name
+        template_pack: String,
+
+        /// Template name
+        template_name: String,
+
+        /// Test data file (JSON)
+        #[arg(short, long)]
+        test_data: Option<String>,
+    },
+
+    /// Publish template
+    #[command(
+        long_about = "Publish template to registry\n\nExample:\n  pmp template-mgmt publish my-pack --version 1.0.0"
+    )]
+    Publish {
+        /// Template pack name
+        template_pack: String,
+
+        /// Registry URL
+        #[arg(short, long)]
+        registry_url: Option<String>,
+
+        /// Version
+        #[arg(short, long)]
+        version: Option<String>,
+    },
+
+    /// Clone template
+    #[command(
+        long_about = "Clone and customize existing template\n\nExample:\n  pmp template-mgmt clone source-pack source-template target-pack target-template"
+    )]
+    Clone {
+        /// Source template pack
+        source_pack: String,
+
+        /// Source template
+        source_template: String,
+
+        /// Target template pack
+        target_pack: String,
+
+        /// Target template
+        target_template: String,
+    },
+
+    /// Develop plugin
+    #[command(
+        long_about = "Helper for developing new plugins\n\nExample:\n  pmp template-mgmt plugin-develop my-pack my-plugin"
+    )]
+    PluginDevelop {
+        /// Template pack name
+        template_pack: String,
+
+        /// Plugin name
+        plugin_name: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum ProviderSubcommands {
+    /// Install provider plugin
+    #[command(
+        long_about = "Install provider-specific plugin\n\nExample:\n  pmp provider install aws vpc"
+    )]
+    Install {
+        /// Provider name (aws, azure, gcp)
+        provider: String,
+
+        /// Plugin name
+        plugin: String,
+    },
+
+    /// Connect to cloud provider
+    #[command(
+        long_about = "Configure cloud provider credentials\n\nExample:\n  pmp provider connect aws --profile default"
+    )]
+    Connect {
+        /// Provider name (aws, azure, gcp, kubernetes)
+        provider: String,
+
+        /// Profile or context name
+        #[arg(short, long)]
+        profile: Option<String>,
+    },
+
+    /// Manage secrets
+    #[command(
+        long_about = "Manage secrets across environments\n\nExample:\n  pmp provider secrets list"
+    )]
+    Secrets {
+        /// Command (list, set, get, delete, rotate)
+        command: String,
+
+        /// Path to environment (defaults to current directory)
+        #[arg(short, long)]
+        path: Option<String>,
+    },
+
+    /// Cost optimization
+    #[command(
+        long_about = "Suggest cost optimization opportunities\n\nExample:\n  pmp provider cost-optimize --format json"
+    )]
+    CostOptimize {
+        /// Path to analyze (defaults to current directory)
+        #[arg(short, long)]
+        path: Option<String>,
+
+        /// Output file
+        #[arg(short, long)]
+        output: Option<String>,
+
+        /// Output format (text, json, yaml)
+        #[arg(short, long)]
+        format: Option<String>,
+    },
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     let ctx = context::Context::new();
@@ -804,6 +1127,164 @@ fn main() -> Result<()> {
                 project,
             } => {
                 EnvCommand::execute_variables(&ctx, environment.as_deref(), project.as_deref())?;
+            }
+        },
+        Commands::Test { command } => match command {
+            TestSubcommands::Test { path, test_pattern } => {
+                TestCommand::execute_test(&ctx, path.as_deref(), test_pattern.as_deref())?;
+            }
+            TestSubcommands::ValidatePlan { path } => {
+                TestCommand::execute_validate_plan(&ctx, path.as_deref())?;
+            }
+            TestSubcommands::DryRun { path } => {
+                TestCommand::execute_dry_run(&ctx, path.as_deref())?;
+            }
+            TestSubcommands::CostEstimate {
+                path,
+                output,
+                format,
+            } => {
+                TestCommand::execute_cost_estimate(
+                    &ctx,
+                    path.as_deref(),
+                    output.as_deref(),
+                    format.as_deref(),
+                )?;
+            }
+            TestSubcommands::ComplianceReport {
+                framework,
+                path,
+                output,
+                format,
+            } => {
+                TestCommand::execute_compliance_report(
+                    &ctx,
+                    path.as_deref(),
+                    &framework,
+                    output.as_deref(),
+                    format.as_deref(),
+                )?;
+            }
+        },
+        Commands::DevEx { command } => match command {
+            DevExSubcommands::Shell => {
+                DevExCommand::execute_shell(&ctx)?;
+            }
+            DevExSubcommands::Docs {
+                path,
+                output,
+                format,
+            } => {
+                DevExCommand::execute_docs(
+                    &ctx,
+                    path.as_deref(),
+                    output.as_deref(),
+                    format.as_deref(),
+                )?;
+            }
+            DevExSubcommands::GraphViz { output, format } => {
+                DevExCommand::execute_graph_viz(&ctx, output.as_deref(), format.as_deref())?;
+            }
+            DevExSubcommands::Export {
+                target_format,
+                path,
+                output,
+            } => {
+                DevExCommand::execute_export(
+                    &ctx,
+                    path.as_deref(),
+                    &target_format,
+                    output.as_deref(),
+                )?;
+            }
+            DevExSubcommands::Import {
+                source_format,
+                source_path,
+                project_name,
+                environment,
+            } => {
+                DevExCommand::execute_import(
+                    &ctx,
+                    &source_path,
+                    &source_format,
+                    &project_name,
+                    &environment,
+                )?;
+            }
+        },
+        Commands::TemplateMgmt { command } => match command {
+            TemplateMgmtSubcommands::Validate {
+                template_pack,
+                template_name,
+            } => {
+                TemplateMgmtCommand::execute_validate(&ctx, &template_pack, &template_name)?;
+            }
+            TemplateMgmtSubcommands::Test {
+                template_pack,
+                template_name,
+                test_data,
+            } => {
+                TemplateMgmtCommand::execute_test(
+                    &ctx,
+                    &template_pack,
+                    &template_name,
+                    test_data.as_deref(),
+                )?;
+            }
+            TemplateMgmtSubcommands::Publish {
+                template_pack,
+                registry_url,
+                version,
+            } => {
+                TemplateMgmtCommand::execute_publish(
+                    &ctx,
+                    &template_pack,
+                    registry_url.as_deref(),
+                    version.as_deref(),
+                )?;
+            }
+            TemplateMgmtSubcommands::Clone {
+                source_pack,
+                source_template,
+                target_pack,
+                target_template,
+            } => {
+                TemplateMgmtCommand::execute_clone(
+                    &ctx,
+                    &source_pack,
+                    &source_template,
+                    &target_pack,
+                    &target_template,
+                )?;
+            }
+            TemplateMgmtSubcommands::PluginDevelop {
+                template_pack,
+                plugin_name,
+            } => {
+                TemplateMgmtCommand::execute_plugin_develop(&ctx, &template_pack, &plugin_name)?;
+            }
+        },
+        Commands::Provider { command } => match command {
+            ProviderSubcommands::Install { provider, plugin } => {
+                ProviderCommand::execute_install(&ctx, &provider, &plugin)?;
+            }
+            ProviderSubcommands::Connect { provider, profile } => {
+                ProviderCommand::execute_connect(&ctx, &provider, profile.as_deref())?;
+            }
+            ProviderSubcommands::Secrets { command, path } => {
+                ProviderCommand::execute_secrets(&ctx, &command, path.as_deref())?;
+            }
+            ProviderSubcommands::CostOptimize {
+                path,
+                output,
+                format,
+            } => {
+                ProviderCommand::execute_cost_optimization(
+                    &ctx,
+                    path.as_deref(),
+                    output.as_deref(),
+                    format.as_deref(),
+                )?;
             }
         },
     }
