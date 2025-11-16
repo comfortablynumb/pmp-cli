@@ -19,6 +19,198 @@ struct DependencyAnalysis {
 }
 
 impl DepsCommand {
+    /// Execute the deps validate command
+    pub fn execute_validate(ctx: &Context) -> Result<()> {
+        ctx.output.section("Dependency Validation");
+
+        // Find the infrastructure root
+        let (infrastructure, infrastructure_root) = CollectionDiscovery::find_collection(&*ctx.fs)?
+            .context("Infrastructure is required. Run 'pmp init' first.")?;
+
+        ctx.output
+            .key_value("Infrastructure", &infrastructure.metadata.name);
+        output::blank();
+
+        // Discover all projects
+        let projects =
+            CollectionDiscovery::discover_projects(&*ctx.fs, &*ctx.output, &infrastructure_root)?;
+
+        if projects.is_empty() {
+            ctx.output.dimmed("No projects found.");
+            return Ok(());
+        }
+
+        // Build dependency data
+        let (all_dependencies, all_projects_set, _) =
+            Self::build_dependency_data(ctx, &projects, &infrastructure_root)?;
+
+        // Validate dependencies
+        let mut validation_errors = Vec::new();
+
+        // Check for missing dependencies
+        for (project, deps) in &all_dependencies {
+            for dep in deps {
+                if !all_projects_set.contains(dep) {
+                    validation_errors.push(format!(
+                        "Missing dependency: {} depends on {} (not found)",
+                        project, dep
+                    ));
+                }
+            }
+        }
+
+        // Check for circular dependencies
+        let circular_deps = Self::detect_circular_dependencies(&all_dependencies);
+        for cycle in &circular_deps {
+            validation_errors.push(format!("Circular dependency: {}", cycle.join(" → ")));
+        }
+
+        // Display results
+        if validation_errors.is_empty() {
+            ctx.output
+                .success("✓ All dependencies are valid. No issues found.");
+        } else {
+            ctx.output.error(&format!(
+                "✗ Found {} validation error(s):",
+                validation_errors.len()
+            ));
+            output::blank();
+
+            for error in &validation_errors {
+                ctx.output.dimmed(&format!("  • {}", error));
+            }
+
+            anyhow::bail!("Dependency validation failed");
+        }
+
+        Ok(())
+    }
+
+    /// Execute the deps order command (topological sort)
+    pub fn execute_order(ctx: &Context) -> Result<()> {
+        ctx.output.section("Deployment Order");
+
+        // Find the infrastructure root
+        let (infrastructure, infrastructure_root) = CollectionDiscovery::find_collection(&*ctx.fs)?
+            .context("Infrastructure is required. Run 'pmp init' first.")?;
+
+        ctx.output
+            .key_value("Infrastructure", &infrastructure.metadata.name);
+        output::blank();
+
+        // Discover all projects
+        let projects =
+            CollectionDiscovery::discover_projects(&*ctx.fs, &*ctx.output, &infrastructure_root)?;
+
+        if projects.is_empty() {
+            ctx.output.dimmed("No projects found.");
+            return Ok(());
+        }
+
+        // Build dependency data
+        let (all_dependencies, all_projects_set, _) =
+            Self::build_dependency_data(ctx, &projects, &infrastructure_root)?;
+
+        // Perform topological sort
+        let deployment_order = Self::topological_sort(&all_dependencies, &all_projects_set)?;
+
+        // Display deployment order
+        ctx.output.info("Optimal deployment order:");
+        output::blank();
+
+        for (level, projects_at_level) in deployment_order.iter().enumerate() {
+            ctx.output
+                .subsection(&format!("Level {} (can deploy in parallel):", level + 1));
+
+            for project in projects_at_level {
+                ctx.output.info(&format!("  • {}", project));
+            }
+
+            output::blank();
+        }
+
+        Ok(())
+    }
+
+    /// Execute the deps why command
+    pub fn execute_why(ctx: &Context, project_name: &str) -> Result<()> {
+        ctx.output
+            .section(&format!("Dependency Explanation: {}", project_name));
+
+        // Find the infrastructure root
+        let (infrastructure, infrastructure_root) = CollectionDiscovery::find_collection(&*ctx.fs)?
+            .context("Infrastructure is required. Run 'pmp init' first.")?;
+
+        ctx.output
+            .key_value("Infrastructure", &infrastructure.metadata.name);
+        output::blank();
+
+        // Discover all projects
+        let projects =
+            CollectionDiscovery::discover_projects(&*ctx.fs, &*ctx.output, &infrastructure_root)?;
+
+        if projects.is_empty() {
+            ctx.output.dimmed("No projects found.");
+            return Ok(());
+        }
+
+        // Build dependency data
+        let (all_dependencies, all_projects_set, reverse_dependencies) =
+            Self::build_dependency_data(ctx, &projects, &infrastructure_root)?;
+
+        // Find all environments of the target project
+        let target_projects: Vec<String> = all_projects_set
+            .iter()
+            .filter(|p| p.starts_with(&format!("{}:", project_name)))
+            .cloned()
+            .collect();
+
+        if target_projects.is_empty() {
+            anyhow::bail!("Project '{}' not found", project_name);
+        }
+
+        for target_project in &target_projects {
+            ctx.output.subsection(target_project);
+            output::blank();
+
+            // Show what this project depends on
+            if let Some(deps) = all_dependencies.get(target_project) {
+                ctx.output.info("This project depends on:");
+                for dep in deps {
+                    ctx.output.dimmed(&format!("  • {}", dep));
+                }
+                output::blank();
+            } else {
+                ctx.output
+                    .dimmed("This project has no dependencies (standalone).");
+                output::blank();
+            }
+
+            // Show what depends on this project
+            if let Some(dependents) = reverse_dependencies.get(target_project) {
+                ctx.output.info("Projects that depend on this:");
+                for dependent in dependents {
+                    ctx.output.dimmed(&format!("  • {}", dependent));
+                }
+                output::blank();
+            } else {
+                ctx.output
+                    .dimmed("No projects depend on this (orphaned or root-level).");
+                output::blank();
+            }
+
+            // Show full dependency chain
+            let chain = Self::build_dependency_chain(target_project, &all_dependencies);
+            if !chain.is_empty() {
+                ctx.output.info("Full dependency chain:");
+                ctx.output.dimmed(&format!("  {}", chain.join(" → ")));
+                output::blank();
+            }
+        }
+
+        Ok(())
+    }
+
     /// Execute the deps analyze command
     pub fn execute_analyze(ctx: &Context) -> Result<()> {
         ctx.output.section("Dependency Analysis");
@@ -57,37 +249,37 @@ impl DepsCommand {
                     if ctx.fs.exists(&env_file)
                         && let Ok(resource) =
                             DynamicProjectEnvironmentResource::from_file(&*ctx.fs, &env_file)
-                        {
-                            let node_key = format!(
-                                "{}:{}",
-                                resource.metadata.name, resource.metadata.environment_name
-                            );
-                            all_projects_set.insert(node_key.clone());
+                    {
+                        let node_key = format!(
+                            "{}:{}",
+                            resource.metadata.name, resource.metadata.environment_name
+                        );
+                        all_projects_set.insert(node_key.clone());
 
-                            let mut deps = Vec::new();
-                            for dep in &resource.spec.dependencies {
-                                for env in &dep.project.environments {
-                                    let dep_key = format!("{}:{}", dep.project.name, env);
-                                    deps.push(dep_key.clone());
+                        let mut deps = Vec::new();
+                        for dep in &resource.spec.dependencies {
+                            for env in &dep.project.environments {
+                                let dep_key = format!("{}:{}", dep.project.name, env);
+                                deps.push(dep_key.clone());
 
-                                    // Build reverse dependency map
-                                    reverse_dependencies
-                                        .entry(dep_key.clone())
-                                        .or_default()
-                                        .push(node_key.clone());
+                                // Build reverse dependency map
+                                reverse_dependencies
+                                    .entry(dep_key.clone())
+                                    .or_default()
+                                    .push(node_key.clone());
 
-                                    // Check if dependency exists
-                                    if !all_projects_set.contains(&dep_key) {
-                                        // We'll check again at the end since we're still discovering
-                                        dependency_errors.push((node_key.clone(), dep_key));
-                                    }
+                                // Check if dependency exists
+                                if !all_projects_set.contains(&dep_key) {
+                                    // We'll check again at the end since we're still discovering
+                                    dependency_errors.push((node_key.clone(), dep_key));
                                 }
                             }
-
-                            if !deps.is_empty() {
-                                all_dependencies.insert(node_key, deps);
-                            }
                         }
+
+                        if !deps.is_empty() {
+                            all_dependencies.insert(node_key, deps);
+                        }
+                    }
                 }
             }
         }
@@ -150,31 +342,31 @@ impl DepsCommand {
                     if ctx.fs.exists(&env_file)
                         && let Ok(resource) =
                             DynamicProjectEnvironmentResource::from_file(&*ctx.fs, &env_file)
-                        {
-                            let node_key = format!(
-                                "{}:{}",
-                                resource.metadata.name, resource.metadata.environment_name
-                            );
-                            all_projects_set.insert(node_key.clone());
+                    {
+                        let node_key = format!(
+                            "{}:{}",
+                            resource.metadata.name, resource.metadata.environment_name
+                        );
+                        all_projects_set.insert(node_key.clone());
 
-                            let mut deps = Vec::new();
-                            for dep in &resource.spec.dependencies {
-                                for env in &dep.project.environments {
-                                    let dep_key = format!("{}:{}", dep.project.name, env);
-                                    deps.push(dep_key.clone());
+                        let mut deps = Vec::new();
+                        for dep in &resource.spec.dependencies {
+                            for env in &dep.project.environments {
+                                let dep_key = format!("{}:{}", dep.project.name, env);
+                                deps.push(dep_key.clone());
 
-                                    // Build reverse dependency map
-                                    reverse_dependencies
-                                        .entry(dep_key.clone())
-                                        .or_default()
-                                        .push(node_key.clone());
-                                }
-                            }
-
-                            if !deps.is_empty() {
-                                all_dependencies.insert(node_key, deps);
+                                // Build reverse dependency map
+                                reverse_dependencies
+                                    .entry(dep_key.clone())
+                                    .or_default()
+                                    .push(node_key.clone());
                             }
                         }
+
+                        if !deps.is_empty() {
+                            all_dependencies.insert(node_key, deps);
+                        }
+                    }
                 }
             }
         }
@@ -451,5 +643,150 @@ impl DepsCommand {
         }
 
         Ok(())
+    }
+
+    /// Build dependency data from projects
+    #[allow(clippy::type_complexity)]
+    fn build_dependency_data(
+        ctx: &Context,
+        projects: &[crate::template::metadata::ProjectReference],
+        infrastructure_root: &std::path::Path,
+    ) -> Result<(
+        HashMap<String, Vec<String>>,
+        HashSet<String>,
+        HashMap<String, Vec<String>>,
+    )> {
+        let mut all_dependencies: HashMap<String, Vec<String>> = HashMap::new();
+        let mut all_projects_set: HashSet<String> = HashSet::new();
+        let mut reverse_dependencies: HashMap<String, Vec<String>> = HashMap::new();
+
+        for project in projects {
+            let project_path = infrastructure_root.join(&project.path);
+            let environments_dir = project_path.join("environments");
+
+            if let Ok(env_entries) = ctx.fs.read_dir(&environments_dir) {
+                for env_path in env_entries {
+                    let env_file = env_path.join(".pmp.environment.yaml");
+                    if ctx.fs.exists(&env_file)
+                        && let Ok(resource) =
+                            DynamicProjectEnvironmentResource::from_file(&*ctx.fs, &env_file)
+                    {
+                        let node_key = format!(
+                            "{}:{}",
+                            resource.metadata.name, resource.metadata.environment_name
+                        );
+                        all_projects_set.insert(node_key.clone());
+
+                        let mut deps = Vec::new();
+                        for dep in &resource.spec.dependencies {
+                            for env in &dep.project.environments {
+                                let dep_key = format!("{}:{}", dep.project.name, env);
+                                deps.push(dep_key.clone());
+
+                                // Build reverse dependency map
+                                reverse_dependencies
+                                    .entry(dep_key)
+                                    .or_default()
+                                    .push(node_key.clone());
+                            }
+                        }
+
+                        if !deps.is_empty() {
+                            all_dependencies.insert(node_key, deps);
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok((all_dependencies, all_projects_set, reverse_dependencies))
+    }
+
+    /// Perform topological sort for deployment ordering
+    fn topological_sort(
+        dependencies: &HashMap<String, Vec<String>>,
+        all_projects: &HashSet<String>,
+    ) -> Result<Vec<Vec<String>>> {
+        let mut in_degree: HashMap<String, usize> = HashMap::new();
+        let mut levels: Vec<Vec<String>> = Vec::new();
+
+        // Initialize in-degree for all projects
+        for project in all_projects {
+            in_degree.insert(project.clone(), 0);
+        }
+
+        // Calculate in-degrees
+        for deps in dependencies.values() {
+            for dep in deps {
+                if let Some(degree) = in_degree.get_mut(dep) {
+                    *degree += 1;
+                }
+            }
+        }
+
+        // Process projects level by level
+        let mut processed = HashSet::new();
+
+        while processed.len() < all_projects.len() {
+            // Find all projects with in-degree 0 (can be deployed now)
+            let mut current_level: Vec<String> = in_degree
+                .iter()
+                .filter(|(project, degree)| **degree == 0 && !processed.contains(*project))
+                .map(|(project, _)| project.clone())
+                .collect();
+
+            if current_level.is_empty() {
+                // Circular dependency detected
+                anyhow::bail!("Circular dependency detected - cannot determine deployment order");
+            }
+
+            current_level.sort();
+
+            // Update in-degrees for next level
+            for project in &current_level {
+                processed.insert(project.clone());
+
+                // Decrease in-degree for projects that depend on this one
+                if let Some(deps) = dependencies.get(project) {
+                    for dep in deps {
+                        if let Some(degree) = in_degree.get_mut(dep)
+                            && *degree > 0
+                        {
+                            *degree -= 1;
+                        }
+                    }
+                }
+            }
+
+            levels.push(current_level);
+        }
+
+        Ok(levels)
+    }
+
+    /// Build full dependency chain for a project
+    fn build_dependency_chain(
+        project: &str,
+        dependencies: &HashMap<String, Vec<String>>,
+    ) -> Vec<String> {
+        let mut chain = vec![project.to_string()];
+        let mut visited = HashSet::new();
+        visited.insert(project.to_string());
+
+        let mut queue = vec![project.to_string()];
+
+        while let Some(current) = queue.pop() {
+            if let Some(deps) = dependencies.get(&current) {
+                for dep in deps {
+                    if !visited.contains(dep) {
+                        visited.insert(dep.clone());
+                        chain.push(dep.clone());
+                        queue.push(dep.clone());
+                    }
+                }
+            }
+        }
+
+        chain
     }
 }

@@ -307,9 +307,9 @@ impl EnvCommand {
                         .file_name()
                         .and_then(|n| n.to_str())
                         .context("Failed to get environment name")
-                    {
-                        environments.push((env_name.to_string(), env_file));
-                    }
+                {
+                    environments.push((env_name.to_string(), env_file));
+                }
             }
 
             if environments.len() < 2 {
@@ -330,9 +330,10 @@ impl EnvCommand {
 
                     for (key, value) in current_common {
                         if let Some(other_value) = resource.spec.inputs.get(key)
-                            && value == other_value {
-                                new_common.insert(key.clone(), value.clone());
-                            }
+                            && value == other_value
+                        {
+                            new_common.insert(key.clone(), value.clone());
+                        }
                     }
 
                     common_inputs = Some(new_common);
@@ -340,15 +341,16 @@ impl EnvCommand {
             }
 
             if let Some(common) = common_inputs
-                && !common.is_empty() {
-                    ctx.output.subsection(&format!("Project: {}", project.name));
-                    ctx.output.dimmed(&format!(
-                        "  Common inputs across {} environments: {}",
-                        environments.len(),
-                        common.keys().cloned().collect::<Vec<_>>().join(", ")
-                    ));
-                    synced_count += 1;
-                }
+                && !common.is_empty()
+            {
+                ctx.output.subsection(&format!("Project: {}", project.name));
+                ctx.output.dimmed(&format!(
+                    "  Common inputs across {} environments: {}",
+                    environments.len(),
+                    common.keys().cloned().collect::<Vec<_>>().join(", ")
+                ));
+                synced_count += 1;
+            }
         }
 
         output::blank();
@@ -430,9 +432,10 @@ impl EnvCommand {
                 {
                     // Filter by environment if specified
                     if let Some(env_filter) = environment
-                        && env_name != env_filter {
-                            continue;
-                        }
+                        && env_name != env_filter
+                    {
+                        continue;
+                    }
 
                     let resource =
                         DynamicProjectEnvironmentResource::from_file(&*ctx.fs, &env_file)?;
@@ -455,10 +458,7 @@ impl EnvCommand {
             let mut by_variable: HashMap<String, Vec<(String, serde_json::Value)>> = HashMap::new();
 
             for (project, key, value) in variables {
-                by_variable
-                    .entry(key)
-                    .or_default()
-                    .push((project, value));
+                by_variable.entry(key).or_default().push((project, value));
             }
 
             for (var_name, projects) in by_variable {

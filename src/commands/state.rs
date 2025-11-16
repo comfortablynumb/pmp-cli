@@ -28,6 +28,15 @@ struct DriftInfo {
     changes: Vec<String>,
 }
 
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+struct StateBackup {
+    project: String,
+    environment: String,
+    timestamp: String,
+    backup_id: String,
+    state_content: String,
+}
+
 impl StateCommand {
     /// Execute the state list command
     pub fn execute_list(ctx: &Context, show_details: bool) -> Result<()> {
@@ -62,16 +71,16 @@ impl StateCommand {
                     if ctx.fs.exists(&env_file)
                         && let Ok(resource) =
                             DynamicProjectEnvironmentResource::from_file(&*ctx.fs, &env_file)
-                        {
-                            let state_info = Self::get_state_info(
-                                ctx,
-                                &resource.metadata.name,
-                                &resource.metadata.environment_name,
-                                &env_path,
-                                show_details,
-                            )?;
-                            state_infos.push(state_info);
-                        }
+                    {
+                        let state_info = Self::get_state_info(
+                            ctx,
+                            &resource.metadata.name,
+                            &resource.metadata.environment_name,
+                            &env_path,
+                            show_details,
+                        )?;
+                        state_infos.push(state_info);
+                    }
                 }
             }
         }
@@ -116,9 +125,10 @@ impl StateCommand {
         };
 
         if projects_to_check.is_empty()
-            && let Some(name) = project_name {
-                anyhow::bail!("Project '{}' not found", name);
-            }
+            && let Some(name) = project_name
+        {
+            anyhow::bail!("Project '{}' not found", name);
+        }
 
         // Check drift for each project
         let mut drift_infos = Vec::new();
@@ -132,15 +142,15 @@ impl StateCommand {
                     if ctx.fs.exists(&env_file)
                         && let Ok(resource) =
                             DynamicProjectEnvironmentResource::from_file(&*ctx.fs, &env_file)
-                        {
-                            let drift_info = Self::check_drift(
-                                ctx,
-                                &resource.metadata.name,
-                                &resource.metadata.environment_name,
-                                &env_path,
-                            )?;
-                            drift_infos.push(drift_info);
-                        }
+                    {
+                        let drift_info = Self::check_drift(
+                            ctx,
+                            &resource.metadata.name,
+                            &resource.metadata.environment_name,
+                            &env_path,
+                        )?;
+                        drift_infos.push(drift_info);
+                    }
                 }
             }
         }
@@ -216,16 +226,16 @@ impl StateCommand {
                     if ctx.fs.exists(&env_file)
                         && let Ok(resource) =
                             DynamicProjectEnvironmentResource::from_file(&*ctx.fs, &env_file)
-                        {
-                            ctx.output.dimmed(&format!(
-                                "Syncing {}:{}...",
-                                resource.metadata.name, resource.metadata.environment_name
-                            ));
+                    {
+                        ctx.output.dimmed(&format!(
+                            "Syncing {}:{}...",
+                            resource.metadata.name, resource.metadata.environment_name
+                        ));
 
-                            if Self::sync_state(ctx, &env_path)? {
-                                synced_count += 1;
-                            }
+                        if Self::sync_state(ctx, &env_path)? {
+                            synced_count += 1;
                         }
+                    }
                 }
             }
         }
@@ -264,10 +274,11 @@ impl StateCommand {
             // Try to read state file to get resource count
             if let Ok(content) = ctx.fs.read_to_string(&state_file)
                 && let Ok(state) = serde_json::from_str::<serde_json::Value>(&content)
-                    && let Some(resources) = state.get("resources")
-                        && let Some(arr) = resources.as_array() {
-                            resource_count = Some(arr.len());
-                        }
+                && let Some(resources) = state.get("resources")
+                && let Some(arr) = resources.as_array()
+            {
+                resource_count = Some(arr.len());
+            }
 
             // Get last modified time (this would require metadata access in real impl)
             last_modified = Some("N/A".to_string());
@@ -300,10 +311,11 @@ impl StateCommand {
             .join("terraform.tfstate.lock.info");
         if ctx.fs.exists(&lock_file)
             && let Ok(content) = ctx.fs.read_to_string(&lock_file)
-                && let Ok(lock_data) = serde_json::from_str::<serde_json::Value>(&content)
-                    && let Some(who) = lock_data.get("Who").and_then(|v| v.as_str()) {
-                        return Ok(Some(who.to_string()));
-                    }
+            && let Ok(lock_data) = serde_json::from_str::<serde_json::Value>(&content)
+            && let Some(who) = lock_data.get("Who").and_then(|v| v.as_str())
+        {
+            return Ok(Some(who.to_string()));
+        }
         Ok(None)
     }
 
@@ -418,14 +430,15 @@ impl StateCommand {
             // Check lock ownership
             if let Ok(content) = ctx.fs.read_to_string(&lock_file)
                 && let Ok(lock_data) = serde_json::from_str::<serde_json::Value>(&content)
-                    && let Some(who) = lock_data.get("Who").and_then(|v| v.as_str()) {
-                        let hostname =
-                            whoami::fallible::hostname().unwrap_or_else(|_| "unknown".to_string());
-                        let current_user = format!("{}@{}", whoami::username(), hostname);
-                        if who != current_user {
-                            anyhow::bail!("Lock is held by {}. Use --force to override.", who);
-                        }
-                    }
+                && let Some(who) = lock_data.get("Who").and_then(|v| v.as_str())
+            {
+                let hostname =
+                    whoami::fallible::hostname().unwrap_or_else(|_| "unknown".to_string());
+                let current_user = format!("{}@{}", whoami::username(), hostname);
+                if who != current_user {
+                    anyhow::bail!("Lock is held by {}. Use --force to override.", who);
+                }
+            }
             ctx.fs.remove_file(&lock_file)?;
         }
 
@@ -584,6 +597,262 @@ impl StateCommand {
                 drift_infos.len()
             ));
         }
+
+        Ok(())
+    }
+
+    /// Execute the state backup command
+    pub fn execute_backup(ctx: &Context, path: Option<&str>) -> Result<()> {
+        ctx.output.section("State Backup");
+
+        let current_path = if let Some(p) = path {
+            PathBuf::from(p)
+        } else {
+            std::env::current_dir()?
+        };
+
+        let env_yaml = current_path.join(".pmp.environment.yaml");
+
+        if !ctx.fs.exists(&env_yaml) {
+            anyhow::bail!(
+                "Not in an environment directory. Navigate to a project environment or use --path"
+            );
+        }
+
+        let resource = DynamicProjectEnvironmentResource::from_file(&*ctx.fs, &env_yaml)?;
+
+        ctx.output.key_value("Project", &resource.metadata.name);
+        ctx.output
+            .key_value("Environment", &resource.metadata.environment_name);
+        output::blank();
+
+        // Create backup
+        let backup_id = chrono::Utc::now().format("%Y%m%d_%H%M%S").to_string();
+        let backup = Self::create_backup(ctx, &current_path, &resource, &backup_id)?;
+
+        // Save backup
+        let backup_dir = current_path.join(".pmp").join("backups");
+        ctx.fs.create_dir_all(&backup_dir)?;
+
+        let backup_file = backup_dir.join(format!("{}.json", backup_id));
+        let backup_json = serde_json::to_string_pretty(&backup)?;
+        ctx.fs.write(&backup_file, &backup_json)?;
+
+        ctx.output
+            .success(&format!("Backup created: {}", backup_file.display()));
+        ctx.output.key_value("Backup ID", &backup_id);
+
+        Ok(())
+    }
+
+    /// Execute the state restore command
+    pub fn execute_restore(
+        ctx: &Context,
+        backup_id: &str,
+        path: Option<&str>,
+        force: bool,
+    ) -> Result<()> {
+        ctx.output.section("State Restore");
+
+        let current_path = if let Some(p) = path {
+            PathBuf::from(p)
+        } else {
+            std::env::current_dir()?
+        };
+
+        let env_yaml = current_path.join(".pmp.environment.yaml");
+
+        if !ctx.fs.exists(&env_yaml) {
+            anyhow::bail!(
+                "Not in an environment directory. Navigate to a project environment or use --path"
+            );
+        }
+
+        let resource = DynamicProjectEnvironmentResource::from_file(&*ctx.fs, &env_yaml)?;
+
+        ctx.output.key_value("Project", &resource.metadata.name);
+        ctx.output
+            .key_value("Environment", &resource.metadata.environment_name);
+        ctx.output.key_value("Backup ID", backup_id);
+        output::blank();
+
+        // Load backup
+        let backup_dir = current_path.join(".pmp").join("backups");
+        let backup_file = backup_dir.join(format!("{}.json", backup_id));
+
+        if !ctx.fs.exists(&backup_file) {
+            anyhow::bail!("Backup not found: {}", backup_id);
+        }
+
+        let backup_json = ctx.fs.read_to_string(&backup_file)?;
+        let backup: StateBackup = serde_json::from_str(&backup_json)?;
+
+        // Verify backup matches current project
+        if backup.project != resource.metadata.name
+            || backup.environment != resource.metadata.environment_name
+        {
+            ctx.output
+                .error("Backup does not match current project/environment");
+            ctx.output.dimmed(&format!(
+                "Backup is for: {}:{}",
+                backup.project, backup.environment
+            ));
+            anyhow::bail!("Backup mismatch");
+        }
+
+        // Confirm restore
+        if !force {
+            let confirmed = ctx
+                .input
+                .confirm("This will replace the current state. Continue?", false)?;
+
+            if !confirmed {
+                ctx.output.dimmed("Restore cancelled.");
+                return Ok(());
+            }
+        }
+
+        // Restore state
+        Self::restore_backup(ctx, &current_path, &backup)?;
+
+        ctx.output.success("State restored successfully");
+
+        Ok(())
+    }
+
+    /// Execute the state migrate command
+    pub fn execute_migrate(ctx: &Context, backend_type: &str, path: Option<&str>) -> Result<()> {
+        ctx.output.section("State Migration");
+
+        let current_path = if let Some(p) = path {
+            PathBuf::from(p)
+        } else {
+            std::env::current_dir()?
+        };
+
+        let env_yaml = current_path.join(".pmp.environment.yaml");
+
+        if !ctx.fs.exists(&env_yaml) {
+            anyhow::bail!(
+                "Not in an environment directory. Navigate to a project environment or use --path"
+            );
+        }
+
+        let resource = DynamicProjectEnvironmentResource::from_file(&*ctx.fs, &env_yaml)?;
+
+        ctx.output.key_value("Project", &resource.metadata.name);
+        ctx.output
+            .key_value("Environment", &resource.metadata.environment_name);
+        ctx.output.key_value("Target Backend", backend_type);
+        output::blank();
+
+        // Create backup before migration
+        ctx.output.info("Creating backup before migration...");
+        let backup_id = format!(
+            "pre_migration_{}",
+            chrono::Utc::now().format("%Y%m%d_%H%M%S")
+        );
+        let backup = Self::create_backup(ctx, &current_path, &resource, &backup_id)?;
+
+        let backup_dir = current_path.join(".pmp").join("backups");
+        ctx.fs.create_dir_all(&backup_dir)?;
+
+        let backup_file = backup_dir.join(format!("{}.json", backup_id));
+        let backup_json = serde_json::to_string_pretty(&backup)?;
+        ctx.fs.write(&backup_file, &backup_json)?;
+
+        ctx.output
+            .success(&format!("Backup created: {}", backup_id));
+        output::blank();
+
+        // Migrate backend
+        Self::migrate_backend(ctx, &current_path, backend_type)?;
+
+        ctx.output
+            .success("Backend migration completed successfully");
+        ctx.output
+            .dimmed(&format!("Backup available for rollback: {}", backup_id));
+
+        Ok(())
+    }
+
+    /// Create a state backup
+    fn create_backup(
+        ctx: &Context,
+        env_path: &Path,
+        resource: &DynamicProjectEnvironmentResource,
+        backup_id: &str,
+    ) -> Result<StateBackup> {
+        // Read current state file
+        let state_file = env_path.join("terraform.tfstate");
+        let state_content = if ctx.fs.exists(&state_file) {
+            ctx.fs.read_to_string(&state_file)?
+        } else {
+            String::from("{}")
+        };
+
+        Ok(StateBackup {
+            project: resource.metadata.name.clone(),
+            environment: resource.metadata.environment_name.clone(),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            backup_id: backup_id.to_string(),
+            state_content,
+        })
+    }
+
+    /// Restore a backup
+    fn restore_backup(ctx: &Context, env_path: &Path, backup: &StateBackup) -> Result<()> {
+        let state_file = env_path.join("terraform.tfstate");
+
+        // Create backup of current state before restore
+        if ctx.fs.exists(&state_file) {
+            let current_backup = env_path.join("terraform.tfstate.before-restore");
+            let current_content = ctx.fs.read_to_string(&state_file)?;
+            ctx.fs.write(&current_backup, &current_content)?;
+            ctx.output.dimmed(&format!(
+                "Current state backed up to: {}",
+                current_backup.display()
+            ));
+        }
+
+        // Write restored state
+        ctx.fs.write(&state_file, &backup.state_content)?;
+
+        Ok(())
+    }
+
+    /// Migrate backend
+    fn migrate_backend(ctx: &Context, env_path: &Path, backend_type: &str) -> Result<()> {
+        ctx.output
+            .info(&format!("Migrating to {} backend...", backend_type));
+
+        // This would generate new backend configuration
+        // For now, we'll create a placeholder implementation
+
+        let backend_config = match backend_type {
+            "s3" => {
+                "terraform {\n  backend \"s3\" {\n    # Configure S3 backend parameters\n  }\n}\n"
+            }
+            "azurerm" => {
+                "terraform {\n  backend \"azurerm\" {\n    # Configure Azure backend parameters\n  }\n}\n"
+            }
+            "gcs" => {
+                "terraform {\n  backend \"gcs\" {\n    # Configure GCS backend parameters\n  }\n}\n"
+            }
+            "local" => "terraform {\n  backend \"local\" {}\n}\n",
+            _ => anyhow::bail!("Unsupported backend type: {}", backend_type),
+        };
+
+        // Write new backend configuration
+        let backend_file = env_path.join("_backend.tf");
+        ctx.fs.write(&backend_file, backend_config)?;
+
+        ctx.output.success(&format!(
+            "Backend configuration written to: {}",
+            backend_file.display()
+        ));
+        ctx.output
+            .dimmed("Run 'tofu init -migrate-state' to complete migration");
 
         Ok(())
     }

@@ -154,25 +154,25 @@ impl GraphCommand {
                     if ctx.fs.exists(&env_file)
                         && let Ok(resource) =
                             DynamicProjectEnvironmentResource::from_file(&*ctx.fs, &env_file)
-                        {
-                            let node_key = format!(
-                                "{}:{}",
-                                resource.metadata.name, resource.metadata.environment_name
-                            );
-                            all_projects_set.insert(node_key.clone());
+                    {
+                        let node_key = format!(
+                            "{}:{}",
+                            resource.metadata.name, resource.metadata.environment_name
+                        );
+                        all_projects_set.insert(node_key.clone());
 
-                            let mut deps = Vec::new();
-                            for dep in &resource.spec.dependencies {
-                                for env in &dep.project.environments {
-                                    let dep_key = format!("{}:{}", dep.project.name, env);
-                                    deps.push(dep_key);
-                                }
-                            }
-
-                            if !deps.is_empty() {
-                                all_dependencies.insert(node_key, deps);
+                        let mut deps = Vec::new();
+                        for dep in &resource.spec.dependencies {
+                            for env in &dep.project.environments {
+                                let dep_key = format!("{}:{}", dep.project.name, env);
+                                deps.push(dep_key);
                             }
                         }
+
+                        if !deps.is_empty() {
+                            all_dependencies.insert(node_key, deps);
+                        }
+                    }
                 }
             }
         }

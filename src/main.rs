@@ -11,9 +11,10 @@ mod traits;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use commands::{
-    ApplyCommand, CiCommand, CloneCommand, CreateCommand, DepsCommand, DestroyCommand, EnvCommand,
-    FindCommand, GenerateCommand, GraphCommand, InitCommand, PreviewCommand, RefreshCommand,
-    StateCommand, TemplateCommand, UiCommand, UpdateCommand,
+    ApplyCommand, CiCommand, CloneCommand, CreateCommand, DepsCommand, DestroyCommand,
+    DriftCommand, EnvCommand, FindCommand, GenerateCommand, GraphCommand, InitCommand,
+    PolicyCommand, PreviewCommand, RefreshCommand, StateCommand, TemplateCommand, UiCommand,
+    UpdateCommand,
 };
 
 #[derive(Parser)]
@@ -207,11 +208,29 @@ enum Commands {
 
     /// Dependency analysis and management
     #[command(
-        long_about = "Analyze and manage project dependencies\n\nSubcommands:\n- analyze: Comprehensive dependency analysis\n- impact: Show projects affected by changes\n\nExamples:\n  pmp deps analyze\n  pmp deps impact my-api"
+        long_about = "Analyze and manage project dependencies\n\nSubcommands:\n- analyze: Comprehensive dependency analysis\n- impact: Show projects affected by changes\n- validate: Validate dependency chains\n- order: Show optimal deployment order\n- why: Explain dependency relationships\n\nExamples:\n  pmp deps analyze\n  pmp deps impact my-api\n  pmp deps validate\n  pmp deps order\n  pmp deps why my-api"
     )]
     Deps {
         #[command(subcommand)]
         command: DepsSubcommands,
+    },
+
+    /// Drift detection and reconciliation
+    #[command(
+        long_about = "Detect and reconcile infrastructure drift\n\nSubcommands:\n- detect: Detect drift in infrastructure\n- report: Generate drift report\n- reconcile: Reconcile drift by applying changes\n\nExamples:\n  pmp drift detect\n  pmp drift detect --path ./my-project/environments/dev\n  pmp drift report --format json --output drift-report.json\n  pmp drift reconcile --auto-approve"
+    )]
+    Drift {
+        #[command(subcommand)]
+        command: DriftSubcommands,
+    },
+
+    /// Policy validation and security scanning
+    #[command(
+        long_about = "Validate policies and scan for security issues\n\nSubcommands:\n- validate: Validate against organizational policies\n- scan: Run security scanning tools\n\nExamples:\n  pmp policy validate\n  pmp policy validate --policy naming\n  pmp policy scan --scanner tfsec\n  pmp policy scan --scanner checkov"
+    )]
+    Policy {
+        #[command(subcommand)]
+        command: PolicySubcommands,
     },
 
     /// State management and drift detection
@@ -283,6 +302,27 @@ enum DepsSubcommands {
         /// Project name to analyze
         project: String,
     },
+
+    /// Validate dependency chains
+    #[command(
+        long_about = "Validate all dependency chains for errors\n\nChecks for:\n- Missing dependencies\n- Circular dependencies\n- Invalid dependency references\n\nExample:\n  pmp deps validate"
+    )]
+    Validate,
+
+    /// Show optimal deployment order
+    #[command(
+        long_about = "Calculate optimal deployment order using topological sort\n\nShows projects grouped by deployment level (can deploy in parallel)\n\nExample:\n  pmp deps order"
+    )]
+    Order,
+
+    /// Explain why a project is needed
+    #[command(
+        long_about = "Explain dependency relationships for a project\n\nShows:\n- What the project depends on\n- What depends on the project\n- Full dependency chain\n\nExample:\n  pmp deps why my-api"
+    )]
+    Why {
+        /// Project name to explain
+        project: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -339,6 +379,126 @@ enum StateSubcommands {
     /// Sync remote state
     #[command(long_about = "Sync state with remote backend\n\nExample:\n  pmp state sync")]
     Sync,
+
+    /// Create a manual backup of state
+    #[command(
+        long_about = "Create a backup of the current state\n\nExample:\n  pmp state backup\n  pmp state backup --path ./my-project/environments/dev"
+    )]
+    Backup {
+        /// Path to the project environment (defaults to current directory)
+        #[arg(short, long)]
+        path: Option<String>,
+    },
+
+    /// Restore state from a backup
+    #[command(
+        long_about = "Restore state from a previous backup\n\nExample:\n  pmp state restore 20250116_143000\n  pmp state restore 20250116_143000 --force"
+    )]
+    Restore {
+        /// Backup ID to restore
+        backup_id: String,
+
+        /// Path to the project environment (defaults to current directory)
+        #[arg(short, long)]
+        path: Option<String>,
+
+        /// Skip confirmation prompt
+        #[arg(short, long)]
+        force: bool,
+    },
+
+    /// Migrate state between backends
+    #[command(
+        long_about = "Migrate state to a different backend\n\nSupported backends:\n- s3\n- azurerm\n- gcs\n- local\n\nExample:\n  pmp state migrate s3\n  pmp state migrate azurerm --path ./my-project/environments/prod"
+    )]
+    Migrate {
+        /// Target backend type
+        backend_type: String,
+
+        /// Path to the project environment (defaults to current directory)
+        #[arg(short, long)]
+        path: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum DriftSubcommands {
+    /// Detect drift in infrastructure
+    #[command(
+        long_about = "Compare actual infrastructure state vs declared configuration\n\nExample:\n  pmp drift detect\n  pmp drift detect --path ./my-project/environments/dev"
+    )]
+    Detect {
+        /// Path to check (defaults to current directory or all projects)
+        #[arg(short, long)]
+        path: Option<String>,
+
+        /// Output format (text, json)
+        #[arg(short, long)]
+        format: Option<String>,
+    },
+
+    /// Generate drift report
+    #[command(
+        long_about = "Generate a detailed drift report with visualization\n\nExample:\n  pmp drift report\n  pmp drift report --format json --output drift-report.json"
+    )]
+    Report {
+        /// Path to check (defaults to current directory)
+        #[arg(short, long)]
+        path: Option<String>,
+
+        /// Output file
+        #[arg(short, long)]
+        output: Option<String>,
+
+        /// Output format (text, json, yaml)
+        #[arg(short, long)]
+        format: Option<String>,
+    },
+
+    /// Reconcile drift by applying changes
+    #[command(
+        long_about = "Auto-fix configuration drift by applying changes\n\nExample:\n  pmp drift reconcile\n  pmp drift reconcile --auto-approve"
+    )]
+    Reconcile {
+        /// Path to reconcile (defaults to current directory)
+        #[arg(short, long)]
+        path: Option<String>,
+
+        /// Skip confirmation prompt
+        #[arg(long)]
+        auto_approve: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum PolicySubcommands {
+    /// Validate against organizational policies
+    #[command(
+        long_about = "Check projects against organizational policies\n\nBuilt-in policies:\n- naming: Naming conventions\n- tagging: Required tags\n- security: Security best practices\n- dependencies: Dependency validation\n\nExample:\n  pmp policy validate\n  pmp policy validate --policy naming\n  pmp policy validate --path ./my-project/environments/dev"
+    )]
+    Validate {
+        /// Path to validate (defaults to current directory or all projects)
+        #[arg(short, long)]
+        path: Option<String>,
+
+        /// Filter policies by ID or category
+        #[arg(long)]
+        policy: Option<String>,
+    },
+
+    /// Run security scanning
+    #[command(
+        long_about = "Run security scanning tools on infrastructure code\n\nSupported scanners:\n- tfsec: Terraform security scanner\n- checkov: Policy-as-code scanner\n- trivy: Comprehensive security scanner\n\nExample:\n  pmp policy scan\n  pmp policy scan --scanner tfsec\n  pmp policy scan --scanner checkov --path ./my-project/environments/prod"
+    )]
+    Scan {
+        /// Path to scan (defaults to current directory)
+        #[arg(short, long)]
+        path: Option<String>,
+
+        /// Scanner to use (tfsec, checkov, trivy)
+        #[arg(short, long)]
+        scanner: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -524,6 +684,43 @@ fn main() -> Result<()> {
             DepsSubcommands::Impact { project } => {
                 DepsCommand::execute_impact(&ctx, &project)?;
             }
+            DepsSubcommands::Validate => {
+                DepsCommand::execute_validate(&ctx)?;
+            }
+            DepsSubcommands::Order => {
+                DepsCommand::execute_order(&ctx)?;
+            }
+            DepsSubcommands::Why { project } => {
+                DepsCommand::execute_why(&ctx, &project)?;
+            }
+        },
+        Commands::Drift { command } => match command {
+            DriftSubcommands::Detect { path, format } => {
+                DriftCommand::execute_detect(&ctx, path.as_deref(), format.as_deref())?;
+            }
+            DriftSubcommands::Report {
+                path,
+                output,
+                format,
+            } => {
+                DriftCommand::execute_report(
+                    &ctx,
+                    path.as_deref(),
+                    output.as_deref(),
+                    format.as_deref(),
+                )?;
+            }
+            DriftSubcommands::Reconcile { path, auto_approve } => {
+                DriftCommand::execute_reconcile(&ctx, path.as_deref(), auto_approve)?;
+            }
+        },
+        Commands::Policy { command } => match command {
+            PolicySubcommands::Validate { path, policy } => {
+                PolicyCommand::execute_validate(&ctx, path.as_deref(), policy.as_deref())?;
+            }
+            PolicySubcommands::Scan { path, scanner } => {
+                PolicyCommand::execute_scan(&ctx, path.as_deref(), scanner.as_deref())?;
+            }
         },
         Commands::State { command } => match command {
             StateSubcommands::List { details } => {
@@ -547,6 +744,19 @@ fn main() -> Result<()> {
             }
             StateSubcommands::Sync => {
                 StateCommand::execute_sync(&ctx)?;
+            }
+            StateSubcommands::Backup { path } => {
+                StateCommand::execute_backup(&ctx, path.as_deref())?;
+            }
+            StateSubcommands::Restore {
+                backup_id,
+                path,
+                force,
+            } => {
+                StateCommand::execute_restore(&ctx, &backup_id, path.as_deref(), force)?;
+            }
+            StateSubcommands::Migrate { backend_type, path } => {
+                StateCommand::execute_migrate(&ctx, &backend_type, path.as_deref())?;
             }
         },
         Commands::Ci { command } => match command {
