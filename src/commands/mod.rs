@@ -1,6 +1,7 @@
 pub mod apply;
 pub mod create;
 pub mod destroy;
+mod execution_helper;
 pub mod find;
 pub mod generate;
 pub mod init;
@@ -12,6 +13,7 @@ pub mod update;
 pub use apply::ApplyCommand;
 pub use create::CreateCommand;
 pub use destroy::DestroyCommand;
+pub use execution_helper::ExecutionHelper;
 pub use find::FindCommand;
 pub use generate::GenerateCommand;
 pub use init::InitCommand;

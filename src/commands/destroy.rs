@@ -66,11 +66,26 @@ impl DestroyCommand {
 
         ctx.output.key_value("Kind", &resource.kind);
 
+        // Check for dependencies
+        let maybe_graph = crate::commands::ExecutionHelper::check_and_display_dependencies(
+            ctx,
+            &env_path,
+            &project_name,
+            &env_name,
+            "destroy",
+        )?;
+
         // Show confirmation prompt unless --yes flag is provided
         if !skip_confirmation {
             ctx.output.blank();
             ctx.output
                 .warning("WARNING: This will destroy all resources managed by this project!");
+
+            if maybe_graph.is_some() {
+                ctx.output
+                    .warning("This will also destroy all dependent projects!");
+            }
+
             ctx.output
                 .warning(&format!("Project: {} ({})", project_name, env_name));
             ctx.output.blank();
@@ -87,6 +102,64 @@ impl DestroyCommand {
             }
         }
 
+        if let Some(graph) = maybe_graph {
+            // For destroy, we need to reverse the execution order
+            // (destroy dependents before dependencies)
+            let mut execution_order = graph.execution_order()?;
+            execution_order.reverse();
+
+            ctx.output.blank();
+            ctx.output.section(&format!(
+                "Executing destroy on {} projects (in reverse dependency order)",
+                execution_order.len()
+            ));
+
+            // Execute destroy on each project in reverse order
+            for (i, node) in execution_order.iter().enumerate() {
+                ctx.output.blank();
+                ctx.output.subsection(&format!(
+                    "Step {}/{}: {} ({})",
+                    i + 1,
+                    execution_order.len(),
+                    node.project_name,
+                    node.environment_name
+                ));
+
+                // Load environment resource
+                let env_file = node.environment_path.join(".pmp.environment.yaml");
+                let resource = DynamicProjectEnvironmentResource::from_file(&*ctx.fs, &env_file)
+                    .context("Failed to load environment resource")?;
+
+                // Get executor configuration
+                let executor_config = resource.get_executor_config();
+
+                // Get executor
+                let executor = Self::get_executor(&executor_config.name)?;
+
+                // Build executor config
+                let execution_config = crate::executor::ExecutorConfig {
+                    plan_command: None,
+                    apply_command: None,
+                    destroy_command: None,
+                    refresh_command: None,
+                };
+
+                // Execute destroy on this node
+                crate::commands::ExecutionHelper::execute_destroy_on_node(
+                    ctx,
+                    node,
+                    executor.as_ref(),
+                    &execution_config,
+                    extra_args,
+                )?;
+            }
+
+            ctx.output.blank();
+            ctx.output.success("Destroy completed successfully for all projects");
+            return Ok(());
+        }
+
+        // No dependencies - proceed with single project execution
         // Get executor configuration
         let executor_config = resource.get_executor_config();
 

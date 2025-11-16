@@ -394,11 +394,122 @@ pub enum InputType {
         #[serde(skip_serializing_if = "Option::is_none")]
         max: Option<usize>,
     },
+    /// File or directory path input
+    Path {
+        /// If true, only accept existing paths
+        #[serde(default, skip_serializing_if = "is_false")]
+        must_exist: bool,
+        /// If true, only accept directories
+        #[serde(default, skip_serializing_if = "is_false")]
+        directories_only: bool,
+        /// If true, only accept files
+        #[serde(default, skip_serializing_if = "is_false")]
+        files_only: bool,
+    },
+    /// URL input with optional reachability check
+    #[serde(rename = "url")]
+    Url {
+        /// Allowed URL schemes (e.g., ["http", "https"])
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        allowed_schemes: Vec<String>,
+        /// If true, verify the URL is reachable
+        #[serde(default, skip_serializing_if = "is_false")]
+        check_reachable: bool,
+    },
+    /// Date input in ISO 8601 format (YYYY-MM-DD)
+    Date {
+        /// Minimum date (ISO 8601 format)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        min: Option<String>,
+        /// Maximum date (ISO 8601 format)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        max: Option<String>,
+    },
+    /// DateTime input in ISO 8601 format (YYYY-MM-DDTHH:MM:SSZ)
+    DateTime {
+        /// Minimum datetime (ISO 8601 format)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        min: Option<String>,
+        /// Maximum datetime (ISO 8601 format)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        max: Option<String>,
+    },
+    /// JSON object input (validates JSON syntax)
+    #[serde(rename = "json")]
+    Json {
+        /// If true, format/prettify the JSON before storing
+        #[serde(default, skip_serializing_if = "is_false")]
+        prettify: bool,
+    },
+    /// YAML object input (validates YAML syntax)
+    #[serde(rename = "yaml")]
+    Yaml {
+        /// If true, format the YAML before storing
+        #[serde(default, skip_serializing_if = "is_false")]
+        prettify: bool,
+    },
+    /// List input (comma-separated values)
+    List {
+        /// Separator character (default: ",")
+        #[serde(default = "default_list_separator")]
+        separator: String,
+        /// Minimum number of items
+        #[serde(skip_serializing_if = "Option::is_none")]
+        min: Option<usize>,
+        /// Maximum number of items
+        #[serde(skip_serializing_if = "Option::is_none")]
+        max: Option<usize>,
+        /// If true, remove whitespace from each item
+        #[serde(default = "default_true", skip_serializing_if = "is_true")]
+        trim_items: bool,
+        /// If true, remove empty items
+        #[serde(default = "default_true", skip_serializing_if = "is_true")]
+        remove_empty: bool,
+    },
+    /// Email input with validation
+    Email,
+    /// IP address input (supports IPv4 and IPv6)
+    #[serde(rename = "ip")]
+    IpAddress {
+        /// If true, only accept IPv4 addresses
+        #[serde(default, skip_serializing_if = "is_false")]
+        ipv4_only: bool,
+        /// If true, only accept IPv6 addresses
+        #[serde(default, skip_serializing_if = "is_false")]
+        ipv6_only: bool,
+    },
+    /// CIDR notation input (e.g., 192.168.1.0/24)
+    #[serde(rename = "cidr")]
+    Cidr {
+        /// If true, only accept IPv4 CIDR
+        #[serde(default, skip_serializing_if = "is_false")]
+        ipv4_only: bool,
+        /// If true, only accept IPv6 CIDR
+        #[serde(default, skip_serializing_if = "is_false")]
+        ipv6_only: bool,
+    },
+    /// Port number input (1-65535)
+    Port,
 }
 
 /// Helper function for serde to determine if a bool is false
 fn is_false(b: &bool) -> bool {
     !b
+}
+
+/// Helper function for serde to determine if a bool is true
+fn is_true(b: &bool) -> bool {
+    *b
+}
+
+/// Default value for list separator
+fn default_list_separator() -> String {
+    ",".to_string()
+}
+
+/// Default value for true boolean
+fn default_true() -> bool {
+    true
 }
 
 /// Enum option with display text and value
@@ -665,6 +776,23 @@ pub struct EnvironmentReference {
     pub name: String,
 }
 
+/// Reference to a dependency project
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DependencyProject {
+    /// Name of the project
+    pub name: String,
+
+    /// List of environments of the dependency project
+    pub environments: Vec<String>,
+}
+
+/// Project dependency configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectDependency {
+    /// Project reference
+    pub project: DependencyProject,
+}
+
 /// Project specification
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectSpec {
@@ -700,6 +828,11 @@ pub struct ProjectSpec {
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub template_reference_projects: Vec<TemplateReferenceProject>,
+
+    /// Dependencies on other projects
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub dependencies: Vec<ProjectDependency>,
 }
 
 // ============================================================================
@@ -1981,5 +2114,173 @@ spec:
         assert_eq!(plugin.spec.inputs.len(), 2);
         assert_eq!(plugin.spec.inputs[0].name, "plugin_input1");
         assert_eq!(plugin.spec.inputs[1].name, "plugin_input2");
+    }
+
+    #[test]
+    fn test_project_spec_with_dependencies() {
+        let yaml = r#"
+apiVersion: pmp.io/v1
+kind: TestResource
+metadata:
+  name: test-project
+  environment_name: dev
+spec:
+  resource:
+    apiVersion: pmp.io/v1
+    kind: TestResource
+  executor:
+    name: opentofu
+  inputs: {}
+  dependencies:
+    - project:
+        name: database-project
+        environments:
+          - dev
+          - staging
+    - project:
+        name: network-project
+        environments:
+          - dev
+"#;
+
+        let resource: DynamicProjectEnvironmentResource = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(resource.spec.dependencies.len(), 2);
+
+        let dep1 = &resource.spec.dependencies[0];
+        assert_eq!(dep1.project.name, "database-project");
+        assert_eq!(dep1.project.environments.len(), 2);
+        assert_eq!(dep1.project.environments[0], "dev");
+        assert_eq!(dep1.project.environments[1], "staging");
+
+        let dep2 = &resource.spec.dependencies[1];
+        assert_eq!(dep2.project.name, "network-project");
+        assert_eq!(dep2.project.environments.len(), 1);
+        assert_eq!(dep2.project.environments[0], "dev");
+    }
+
+    #[test]
+    fn test_project_spec_empty_dependencies() {
+        let yaml = r#"
+apiVersion: pmp.io/v1
+kind: TestResource
+metadata:
+  name: test-project
+  environment_name: dev
+spec:
+  resource:
+    apiVersion: pmp.io/v1
+    kind: TestResource
+  executor:
+    name: opentofu
+  inputs: {}
+  dependencies: []
+"#;
+
+        let resource: DynamicProjectEnvironmentResource = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(resource.spec.dependencies.len(), 0);
+    }
+
+    #[test]
+    fn test_project_spec_no_dependencies_field() {
+        // Test backward compatibility - dependencies field is optional
+        let yaml = r#"
+apiVersion: pmp.io/v1
+kind: TestResource
+metadata:
+  name: test-project
+  environment_name: dev
+spec:
+  resource:
+    apiVersion: pmp.io/v1
+    kind: TestResource
+  executor:
+    name: opentofu
+  inputs: {}
+"#;
+
+        let resource: DynamicProjectEnvironmentResource = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(resource.spec.dependencies.len(), 0);
+    }
+
+    #[test]
+    fn test_project_spec_dependencies_serialization() {
+        use std::collections::HashMap;
+
+        let project_spec = ProjectSpec {
+            resource: ResourceDefinition {
+                api_version: "pmp.io/v1".to_string(),
+                kind: "TestResource".to_string(),
+            },
+            executor: ExecutorProjectConfig {
+                name: "opentofu".to_string(),
+            },
+            inputs: HashMap::new(),
+            custom: None,
+            plugins: None,
+            template: None,
+            environment: None,
+            template_reference_projects: Vec::new(),
+            dependencies: vec![
+                ProjectDependency {
+                    project: DependencyProject {
+                        name: "db-project".to_string(),
+                        environments: vec!["dev".to_string(), "staging".to_string()],
+                    },
+                },
+                ProjectDependency {
+                    project: DependencyProject {
+                        name: "network-project".to_string(),
+                        environments: vec!["dev".to_string()],
+                    },
+                },
+            ],
+        };
+
+        let yaml = serde_yaml::to_string(&project_spec).unwrap();
+
+        // Verify the YAML contains the dependencies
+        assert!(yaml.contains("dependencies:"));
+        assert!(yaml.contains("db-project"));
+        assert!(yaml.contains("network-project"));
+        assert!(yaml.contains("- dev"));
+        assert!(yaml.contains("- staging"));
+
+        // Deserialize back and verify
+        let deserialized: ProjectSpec = serde_yaml::from_str(&yaml).unwrap();
+        assert_eq!(deserialized.dependencies.len(), 2);
+        assert_eq!(deserialized.dependencies[0].project.name, "db-project");
+        assert_eq!(deserialized.dependencies[0].project.environments.len(), 2);
+        assert_eq!(deserialized.dependencies[1].project.name, "network-project");
+        assert_eq!(deserialized.dependencies[1].project.environments.len(), 1);
+    }
+
+    #[test]
+    fn test_dependency_project_single_environment() {
+        let dep = DependencyProject {
+            name: "test-project".to_string(),
+            environments: vec!["production".to_string()],
+        };
+
+        assert_eq!(dep.name, "test-project");
+        assert_eq!(dep.environments.len(), 1);
+        assert_eq!(dep.environments[0], "production");
+    }
+
+    #[test]
+    fn test_dependency_project_multiple_environments() {
+        let dep = DependencyProject {
+            name: "multi-env-project".to_string(),
+            environments: vec![
+                "dev".to_string(),
+                "staging".to_string(),
+                "production".to_string(),
+            ],
+        };
+
+        assert_eq!(dep.name, "multi-env-project");
+        assert_eq!(dep.environments.len(), 3);
+        assert!(dep.environments.contains(&"dev".to_string()));
+        assert!(dep.environments.contains(&"staging".to_string()));
+        assert!(dep.environments.contains(&"production".to_string()));
     }
 }

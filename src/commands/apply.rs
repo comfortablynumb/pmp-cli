@@ -65,6 +65,30 @@ impl ApplyCommand {
 
         ctx.output.key_value("Kind", &resource.kind);
 
+        // Check for dependencies
+        let maybe_graph = crate::commands::ExecutionHelper::check_and_display_dependencies(
+            ctx,
+            &env_path,
+            &project_name,
+            &env_name,
+            "apply",
+        )?;
+
+        if let Some(graph) = maybe_graph {
+            // Execute apply on entire dependency graph
+            crate::commands::ExecutionHelper::execute_on_graph(
+                ctx,
+                &graph,
+                "apply",
+                crate::commands::ExecutionHelper::execute_apply_on_node,
+            )?;
+
+            ctx.output.blank();
+            ctx.output.success("Apply completed successfully for all projects");
+            return Ok(());
+        }
+
+        // No dependencies - proceed with single project execution
         // Get executor configuration
         let executor_config = resource.get_executor_config();
 

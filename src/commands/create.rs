@@ -1465,9 +1465,11 @@ impl CreateCommand {
         input_type: &InputType,
         default: Option<&Value>,
     ) -> Result<Value> {
+        // Extract default_str for string-based inputs
+        let default_str = default.and_then(|v| v.as_str());
+
         match input_type {
             InputType::String => {
-                let default_str = default.and_then(|v| v.as_str());
                 let prompt_text = if let Some(def) = default_str {
                     format!("{} [default: {}]", description, def)
                 } else {
@@ -1672,6 +1674,53 @@ impl CreateCommand {
                 *min,
                 *max,
             ),
+            InputType::Path {
+                must_exist,
+                directories_only,
+                files_only,
+            } => Self::prompt_for_path(ctx, description, default_str, *must_exist, *directories_only, *files_only),
+            InputType::Url {
+                allowed_schemes,
+                check_reachable,
+            } => Self::prompt_for_url(ctx, description, default_str, allowed_schemes, *check_reachable),
+            InputType::Date { min, max } => {
+                Self::prompt_for_date(ctx, description, default_str, min.as_deref(), max.as_deref())
+            }
+            InputType::DateTime { min, max } => {
+                Self::prompt_for_datetime(ctx, description, default_str, min.as_deref(), max.as_deref())
+            }
+            InputType::Json { prettify } => {
+                Self::prompt_for_json(ctx, description, default_str, *prettify)
+            }
+            InputType::Yaml { prettify } => {
+                Self::prompt_for_yaml(ctx, description, default_str, *prettify)
+            }
+            InputType::List {
+                separator,
+                min,
+                max,
+                trim_items,
+                remove_empty,
+            } => Self::prompt_for_list(
+                ctx,
+                description,
+                default_str,
+                separator,
+                *min,
+                *max,
+                *trim_items,
+                *remove_empty,
+            ),
+            InputType::Email => Self::prompt_for_email(ctx, description, default_str),
+            InputType::IpAddress {
+                ipv4_only,
+                ipv6_only,
+            } => Self::prompt_for_ip_address(ctx, description, default_str, *ipv4_only, *ipv6_only),
+            InputType::Cidr {
+                ipv4_only,
+                ipv6_only,
+            } => Self::prompt_for_cidr(ctx, description, default_str, *ipv4_only, *ipv6_only),
+            InputType::Port => Self::prompt_for_port(ctx, description, default_str),
         }
     }
 
@@ -1761,7 +1810,7 @@ impl CreateCommand {
             .filter(|project| {
                 // Filter by kind if specified
                 if let Some(k) = kind
-                    && &project.kind != k
+                    && project.kind != *k
                 {
                     return false;
                 }
@@ -1773,21 +1822,21 @@ impl CreateCommand {
                 if let Ok(env_entries) = ctx.fs.read_dir(&environments_dir) {
                     for env_path in env_entries {
                         let env_file = env_path.join(".pmp.environment.yaml");
-                        if ctx.fs.exists(&env_file) {
-                            if let Ok(env_resource) = crate::template::metadata::DynamicProjectEnvironmentResource::from_file(&*ctx.fs, &env_file) {
-                                // Check api_version if specified
-                                if let Some(av) = api_version
-                                    && env_resource.api_version != av
-                                {
-                                    continue;
-                                }
-
-                                // TODO: Check labels if specified (labels not yet implemented in ProjectSpec)
-                                // For now, ignore label filtering
-                                let _ = labels;
-
-                                return true; // At least one environment matches
+                        if ctx.fs.exists(&env_file)
+                            && let Ok(env_resource) = crate::template::metadata::DynamicProjectEnvironmentResource::from_file(&*ctx.fs, &env_file)
+                        {
+                            // Check api_version if specified
+                            if let Some(av) = api_version
+                                && env_resource.api_version != av
+                            {
+                                continue;
                             }
+
+                            // TODO: Check labels if specified (labels not yet implemented in ProjectSpec)
+                            // For now, ignore label filtering
+                            let _ = labels;
+
+                            return true; // At least one environment matches
                         }
                     }
                 }
@@ -1839,7 +1888,7 @@ impl CreateCommand {
             .iter()
             .filter(|project| {
                 if let Some(k) = kind
-                    && &project.kind != k
+                    && project.kind != *k
                 {
                     return false;
                 }
@@ -1850,20 +1899,20 @@ impl CreateCommand {
                 if let Ok(env_entries) = ctx.fs.read_dir(&environments_dir) {
                     for env_path in env_entries {
                         let env_file = env_path.join(".pmp.environment.yaml");
-                        if ctx.fs.exists(&env_file) {
-                            if let Ok(env_resource) = crate::template::metadata::DynamicProjectEnvironmentResource::from_file(&*ctx.fs, &env_file) {
-                                if let Some(av) = api_version
-                                    && env_resource.api_version != av
-                                {
-                                    continue;
-                                }
-
-                                // TODO: Check labels if specified (labels not yet implemented in ProjectSpec)
-                                // For now, ignore label filtering
-                                let _ = labels;
-
-                                return true;
+                        if ctx.fs.exists(&env_file)
+                            && let Ok(env_resource) = crate::template::metadata::DynamicProjectEnvironmentResource::from_file(&*ctx.fs, &env_file)
+                        {
+                            if let Some(av) = api_version
+                                && env_resource.api_version != av
+                            {
+                                continue;
                             }
+
+                            // TODO: Check labels if specified (labels not yet implemented in ProjectSpec)
+                            // For now, ignore label filtering
+                            let _ = labels;
+
+                            return true;
                         }
                     }
                 }
@@ -1936,6 +1985,388 @@ impl CreateCommand {
             }
         }
         true
+    }
+
+    /// Prompt for file/directory path input
+    fn prompt_for_path(
+        ctx: &crate::context::Context,
+        description: &str,
+        default: Option<&str>,
+        must_exist: bool,
+        directories_only: bool,
+        files_only: bool,
+    ) -> Result<Value> {
+        let mut prompt = description.to_string();
+
+        if directories_only {
+            prompt.push_str(" [directory]");
+        } else if files_only {
+            prompt.push_str(" [file]");
+        } else {
+            prompt.push_str(" [path]");
+        }
+
+        loop {
+            let answer = ctx.input.text(&prompt, default).context("Failed to get input")?;
+
+            if must_exist {
+                let path = std::path::Path::new(&answer);
+                if !path.exists() {
+                    ctx.output.error(&format!("Path does not exist: {}", answer));
+                    continue;
+                }
+                if directories_only && !path.is_dir() {
+                    ctx.output.error("Path must be a directory");
+                    continue;
+                }
+                if files_only && !path.is_file() {
+                    ctx.output.error("Path must be a file");
+                    continue;
+                }
+            }
+
+            return Ok(Value::String(answer));
+        }
+    }
+
+    /// Prompt for URL input
+    fn prompt_for_url(
+        ctx: &crate::context::Context,
+        description: &str,
+        default: Option<&str>,
+        allowed_schemes: &[String],
+        _check_reachable: bool,
+    ) -> Result<Value> {
+        let prompt = format!("{} [URL]", description);
+
+        loop {
+            let answer = ctx.input.text(&prompt, default).context("Failed to get input")?;
+
+            // Basic URL validation
+            if let Err(e) = url::Url::parse(&answer) {
+                ctx.output.error(&format!("Invalid URL: {}", e));
+                continue;
+            }
+
+            // Check allowed schemes if specified
+            if !allowed_schemes.is_empty()
+                && let Ok(parsed_url) = url::Url::parse(&answer)
+                && !allowed_schemes.contains(&parsed_url.scheme().to_string())
+            {
+                ctx.output.error(&format!(
+                    "URL scheme must be one of: {}",
+                    allowed_schemes.join(", ")
+                ));
+                continue;
+            }
+
+            return Ok(Value::String(answer));
+        }
+    }
+
+    /// Prompt for date input (ISO 8601 format: YYYY-MM-DD)
+    fn prompt_for_date(
+        ctx: &crate::context::Context,
+        description: &str,
+        default: Option<&str>,
+        _min: Option<&str>,
+        _max: Option<&str>,
+    ) -> Result<Value> {
+        let prompt = format!("{} [YYYY-MM-DD]", description);
+
+        loop {
+            let answer = ctx.input.text(&prompt, default).context("Failed to get input")?;
+
+            // Validate date format
+            if let Err(e) = chrono::NaiveDate::parse_from_str(&answer, "%Y-%m-%d") {
+                ctx.output.error(&format!("Invalid date format: {}", e));
+                continue;
+            }
+
+            return Ok(Value::String(answer));
+        }
+    }
+
+    /// Prompt for datetime input (ISO 8601 format)
+    fn prompt_for_datetime(
+        ctx: &crate::context::Context,
+        description: &str,
+        default: Option<&str>,
+        _min: Option<&str>,
+        _max: Option<&str>,
+    ) -> Result<Value> {
+        let prompt = format!("{} [ISO 8601: YYYY-MM-DDTHH:MM:SSZ]", description);
+
+        loop {
+            let answer = ctx.input.text(&prompt, default).context("Failed to get input")?;
+
+            // Validate datetime format
+            if let Err(e) = chrono::DateTime::parse_from_rfc3339(&answer) {
+                ctx.output.error(&format!("Invalid datetime format: {}", e));
+                continue;
+            }
+
+            return Ok(Value::String(answer));
+        }
+    }
+
+    /// Prompt for JSON input
+    fn prompt_for_json(
+        ctx: &crate::context::Context,
+        description: &str,
+        default: Option<&str>,
+        prettify: bool,
+    ) -> Result<Value> {
+        let prompt = format!("{} [JSON]", description);
+
+        loop {
+            let answer = ctx.input.text(&prompt, default).context("Failed to get input")?;
+
+            // Validate JSON
+            match serde_json::from_str::<serde_json::Value>(&answer) {
+                Ok(value) => {
+                    let result = if prettify {
+                        serde_json::to_string_pretty(&value).unwrap_or(answer)
+                    } else {
+                        answer
+                    };
+                    return Ok(Value::String(result));
+                }
+                Err(e) => {
+                    ctx.output.error(&format!("Invalid JSON: {}", e));
+                    continue;
+                }
+            }
+        }
+    }
+
+    /// Prompt for YAML input
+    fn prompt_for_yaml(
+        ctx: &crate::context::Context,
+        description: &str,
+        default: Option<&str>,
+        prettify: bool,
+    ) -> Result<Value> {
+        let prompt = format!("{} [YAML]", description);
+
+        loop {
+            let answer = ctx.input.text(&prompt, default).context("Failed to get input")?;
+
+            // Validate YAML
+            match serde_yaml::from_str::<serde_yaml::Value>(&answer) {
+                Ok(value) => {
+                    let result = if prettify {
+                        serde_yaml::to_string(&value).unwrap_or(answer)
+                    } else {
+                        answer
+                    };
+                    return Ok(Value::String(result));
+                }
+                Err(e) => {
+                    ctx.output.error(&format!("Invalid YAML: {}", e));
+                    continue;
+                }
+            }
+        }
+    }
+
+    /// Prompt for list input (comma-separated values)
+    #[allow(clippy::too_many_arguments)]
+    fn prompt_for_list(
+        ctx: &crate::context::Context,
+        description: &str,
+        default: Option<&str>,
+        separator: &str,
+        min: Option<usize>,
+        max: Option<usize>,
+        trim_items: bool,
+        remove_empty: bool,
+    ) -> Result<Value> {
+        let mut prompt = format!("{} [list, separator: '{}']", description, separator);
+
+        if let Some(min_val) = min {
+            prompt.push_str(&format!(" (min: {})", min_val));
+        }
+        if let Some(max_val) = max {
+            prompt.push_str(&format!(" (max: {})", max_val));
+        }
+
+        loop {
+            let answer = ctx.input.text(&prompt, default).context("Failed to get input")?;
+
+            let mut items: Vec<String> = answer
+                .split(separator)
+                .map(|s| if trim_items { s.trim().to_string() } else { s.to_string() })
+                .collect();
+
+            if remove_empty {
+                items.retain(|s| !s.is_empty());
+            }
+
+            if let Some(min_val) = min
+                && items.len() < min_val
+            {
+                ctx.output.error(&format!("List must have at least {} items", min_val));
+                continue;
+            }
+
+            if let Some(max_val) = max
+                && items.len() > max_val
+            {
+                ctx.output.error(&format!("List must have at most {} items", max_val));
+                continue;
+            }
+
+            let values: Vec<Value> = items.into_iter().map(Value::String).collect();
+            return Ok(Value::Array(values));
+        }
+    }
+
+    /// Prompt for email input
+    fn prompt_for_email(
+        ctx: &crate::context::Context,
+        description: &str,
+        default: Option<&str>,
+    ) -> Result<Value> {
+        let prompt = format!("{} [email]", description);
+
+        loop {
+            let answer = ctx.input.text(&prompt, default).context("Failed to get input")?;
+
+            // Basic email validation (contains @ and domain)
+            if !answer.contains('@') || !answer.contains('.') {
+                ctx.output.error("Invalid email format");
+                continue;
+            }
+
+            return Ok(Value::String(answer));
+        }
+    }
+
+    /// Prompt for IP address input
+    fn prompt_for_ip_address(
+        ctx: &crate::context::Context,
+        description: &str,
+        default: Option<&str>,
+        ipv4_only: bool,
+        ipv6_only: bool,
+    ) -> Result<Value> {
+        let ip_type = if ipv4_only {
+            "IPv4"
+        } else if ipv6_only {
+            "IPv6"
+        } else {
+            "IP"
+        };
+        let prompt = format!("{} [{}]", description, ip_type);
+
+        loop {
+            let answer = ctx.input.text(&prompt, default).context("Failed to get input")?;
+
+            match answer.parse::<std::net::IpAddr>() {
+                Ok(addr) => {
+                    if ipv4_only && !addr.is_ipv4() {
+                        ctx.output.error("Must be an IPv4 address");
+                        continue;
+                    }
+                    if ipv6_only && !addr.is_ipv6() {
+                        ctx.output.error("Must be an IPv6 address");
+                        continue;
+                    }
+                    return Ok(Value::String(answer));
+                }
+                Err(_) => {
+                    ctx.output.error("Invalid IP address");
+                    continue;
+                }
+            }
+        }
+    }
+
+    /// Prompt for CIDR notation input
+    fn prompt_for_cidr(
+        ctx: &crate::context::Context,
+        description: &str,
+        default: Option<&str>,
+        ipv4_only: bool,
+        ipv6_only: bool,
+    ) -> Result<Value> {
+        let cidr_type = if ipv4_only {
+            "IPv4 CIDR"
+        } else if ipv6_only {
+            "IPv6 CIDR"
+        } else {
+            "CIDR"
+        };
+        let prompt = format!("{} [{}]", description, cidr_type);
+
+        loop {
+            let answer = ctx.input.text(&prompt, default).context("Failed to get input")?;
+
+            // Parse CIDR notation (IP/prefix)
+            let parts: Vec<&str> = answer.split('/').collect();
+            if parts.len() != 2 {
+                ctx.output.error("Invalid CIDR format. Use: IP/prefix (e.g., 192.168.1.0/24)");
+                continue;
+            }
+
+            match parts[0].parse::<std::net::IpAddr>() {
+                Ok(addr) => {
+                    if ipv4_only && !addr.is_ipv4() {
+                        ctx.output.error("Must be an IPv4 CIDR");
+                        continue;
+                    }
+                    if ipv6_only && !addr.is_ipv6() {
+                        ctx.output.error("Must be an IPv6 CIDR");
+                        continue;
+                    }
+
+                    // Validate prefix length
+                    if let Ok(prefix) = parts[1].parse::<u8>() {
+                        let max_prefix = if addr.is_ipv4() { 32 } else { 128 };
+                        if prefix > max_prefix {
+                            ctx.output.error(&format!("Prefix length must be 0-{}", max_prefix));
+                            continue;
+                        }
+                        return Ok(Value::String(answer));
+                    } else {
+                        ctx.output.error("Invalid prefix length");
+                        continue;
+                    }
+                }
+                Err(_) => {
+                    ctx.output.error("Invalid IP address in CIDR");
+                    continue;
+                }
+            }
+        }
+    }
+
+    /// Prompt for port number input
+    fn prompt_for_port(
+        ctx: &crate::context::Context,
+        description: &str,
+        default: Option<&str>,
+    ) -> Result<Value> {
+        let prompt = format!("{} [port: 1-65535]", description);
+
+        loop {
+            let answer = ctx.input.text(&prompt, default).context("Failed to get input")?;
+
+            match answer.parse::<u16>() {
+                Ok(port) => {
+                    if port == 0 {
+                        ctx.output.error("Port must be between 1 and 65535");
+                        continue;
+                    }
+                    return Ok(Value::Number(serde_json::Number::from(port)));
+                }
+                Err(_) => {
+                    ctx.output.error("Invalid port number");
+                    continue;
+                }
+            }
+        }
     }
 
     /// Recursively collect all templates from the category tree
@@ -2286,6 +2717,7 @@ impl CreateCommand {
                     name: environment_name.to_string(),
                 }),
                 template_reference_projects: template_reference_projects.to_vec(),
+                dependencies: Vec::new(), // No dependencies by default, can be added later
             },
         };
 

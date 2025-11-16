@@ -58,7 +58,7 @@ impl CommandExecutor for RealCommandExecutor {
     fn execute_shell(&self, command: &str, working_dir: &Path) -> Result<Output> {
         #[cfg(target_os = "windows")]
         let output = Command::new("cmd")
-            .args(&["/C", command])
+            .args(["/C", command])
             .current_dir(working_dir)
             .output()?;
 

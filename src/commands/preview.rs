@@ -65,6 +65,30 @@ impl PreviewCommand {
 
         ctx.output.key_value("Kind", &resource.kind);
 
+        // Check for dependencies
+        let maybe_graph = crate::commands::ExecutionHelper::check_and_display_dependencies(
+            ctx,
+            &env_path,
+            &project_name,
+            &env_name,
+            "preview",
+        )?;
+
+        if let Some(graph) = maybe_graph {
+            // Execute preview on entire dependency graph
+            crate::commands::ExecutionHelper::execute_on_graph(
+                ctx,
+                &graph,
+                "preview",
+                crate::commands::ExecutionHelper::execute_preview_on_node,
+            )?;
+
+            ctx.output.blank();
+            ctx.output.success("Preview completed successfully for all projects");
+            return Ok(());
+        }
+
+        // No dependencies - proceed with single project execution
         // Get executor configuration
         let executor_config = resource.get_executor_config();
 
