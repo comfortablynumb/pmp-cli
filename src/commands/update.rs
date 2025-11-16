@@ -1883,7 +1883,7 @@ impl UpdateCommand {
                     name: environment_name.to_string(),
                 }),
                 template_reference_projects: Vec::new(), // No template references in tests
-                dependencies: Vec::new(), // No dependencies by default
+                dependencies: Vec::new(),                // No dependencies by default
             },
         };
 

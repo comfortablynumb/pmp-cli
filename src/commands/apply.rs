@@ -84,7 +84,8 @@ impl ApplyCommand {
             )?;
 
             ctx.output.blank();
-            ctx.output.success("Apply completed successfully for all projects");
+            ctx.output
+                .success("Apply completed successfully for all projects");
             return Ok(());
         }
 

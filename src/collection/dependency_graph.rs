@@ -100,11 +100,8 @@ impl DependencyGraph {
                     // For each dependency, we need to resolve all its environments
                     for dep_env in &dep.project.environments {
                         // Find the dependency project
-                        let dep_node = Self::find_dependency_project(
-                            fs,
-                            &dep.project.name,
-                            dep_env,
-                        )?;
+                        let dep_node =
+                            Self::find_dependency_project(fs, &dep.project.name, dep_env)?;
 
                         dep_nodes.push(dep_node.clone());
                         queue.push_back(dep_node);
@@ -141,9 +138,7 @@ impl DependencyGraph {
 
         // Recursively search for the project
         let project_path = Self::search_project(fs, projects_dir, project_name)?;
-        let env_path = project_path
-            .join("environments")
-            .join(environment_name);
+        let env_path = project_path.join("environments").join(environment_name);
 
         if !fs.exists(&env_path) {
             anyhow::bail!(
@@ -300,7 +295,11 @@ impl DependencyGraph {
                 let dep_key = dep.key();
                 if visited.contains(&dep_key) {
                     // Show it's already visited
-                    let dep_connector = if is_last_dep { "└── " } else { "├── " };
+                    let dep_connector = if is_last_dep {
+                        "└── "
+                    } else {
+                        "├── "
+                    };
                     output.push_str(&format!(
                         "{}{}{} ({}) [already shown]\n",
                         new_prefix, dep_connector, dep.project_name, dep.environment_name
@@ -449,8 +448,11 @@ metadata:
 "#,
         )
         .unwrap();
-        fs.write(&project_a_env_path.join(".pmp.environment.yaml"), project_a_yaml)
-            .unwrap();
+        fs.write(
+            &project_a_env_path.join(".pmp.environment.yaml"),
+            project_a_yaml,
+        )
+        .unwrap();
 
         let project_b_path = PathBuf::from("/projects/test_resource/project-b");
         let project_b_env_path = project_b_path.join("environments/dev");
@@ -465,8 +467,11 @@ metadata:
 "#,
         )
         .unwrap();
-        fs.write(&project_b_env_path.join(".pmp.environment.yaml"), project_b_yaml)
-            .unwrap();
+        fs.write(
+            &project_b_env_path.join(".pmp.environment.yaml"),
+            project_b_yaml,
+        )
+        .unwrap();
 
         let graph = DependencyGraph::build(&*fs, &project_a_env_path, "project-a", "dev").unwrap();
 
@@ -563,16 +568,14 @@ metadata:
 "#,
                 name
             );
-            fs.write(
-                &project_path.join(".pmp.project.yaml"),
-                &project_yaml,
-            )
-            .unwrap();
+            fs.write(&project_path.join(".pmp.project.yaml"), &project_yaml)
+                .unwrap();
             fs.write(&env_path.join(".pmp.environment.yaml"), yaml)
                 .unwrap();
         }
 
-        let project_a_env_path = PathBuf::from("/projects/test_resource/project-a/environments/dev");
+        let project_a_env_path =
+            PathBuf::from("/projects/test_resource/project-a/environments/dev");
         let graph = DependencyGraph::build(&*fs, &project_a_env_path, "project-a", "dev").unwrap();
 
         assert_eq!(graph.node_count(), 3);
@@ -667,16 +670,14 @@ metadata:
 "#,
                 name
             );
-            fs.write(
-                &project_path.join(".pmp.project.yaml"),
-                &project_yaml,
-            )
-            .unwrap();
+            fs.write(&project_path.join(".pmp.project.yaml"), &project_yaml)
+                .unwrap();
             fs.write(&env_path.join(".pmp.environment.yaml"), yaml)
                 .unwrap();
         }
 
-        let project_a_env_path = PathBuf::from("/projects/test_resource/project-a/environments/dev");
+        let project_a_env_path =
+            PathBuf::from("/projects/test_resource/project-a/environments/dev");
         let graph = DependencyGraph::build(&*fs, &project_a_env_path, "project-a", "dev").unwrap();
 
         assert_eq!(graph.node_count(), 3);
@@ -685,8 +686,20 @@ metadata:
         let order = graph.execution_order().unwrap();
         assert_eq!(order.len(), 3);
         // project-b and project-c should come before project-a
-        assert!(order.iter().position(|n| n.project_name == "project-b").unwrap() < 2);
-        assert!(order.iter().position(|n| n.project_name == "project-c").unwrap() < 2);
+        assert!(
+            order
+                .iter()
+                .position(|n| n.project_name == "project-b")
+                .unwrap()
+                < 2
+        );
+        assert!(
+            order
+                .iter()
+                .position(|n| n.project_name == "project-c")
+                .unwrap()
+                < 2
+        );
         assert_eq!(order[2].project_name, "project-a");
     }
 
@@ -752,16 +765,14 @@ metadata:
 "#,
                 name
             );
-            fs.write(
-                &project_path.join(".pmp.project.yaml"),
-                &project_yaml,
-            )
-            .unwrap();
+            fs.write(&project_path.join(".pmp.project.yaml"), &project_yaml)
+                .unwrap();
             fs.write(&env_path.join(".pmp.environment.yaml"), yaml)
                 .unwrap();
         }
 
-        let project_a_env_path = PathBuf::from("/projects/test_resource/project-a/environments/dev");
+        let project_a_env_path =
+            PathBuf::from("/projects/test_resource/project-a/environments/dev");
         let graph = DependencyGraph::build(&*fs, &project_a_env_path, "project-a", "dev").unwrap();
 
         // Building the graph should succeed
@@ -770,10 +781,12 @@ metadata:
         // But getting execution order should fail with circular dependency error
         let result = graph.execution_order();
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Circular dependency"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Circular dependency")
+        );
     }
 
     #[test]
@@ -851,13 +864,18 @@ metadata:
 "#,
         )
         .unwrap();
-        fs.write(&project_a_env_path.join(".pmp.environment.yaml"), project_a_yaml)
-            .unwrap();
+        fs.write(
+            &project_a_env_path.join(".pmp.environment.yaml"),
+            project_a_yaml,
+        )
+        .unwrap();
 
         // Create project-b with two environments
         let project_b_path = PathBuf::from("/projects/test_resource/project-b");
-        fs.create_dir_all(&project_b_path.join("environments/dev")).unwrap();
-        fs.create_dir_all(&project_b_path.join("environments/staging")).unwrap();
+        fs.create_dir_all(&project_b_path.join("environments/dev"))
+            .unwrap();
+        fs.create_dir_all(&project_b_path.join("environments/staging"))
+            .unwrap();
         fs.write(
             &project_b_path.join(".pmp.project.yaml"),
             r#"
@@ -888,7 +906,10 @@ metadata:
         assert_eq!(order.len(), 3);
 
         // Both project-b environments should come before project-a
-        let project_a_pos = order.iter().position(|n| n.project_name == "project-a").unwrap();
+        let project_a_pos = order
+            .iter()
+            .position(|n| n.project_name == "project-a")
+            .unwrap();
         let project_b_dev_pos = order
             .iter()
             .position(|n| n.project_name == "project-b" && n.environment_name == "dev")
@@ -960,16 +981,14 @@ metadata:
 "#,
                 name
             );
-            fs.write(
-                &project_path.join(".pmp.project.yaml"),
-                &project_yaml,
-            )
-            .unwrap();
+            fs.write(&project_path.join(".pmp.project.yaml"), &project_yaml)
+                .unwrap();
             fs.write(&env_path.join(".pmp.environment.yaml"), yaml)
                 .unwrap();
         }
 
-        let project_a_env_path = PathBuf::from("/projects/test_resource/project-a/environments/dev");
+        let project_a_env_path =
+            PathBuf::from("/projects/test_resource/project-a/environments/dev");
         let graph = DependencyGraph::build(&*fs, &project_a_env_path, "project-a", "dev").unwrap();
 
         let tree = graph.format_tree();
@@ -1020,16 +1039,16 @@ metadata:
 "#,
         )
         .unwrap();
-        fs.write(&project_a_env_path.join(".pmp.environment.yaml"), project_a_yaml)
-            .unwrap();
+        fs.write(
+            &project_a_env_path.join(".pmp.environment.yaml"),
+            project_a_yaml,
+        )
+        .unwrap();
 
         let result = DependencyGraph::build(&*fs, &project_a_env_path, "project-a", "dev");
 
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("project-b"));
+        assert!(result.unwrap_err().to_string().contains("project-b"));
     }
 
     #[test]
@@ -1087,8 +1106,11 @@ metadata:
 "#,
         )
         .unwrap();
-        fs.write(&project_a_env_path.join(".pmp.environment.yaml"), project_a_yaml)
-            .unwrap();
+        fs.write(
+            &project_a_env_path.join(".pmp.environment.yaml"),
+            project_a_yaml,
+        )
+        .unwrap();
 
         // Create project-b with only dev environment
         let project_b_path = PathBuf::from("/projects/test_resource/project-b");
@@ -1104,15 +1126,15 @@ metadata:
 "#,
         )
         .unwrap();
-        fs.write(&project_b_env_path.join(".pmp.environment.yaml"), project_b_yaml)
-            .unwrap();
+        fs.write(
+            &project_b_env_path.join(".pmp.environment.yaml"),
+            project_b_yaml,
+        )
+        .unwrap();
 
         let result = DependencyGraph::build(&*fs, &project_a_env_path, "project-a", "dev");
 
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("staging"));
+        assert!(result.unwrap_err().to_string().contains("staging"));
     }
 }

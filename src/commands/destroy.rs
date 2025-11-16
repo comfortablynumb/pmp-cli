@@ -155,7 +155,8 @@ impl DestroyCommand {
             }
 
             ctx.output.blank();
-            ctx.output.success("Destroy completed successfully for all projects");
+            ctx.output
+                .success("Destroy completed successfully for all projects");
             return Ok(());
         }
 

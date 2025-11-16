@@ -11,8 +11,9 @@ mod traits;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use commands::{
-    ApplyCommand, CreateCommand, DestroyCommand, FindCommand, GenerateCommand, InitCommand,
-    PreviewCommand, RefreshCommand, UiCommand, UpdateCommand,
+    ApplyCommand, CiCommand, CloneCommand, CreateCommand, DepsCommand, DestroyCommand, EnvCommand,
+    FindCommand, GenerateCommand, GraphCommand, InitCommand, PreviewCommand, RefreshCommand,
+    StateCommand, TemplateCommand, UiCommand, UpdateCommand,
 };
 
 #[derive(Parser)]
@@ -181,6 +182,251 @@ enum Commands {
         #[arg(long)]
         host: Option<String>,
     },
+
+    /// Visualize dependency graph
+    #[command(
+        long_about = "Visualize project dependency graphs\n\nSupports multiple output formats:\n- ASCII: Terminal-friendly tree visualization\n- Mermaid: Mermaid.js diagram format\n- DOT: GraphViz DOT format\n\nExamples:\n  pmp graph\n  pmp graph --all\n  pmp graph --format mermaid --output graph.mmd\n  pmp graph --format dot --output graph.dot"
+    )]
+    Graph {
+        /// Path to the project directory (defaults to current directory)
+        #[arg(short, long)]
+        path: Option<String>,
+
+        /// Output format (ascii, mermaid, dot)
+        #[arg(short, long)]
+        format: Option<String>,
+
+        /// Output file (defaults to stdout)
+        #[arg(short, long)]
+        output: Option<String>,
+
+        /// Show all projects in the infrastructure
+        #[arg(short, long)]
+        all: bool,
+    },
+
+    /// Dependency analysis and management
+    #[command(
+        long_about = "Analyze and manage project dependencies\n\nSubcommands:\n- analyze: Comprehensive dependency analysis\n- impact: Show projects affected by changes\n\nExamples:\n  pmp deps analyze\n  pmp deps impact my-api"
+    )]
+    Deps {
+        #[command(subcommand)]
+        command: DepsSubcommands,
+    },
+
+    /// State management and drift detection
+    #[command(
+        long_about = "Manage infrastructure state and detect drift\n\nSubcommands:\n- list: Show state across all projects\n- drift: Detect configuration drift\n- lock: Lock state for a project\n- unlock: Unlock state for a project\n- sync: Sync remote state\n\nExamples:\n  pmp state list\n  pmp state drift\n  pmp state lock my-project\n  pmp state unlock my-project --force"
+    )]
+    State {
+        #[command(subcommand)]
+        command: StateSubcommands,
+    },
+
+    /// CI/CD pipeline generation
+    #[command(
+        long_about = "Generate CI/CD pipeline configurations\n\nSupports:\n- GitHub Actions\n- GitLab CI\n- Jenkins\n\nExamples:\n  pmp ci generate github-actions\n  pmp ci generate gitlab-ci --output .gitlab-ci.yml\n  pmp ci generate jenkins --output Jenkinsfile"
+    )]
+    Ci {
+        #[command(subcommand)]
+        command: CiSubcommands,
+    },
+
+    /// Template management and scaffolding
+    #[command(
+        long_about = "Create and manage template packs\n\nExamples:\n  pmp template scaffold\n  pmp template scaffold --output ./my-templates"
+    )]
+    Template {
+        #[command(subcommand)]
+        command: TemplateSubcommands,
+    },
+
+    /// Clone an existing project
+    #[command(
+        long_about = "Clone an existing project with a new name\n\nExamples:\n  pmp clone my-api new-api\n  pmp clone --source my-api --name new-api\n  pmp clone my-api new-api --environment dev"
+    )]
+    Clone {
+        /// Source project name (optional, prompts if not specified)
+        source: Option<String>,
+
+        /// New project name
+        name: String,
+
+        /// Environment to clone (optional, prompts if not specified)
+        #[arg(short, long)]
+        environment: Option<String>,
+    },
+
+    /// Environment management
+    #[command(
+        long_about = "Manage and compare environments\n\nSubcommands:\n- diff: Compare two environments\n- promote: Promote configuration between environments\n- sync: Synchronize common settings\n- variables: Manage environment variables\n\nExamples:\n  pmp env diff dev staging\n  pmp env promote dev staging\n  pmp env sync\n  pmp env variables --environment production"
+    )]
+    Env {
+        #[command(subcommand)]
+        command: EnvSubcommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum DepsSubcommands {
+    /// Analyze dependencies across all projects
+    #[command(
+        long_about = "Analyze dependencies across all projects\n\nFinds:\n- Circular dependencies\n- Missing dependencies\n- Orphaned projects\n- Dependency bottlenecks\n- Standalone projects\n\nExample:\n  pmp deps analyze"
+    )]
+    Analyze,
+
+    /// Show impact of changes to a project
+    #[command(
+        long_about = "Show which projects would be impacted by changes to a specific project\n\nExample:\n  pmp deps impact my-api"
+    )]
+    Impact {
+        /// Project name to analyze
+        project: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum StateSubcommands {
+    /// List state across all projects
+    #[command(
+        long_about = "Show state information for all projects\n\nExample:\n  pmp state list\n  pmp state list --details"
+    )]
+    List {
+        /// Show detailed information
+        #[arg(short, long)]
+        details: bool,
+    },
+
+    /// Detect configuration drift
+    #[command(
+        long_about = "Detect drift between desired and actual state\n\nExample:\n  pmp state drift\n  pmp state drift my-project"
+    )]
+    Drift {
+        /// Project name (optional, checks all if not specified)
+        project: Option<String>,
+    },
+
+    /// Lock state for a project
+    #[command(
+        long_about = "Lock state to prevent concurrent modifications\n\nExample:\n  pmp state lock my-project\n  pmp state lock my-project --environment production"
+    )]
+    Lock {
+        /// Project name
+        project: String,
+
+        /// Environment name (optional, prompts if not specified)
+        #[arg(short, long)]
+        environment: Option<String>,
+    },
+
+    /// Unlock state for a project
+    #[command(
+        long_about = "Unlock state\n\nExample:\n  pmp state unlock my-project\n  pmp state unlock my-project --force"
+    )]
+    Unlock {
+        /// Project name
+        project: String,
+
+        /// Environment name (optional, prompts if not specified)
+        #[arg(short, long)]
+        environment: Option<String>,
+
+        /// Force unlock even if locked by another user
+        #[arg(short, long)]
+        force: bool,
+    },
+
+    /// Sync remote state
+    #[command(long_about = "Sync state with remote backend\n\nExample:\n  pmp state sync")]
+    Sync,
+}
+
+#[derive(Subcommand)]
+enum CiSubcommands {
+    /// Generate CI/CD pipeline configuration
+    #[command(
+        long_about = "Generate CI/CD pipeline configuration\n\nSupported types:\n- github-actions, github\n- gitlab-ci, gitlab\n- jenkins\n\nExample:\n  pmp ci generate github-actions\n  pmp ci generate gitlab-ci --output .gitlab-ci.yml"
+    )]
+    Generate {
+        /// Pipeline type (github-actions, gitlab-ci, jenkins)
+        pipeline_type: String,
+
+        /// Output file (optional, prints to stdout if not specified)
+        #[arg(short, long)]
+        output: Option<String>,
+
+        /// Environment filter (optional, includes all if not specified)
+        #[arg(short, long)]
+        environment: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum TemplateSubcommands {
+    /// Scaffold a new template pack interactively
+    #[command(
+        long_about = "Create a new template pack with interactive prompts\n\nExample:\n  pmp template scaffold\n  pmp template scaffold --output ./custom-templates"
+    )]
+    Scaffold {
+        /// Output directory (defaults to current directory)
+        #[arg(short, long)]
+        output: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum EnvSubcommands {
+    /// Compare two environments
+    #[command(
+        long_about = "Compare configurations between two environments\n\nExample:\n  pmp env diff dev staging\n  pmp env diff production staging"
+    )]
+    Diff {
+        /// Source environment name
+        source: String,
+
+        /// Target environment name
+        target: String,
+    },
+
+    /// Promote configuration between environments
+    #[command(
+        long_about = "Promote configuration from one environment to another\n\nExample:\n  pmp env promote dev staging\n  pmp env promote dev staging --project my-api"
+    )]
+    Promote {
+        /// Source environment name
+        source: String,
+
+        /// Target environment name
+        target: String,
+
+        /// Project filter (optional)
+        #[arg(short, long)]
+        project: Option<String>,
+    },
+
+    /// Synchronize common settings across environments
+    #[command(
+        long_about = "Find and display common settings across environments\n\nExample:\n  pmp env sync\n  pmp env sync --project my-api"
+    )]
+    Sync {
+        /// Project filter (optional)
+        #[arg(short, long)]
+        project: Option<String>,
+    },
+
+    /// Manage environment variables
+    #[command(
+        long_about = "Display environment variables across projects\n\nExample:\n  pmp env variables\n  pmp env variables --environment production\n  pmp env variables --project my-api"
+    )]
+    Variables {
+        /// Environment filter (optional)
+        #[arg(short, long)]
+        environment: Option<String>,
+
+        /// Project filter (optional)
+        #[arg(short, long)]
+        project: Option<String>,
+    },
 }
 
 fn main() -> Result<()> {
@@ -257,6 +503,99 @@ fn main() -> Result<()> {
         Commands::Ui { port, host } => {
             UiCommand::execute(&ctx, port, host)?;
         }
+        Commands::Graph {
+            path,
+            format,
+            output,
+            all,
+        } => {
+            GraphCommand::execute(
+                &ctx,
+                path.as_deref(),
+                format.as_deref(),
+                output.as_deref(),
+                all,
+            )?;
+        }
+        Commands::Deps { command } => match command {
+            DepsSubcommands::Analyze => {
+                DepsCommand::execute_analyze(&ctx)?;
+            }
+            DepsSubcommands::Impact { project } => {
+                DepsCommand::execute_impact(&ctx, &project)?;
+            }
+        },
+        Commands::State { command } => match command {
+            StateSubcommands::List { details } => {
+                StateCommand::execute_list(&ctx, details)?;
+            }
+            StateSubcommands::Drift { project } => {
+                StateCommand::execute_drift(&ctx, project.as_deref())?;
+            }
+            StateSubcommands::Lock {
+                project,
+                environment,
+            } => {
+                StateCommand::execute_lock(&ctx, &project, environment.as_deref())?;
+            }
+            StateSubcommands::Unlock {
+                project,
+                environment,
+                force,
+            } => {
+                StateCommand::execute_unlock(&ctx, &project, environment.as_deref(), force)?;
+            }
+            StateSubcommands::Sync => {
+                StateCommand::execute_sync(&ctx)?;
+            }
+        },
+        Commands::Ci { command } => match command {
+            CiSubcommands::Generate {
+                pipeline_type,
+                output,
+                environment,
+            } => {
+                CiCommand::execute_generate(
+                    &ctx,
+                    &pipeline_type,
+                    output.as_deref(),
+                    environment.as_deref(),
+                )?;
+            }
+        },
+        Commands::Template { command } => match command {
+            TemplateSubcommands::Scaffold { output } => {
+                TemplateCommand::execute_scaffold(&ctx, output.as_deref())?;
+            }
+        },
+        Commands::Clone {
+            source,
+            name,
+            environment,
+        } => {
+            CloneCommand::execute(&ctx, source.as_deref(), &name, environment.as_deref())?;
+        }
+        Commands::Env { command } => match command {
+            EnvSubcommands::Diff { source, target } => {
+                EnvCommand::execute_diff(&ctx, &source, &target)?;
+            }
+            EnvSubcommands::Promote {
+                source,
+                target,
+                project,
+            } => {
+                EnvCommand::execute_promote(&ctx, &source, &target, project.as_deref())?;
+            }
+            EnvSubcommands::Sync { project } => {
+                EnvCommand::execute_sync(&ctx, project.as_deref())?;
+            }
+            EnvSubcommands::Variables {
+                environment,
+                project,
+            } => {
+                EnvCommand::execute_variables(&ctx, environment.as_deref(), project.as_deref())?;
+            }
+        },
     }
 
     Ok(())

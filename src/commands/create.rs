@@ -973,7 +973,121 @@ impl CreateCommand {
                 .context("Environment key not found")?
         };
 
-        // Step 8: Validate resource kind
+        // Step 8: Select project dependencies (for dependency-only templates with executor: none)
+        let mut project_dependencies = Vec::new();
+
+        if selected_template.resource.spec.executor == "none" {
+            ctx.output.subsection("Project Dependencies");
+            ctx.output.dimmed(
+                "This is a dependency-only project. Select the projects that this group should manage."
+            );
+            output::blank();
+
+            // Discover all projects in the collection
+            let projects = CollectionDiscovery::discover_projects(
+                &*ctx.fs,
+                &*ctx.output,
+                &infrastructure_root,
+            )?;
+
+            if projects.is_empty() {
+                ctx.output
+                    .warning("No existing projects found in this collection.");
+                ctx.output.dimmed(
+                    "You can add dependencies later by editing the .pmp.environment.yaml file.",
+                );
+                output::blank();
+            } else {
+                // Allow user to select multiple projects
+                let project_options: Vec<String> = projects
+                    .iter()
+                    .map(|proj| format!("{} ({})", proj.name, proj.kind))
+                    .collect();
+
+                let selected_project_displays = ctx
+                    .input
+                    .multi_select(
+                        "Select projects to include in this group (space to select, enter when done):",
+                        project_options.clone(),
+                        None,
+                    )
+                    .context("Failed to select projects")?;
+
+                if selected_project_displays.is_empty() {
+                    ctx.output.warning("No projects selected.");
+                    ctx.output.dimmed(
+                        "You can add dependencies later by editing the .pmp.environment.yaml file.",
+                    );
+                    output::blank();
+                } else {
+                    // For each selected project, allow user to select environments
+                    for selected_display in selected_project_displays {
+                        // Find the project index
+                        let index = project_options
+                            .iter()
+                            .position(|opt| opt == &selected_display)
+                            .context("Project not found")?;
+
+                        let selected_project = &projects[index];
+                        let project_path = infrastructure_root.join(&selected_project.path);
+
+                        output::blank();
+                        ctx.output
+                            .key_value_highlight("Project", &selected_project.name);
+
+                        // Discover environments from the selected project
+                        let project_environments =
+                            CollectionDiscovery::discover_environments(&*ctx.fs, &project_path)?;
+
+                        if project_environments.is_empty() {
+                            ctx.output.warning(&format!(
+                                "No environments found in project: {}. Skipping.",
+                                selected_project.name
+                            ));
+                            continue;
+                        }
+
+                        // Allow user to select multiple environments
+                        let selected_envs = ctx
+                            .input
+                            .multi_select(
+                                &format!("Select environments for {} (space to select, enter when done):", selected_project.name),
+                                project_environments.clone(),
+                                None,
+                            )
+                            .context("Failed to select environments")?;
+
+                        if selected_envs.is_empty() {
+                            ctx.output.warning(&format!(
+                                "No environments selected for {}. Skipping.",
+                                selected_project.name
+                            ));
+                            continue;
+                        }
+
+                        ctx.output
+                            .key_value("Environments", &selected_envs.join(", "));
+
+                        // Store as ProjectDependency
+                        project_dependencies.push(crate::template::metadata::ProjectDependency {
+                            project: crate::template::metadata::DependencyProject {
+                                name: selected_project.name.clone(),
+                                environments: selected_envs,
+                            },
+                        });
+                    }
+
+                    output::blank();
+                    ctx.output.success(&format!(
+                        "Added {} project(s) as dependencies",
+                        project_dependencies.len()
+                    ));
+                    output::blank();
+                }
+            }
+        }
+
+        // Step 9: Validate resource kind
         // Validate resource kind contains only alphanumeric characters
         let resource_kind = &selected_template.resource.spec.kind;
         if !resource_kind.chars().all(|c| c.is_alphanumeric()) {
@@ -1208,6 +1322,7 @@ impl CreateCommand {
             &selected_template.resource.metadata.name,
             &template_reference_projects,
             &added_plugins,
+            &project_dependencies,
         )
         .context("Failed to generate .pmp.environment.yaml file")?;
 
@@ -1678,17 +1793,38 @@ impl CreateCommand {
                 must_exist,
                 directories_only,
                 files_only,
-            } => Self::prompt_for_path(ctx, description, default_str, *must_exist, *directories_only, *files_only),
+            } => Self::prompt_for_path(
+                ctx,
+                description,
+                default_str,
+                *must_exist,
+                *directories_only,
+                *files_only,
+            ),
             InputType::Url {
                 allowed_schemes,
                 check_reachable,
-            } => Self::prompt_for_url(ctx, description, default_str, allowed_schemes, *check_reachable),
-            InputType::Date { min, max } => {
-                Self::prompt_for_date(ctx, description, default_str, min.as_deref(), max.as_deref())
-            }
-            InputType::DateTime { min, max } => {
-                Self::prompt_for_datetime(ctx, description, default_str, min.as_deref(), max.as_deref())
-            }
+            } => Self::prompt_for_url(
+                ctx,
+                description,
+                default_str,
+                allowed_schemes,
+                *check_reachable,
+            ),
+            InputType::Date { min, max } => Self::prompt_for_date(
+                ctx,
+                description,
+                default_str,
+                min.as_deref(),
+                max.as_deref(),
+            ),
+            InputType::DateTime { min, max } => Self::prompt_for_datetime(
+                ctx,
+                description,
+                default_str,
+                min.as_deref(),
+                max.as_deref(),
+            ),
             InputType::Json { prettify } => {
                 Self::prompt_for_json(ctx, description, default_str, *prettify)
             }
@@ -2007,12 +2143,16 @@ impl CreateCommand {
         }
 
         loop {
-            let answer = ctx.input.text(&prompt, default).context("Failed to get input")?;
+            let answer = ctx
+                .input
+                .text(&prompt, default)
+                .context("Failed to get input")?;
 
             if must_exist {
                 let path = std::path::Path::new(&answer);
                 if !path.exists() {
-                    ctx.output.error(&format!("Path does not exist: {}", answer));
+                    ctx.output
+                        .error(&format!("Path does not exist: {}", answer));
                     continue;
                 }
                 if directories_only && !path.is_dir() {
@@ -2040,7 +2180,10 @@ impl CreateCommand {
         let prompt = format!("{} [URL]", description);
 
         loop {
-            let answer = ctx.input.text(&prompt, default).context("Failed to get input")?;
+            let answer = ctx
+                .input
+                .text(&prompt, default)
+                .context("Failed to get input")?;
 
             // Basic URL validation
             if let Err(e) = url::Url::parse(&answer) {
@@ -2075,7 +2218,10 @@ impl CreateCommand {
         let prompt = format!("{} [YYYY-MM-DD]", description);
 
         loop {
-            let answer = ctx.input.text(&prompt, default).context("Failed to get input")?;
+            let answer = ctx
+                .input
+                .text(&prompt, default)
+                .context("Failed to get input")?;
 
             // Validate date format
             if let Err(e) = chrono::NaiveDate::parse_from_str(&answer, "%Y-%m-%d") {
@@ -2098,7 +2244,10 @@ impl CreateCommand {
         let prompt = format!("{} [ISO 8601: YYYY-MM-DDTHH:MM:SSZ]", description);
 
         loop {
-            let answer = ctx.input.text(&prompt, default).context("Failed to get input")?;
+            let answer = ctx
+                .input
+                .text(&prompt, default)
+                .context("Failed to get input")?;
 
             // Validate datetime format
             if let Err(e) = chrono::DateTime::parse_from_rfc3339(&answer) {
@@ -2120,7 +2269,10 @@ impl CreateCommand {
         let prompt = format!("{} [JSON]", description);
 
         loop {
-            let answer = ctx.input.text(&prompt, default).context("Failed to get input")?;
+            let answer = ctx
+                .input
+                .text(&prompt, default)
+                .context("Failed to get input")?;
 
             // Validate JSON
             match serde_json::from_str::<serde_json::Value>(&answer) {
@@ -2150,7 +2302,10 @@ impl CreateCommand {
         let prompt = format!("{} [YAML]", description);
 
         loop {
-            let answer = ctx.input.text(&prompt, default).context("Failed to get input")?;
+            let answer = ctx
+                .input
+                .text(&prompt, default)
+                .context("Failed to get input")?;
 
             // Validate YAML
             match serde_yaml::from_str::<serde_yaml::Value>(&answer) {
@@ -2192,11 +2347,20 @@ impl CreateCommand {
         }
 
         loop {
-            let answer = ctx.input.text(&prompt, default).context("Failed to get input")?;
+            let answer = ctx
+                .input
+                .text(&prompt, default)
+                .context("Failed to get input")?;
 
             let mut items: Vec<String> = answer
                 .split(separator)
-                .map(|s| if trim_items { s.trim().to_string() } else { s.to_string() })
+                .map(|s| {
+                    if trim_items {
+                        s.trim().to_string()
+                    } else {
+                        s.to_string()
+                    }
+                })
                 .collect();
 
             if remove_empty {
@@ -2206,14 +2370,16 @@ impl CreateCommand {
             if let Some(min_val) = min
                 && items.len() < min_val
             {
-                ctx.output.error(&format!("List must have at least {} items", min_val));
+                ctx.output
+                    .error(&format!("List must have at least {} items", min_val));
                 continue;
             }
 
             if let Some(max_val) = max
                 && items.len() > max_val
             {
-                ctx.output.error(&format!("List must have at most {} items", max_val));
+                ctx.output
+                    .error(&format!("List must have at most {} items", max_val));
                 continue;
             }
 
@@ -2231,7 +2397,10 @@ impl CreateCommand {
         let prompt = format!("{} [email]", description);
 
         loop {
-            let answer = ctx.input.text(&prompt, default).context("Failed to get input")?;
+            let answer = ctx
+                .input
+                .text(&prompt, default)
+                .context("Failed to get input")?;
 
             // Basic email validation (contains @ and domain)
             if !answer.contains('@') || !answer.contains('.') {
@@ -2261,7 +2430,10 @@ impl CreateCommand {
         let prompt = format!("{} [{}]", description, ip_type);
 
         loop {
-            let answer = ctx.input.text(&prompt, default).context("Failed to get input")?;
+            let answer = ctx
+                .input
+                .text(&prompt, default)
+                .context("Failed to get input")?;
 
             match answer.parse::<std::net::IpAddr>() {
                 Ok(addr) => {
@@ -2301,12 +2473,16 @@ impl CreateCommand {
         let prompt = format!("{} [{}]", description, cidr_type);
 
         loop {
-            let answer = ctx.input.text(&prompt, default).context("Failed to get input")?;
+            let answer = ctx
+                .input
+                .text(&prompt, default)
+                .context("Failed to get input")?;
 
             // Parse CIDR notation (IP/prefix)
             let parts: Vec<&str> = answer.split('/').collect();
             if parts.len() != 2 {
-                ctx.output.error("Invalid CIDR format. Use: IP/prefix (e.g., 192.168.1.0/24)");
+                ctx.output
+                    .error("Invalid CIDR format. Use: IP/prefix (e.g., 192.168.1.0/24)");
                 continue;
             }
 
@@ -2325,7 +2501,8 @@ impl CreateCommand {
                     if let Ok(prefix) = parts[1].parse::<u8>() {
                         let max_prefix = if addr.is_ipv4() { 32 } else { 128 };
                         if prefix > max_prefix {
-                            ctx.output.error(&format!("Prefix length must be 0-{}", max_prefix));
+                            ctx.output
+                                .error(&format!("Prefix length must be 0-{}", max_prefix));
                             continue;
                         }
                         return Ok(Value::String(answer));
@@ -2351,7 +2528,10 @@ impl CreateCommand {
         let prompt = format!("{} [port: 1-65535]", description);
 
         loop {
-            let answer = ctx.input.text(&prompt, default).context("Failed to get input")?;
+            let answer = ctx
+                .input
+                .text(&prompt, default)
+                .context("Failed to get input")?;
 
             match answer.parse::<u16>() {
                 Ok(port) => {
@@ -2673,6 +2853,7 @@ impl CreateCommand {
         template_name: &str,
         template_reference_projects: &[crate::template::metadata::TemplateReferenceProject],
         added_plugins: &[crate::template::metadata::AddedPlugin],
+        project_dependencies: &[crate::template::metadata::ProjectDependency],
     ) -> Result<()> {
         use crate::template::metadata::{
             DynamicProjectEnvironmentMetadata, DynamicProjectEnvironmentResource,
@@ -2717,7 +2898,7 @@ impl CreateCommand {
                     name: environment_name.to_string(),
                 }),
                 template_reference_projects: template_reference_projects.to_vec(),
-                dependencies: Vec::new(), // No dependencies by default, can be added later
+                dependencies: project_dependencies.to_vec(),
             },
         };
 

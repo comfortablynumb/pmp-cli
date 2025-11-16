@@ -1,5 +1,5 @@
 use crate::collection::{DependencyGraph, DependencyNode};
-use crate::executor::{Executor, ExecutorConfig, OpenTofuExecutor};
+use crate::executor::{Executor, ExecutorConfig, NoneExecutor, OpenTofuExecutor};
 use crate::hooks::HooksRunner;
 use crate::template::DynamicProjectEnvironmentResource;
 use anyhow::{Context, Result};
@@ -31,16 +31,16 @@ impl ExecutionHelper {
         // Build dependency graph
         ctx.output.blank();
         ctx.output.subsection("Dependencies");
-        ctx.output
-            .dimmed("Analyzing project dependencies...");
+        ctx.output.dimmed("Analyzing project dependencies...");
 
         let graph = DependencyGraph::build(&*ctx.fs, env_path, project_name, env_name)
             .context("Failed to build dependency graph")?;
 
         // Display dependency tree
         ctx.output.blank();
-        ctx.output
-            .info("This project has dependencies. The following projects will be executed in order:");
+        ctx.output.info(
+            "This project has dependencies. The following projects will be executed in order:",
+        );
         ctx.output.blank();
 
         let tree = graph.format_tree();
@@ -148,6 +148,15 @@ impl ExecutionHelper {
         execution_config: &ExecutorConfig,
         extra_args: &[String],
     ) -> Result<()> {
+        // Skip execution for none executor (dependency-only projects)
+        if executor.get_name() == "none" {
+            ctx.output.dimmed(&format!(
+                "Skipping {} ({}) - dependency-only project",
+                node.project_name, node.environment_name
+            ));
+            return Ok(());
+        }
+
         let env_dir_str = node
             .environment_path
             .to_str()
@@ -214,6 +223,15 @@ impl ExecutionHelper {
         execution_config: &ExecutorConfig,
         extra_args: &[String],
     ) -> Result<()> {
+        // Skip execution for none executor (dependency-only projects)
+        if executor.get_name() == "none" {
+            ctx.output.dimmed(&format!(
+                "Skipping {} ({}) - dependency-only project",
+                node.project_name, node.environment_name
+            ));
+            return Ok(());
+        }
+
         let env_dir_str = node
             .environment_path
             .to_str()
@@ -280,6 +298,15 @@ impl ExecutionHelper {
         execution_config: &ExecutorConfig,
         extra_args: &[String],
     ) -> Result<()> {
+        // Skip execution for none executor (dependency-only projects)
+        if executor.get_name() == "none" {
+            ctx.output.dimmed(&format!(
+                "Skipping {} ({}) - dependency-only project",
+                node.project_name, node.environment_name
+            ));
+            return Ok(());
+        }
+
         let env_dir_str = node
             .environment_path
             .to_str()
@@ -342,6 +369,7 @@ impl ExecutionHelper {
     fn get_executor(name: &str) -> Result<Box<dyn Executor>> {
         match name {
             "opentofu" => Ok(Box::new(OpenTofuExecutor::new())),
+            "none" => Ok(Box::new(NoneExecutor::new())),
             _ => anyhow::bail!("Unknown executor: {}", name),
         }
     }

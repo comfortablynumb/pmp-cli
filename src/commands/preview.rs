@@ -84,7 +84,8 @@ impl PreviewCommand {
             )?;
 
             ctx.output.blank();
-            ctx.output.success("Preview completed successfully for all projects");
+            ctx.output
+                .success("Preview completed successfully for all projects");
             return Ok(());
         }
 

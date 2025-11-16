@@ -17,11 +17,23 @@ PMP (Poor Man's Platform) is a CLI for managing Infrastructure as Code projects 
 ## Development Commands
 
 ```bash
-cargo build                    # Build the project
-cargo build --release          # Build release
-cargo test                     # Run tests
-cargo run -- create            # Create project
-cargo run -- find --name foo   # Find projects
+cargo build                              # Build the project
+cargo build --release                    # Build release
+cargo test                               # Run tests
+cargo run -- create                      # Create project
+cargo run -- find --name foo             # Find projects
+cargo run -- graph                       # Visualize dependency graph
+cargo run -- deps analyze                # Analyze dependencies
+cargo run -- deps impact my-api          # Show impact of changes
+cargo run -- state list                  # List state across projects
+cargo run -- state drift                 # Detect configuration drift
+cargo run -- state lock my-project       # Lock project state
+cargo run -- ci generate github          # Generate GitHub Actions workflow
+cargo run -- template scaffold           # Create new template pack interactively
+cargo run -- clone my-api new-api        # Clone existing project
+cargo run -- env diff dev staging        # Compare environments
+cargo run -- env promote dev staging     # Promote configs between environments
+cargo run -- env variables --environment production  # View environment variables
 ```
 
 ## Architecture Overview
@@ -395,6 +407,48 @@ spec:
 - `oss` - Alibaba Cloud OSS
 - `remote` - Terraform Cloud/Enterprise
 
+### Dependency-Only Projects
+
+PMP supports creating projects that don't manage their own infrastructure but only define dependencies on other projects. These projects use the `none` executor.
+
+**None Executor**:
+- Special executor type that performs no operations
+- Used for dependency-only projects that group other projects
+- Always returns success for all operations (init, plan, apply, destroy, refresh)
+- Does not support backends or generate infrastructure files
+- When executing commands on a dependency graph, projects with `none` executor are skipped with a message
+
+**Use Cases**:
+1. **Environment-wide deployments**: Group all services for an environment
+2. **Feature deployments**: Bundle all microservices for a feature
+3. **Staged rollouts**: Define deployment order via dependency chains
+4. **Integration testing**: Group services needed for end-to-end tests
+
+**Example Template**:
+```yaml
+apiVersion: pmp.io/v1
+kind: Template
+metadata:
+  name: "Project Group"
+  description: "A dependency-only project for grouping other projects"
+spec:
+  resource:
+    apiVersion: pmp.io/v1
+    kind: ProjectGroup
+  executor: none  # Use none executor for dependency-only projects
+  inputs: []      # No inputs needed
+```
+
+**Workflow**:
+1. Create a project using a template with `executor: none`
+2. Edit the `.pmp.environment.yaml` file to add dependencies
+3. Run `pmp apply`, `pmp preview`, or `pmp destroy` on the group project
+4. PMP will execute the command on all dependencies in topological order
+5. The group project itself is skipped (displays "Skipping... - dependency-only project")
+
+**Example**:
+See `examples/template-packs/grouping/` for a complete example of a dependency-only template pack.
+
 ### Project Creation Workflow
 
 1. Discover template packs (`.pmp.template-pack.yaml` files)
@@ -483,6 +537,506 @@ Environment: `projects/kubernetes_workload/my-api/environments/dev/.pmp.environm
   2. If in project directory (has `.pmp.project.yaml`): prompt to select environment
   3. If in collection or elsewhere: use find/search UI to select project + environment
 - Executes in the environment directory (where generated files are located)
+
+### Executors (`src/executor/`)
+- **OpenTofu Executor** (`opentofu.rs`): Default executor for OpenTofu/Terraform projects
+  - Supports backends (S3, Azure, GCS, Kubernetes, PostgreSQL, etc.)
+  - Generates `_common.tf` files with backend and module configuration
+  - Runs `tofu init`, `tofu plan`, `tofu apply`, `tofu destroy`
+
+- **None Executor** (`none.rs`): Special executor for dependency-only projects
+  - All operations are no-ops (always succeed)
+  - Does not support backends
+  - Used with templates that specify `executor: none`
+  - Projects are skipped during dependency graph execution
+
+- **Executor Registry** (`registry.rs`): Available for future extensibility
+  - Can register custom executors
+  - Currently supports `opentofu` and `none` executors
+
+### Execution Helper (`src/commands/execution_helper.rs`)
+- Handles dependency graph execution for preview, apply, and destroy commands
+- Automatically detects and skips projects with `none` executor
+- Displays "Skipping {project} ({env}) - dependency-only project" for none executor
+- Runs hooks (pre/post) for all executors except `none`
+
+### Graph Command (`src/commands/graph.rs`)
+- **Purpose**: Visualize project dependency graphs
+- **Usage**:
+  - `pmp graph` - Show dependency graph for current project
+  - `pmp graph --all` - Show all projects in infrastructure
+  - `pmp graph --format mermaid --output graph.mmd` - Export to Mermaid format
+  - `pmp graph --format dot --output graph.dot` - Export to GraphViz DOT format
+
+- **Features**:
+  - **ASCII Format**: Terminal-friendly tree visualization (default)
+  - **Mermaid Format**: Generate Mermaid.js diagrams for documentation
+  - **DOT Format**: Generate GraphViz DOT files for rendering
+  - **Context-Aware**: Detects current location (environment, project, or infrastructure)
+  - **Multi-Project View**: Visualize all projects and their relationships
+
+- **Output Examples**:
+  ```
+  # ASCII (default)
+  project-a:dev
+  └─ project-b:dev
+      └─ project-c:dev
+
+  # Mermaid
+  graph TD
+      project_a_dev["project-a\n(dev)"]
+      project_b_dev["project-b\n(dev)"]
+      project_a_dev --> project_b_dev
+
+  # DOT
+  digraph dependencies {
+      rankdir=LR;
+      node [shape=box, style=rounded];
+      project_a_dev [label="project-a\n(dev)"];
+      project_b_dev [label="project-b\n(dev)"];
+      project_a_dev -> project_b_dev;
+  }
+  ```
+
+### Deps Command (`src/commands/deps.rs`)
+- **Purpose**: Analyze and manage project dependencies
+- **Subcommands**:
+  - `pmp deps analyze` - Comprehensive dependency analysis
+  - `pmp deps impact <project>` - Show projects affected by changes
+
+- **Analyze Features**:
+  - **Health Checks**:
+    - Circular dependency detection
+    - Missing dependency validation
+    - Orphaned project identification
+  - **Statistics**:
+    - Total projects count
+    - Projects with dependencies
+    - Standalone projects
+  - **Bottleneck Detection**: Find projects that many others depend on
+  - **Standalone Projects**: List projects with no dependencies
+
+- **Impact Analysis**:
+  - Shows all projects (direct and indirect) that depend on a target project
+  - Helps assess blast radius of changes
+  - Useful for planning deployments and understanding dependencies
+
+- **Analysis Output Example**:
+  ```
+  Summary:
+  Total Projects: 15
+  Projects with Dependencies: 8
+  Standalone Projects: 7
+
+  Health Checks:
+  ✓ No circular dependencies detected
+  ✓ No missing dependencies
+
+  Dependency Bottlenecks:
+  postgres-db:production ← 5 project(s) depend on this
+  api-gateway:production ← 3 project(s) depend on this
+
+  Orphaned Projects:
+  • monitoring:dev
+  • logging:dev
+  ```
+
+### State Command (`src/commands/state.rs`)
+- **Purpose**: Manage infrastructure state and detect drift
+- **Subcommands**:
+  - `pmp state list` - Show state across all projects
+  - `pmp state drift` - Detect configuration drift
+  - `pmp state lock` - Lock state for a project
+  - `pmp state unlock` - Unlock state for a project
+  - `pmp state sync` - Sync remote state
+
+- **List Features**:
+  - **Overview**: Shows state information for all project environments
+  - **Details Mode**: Use `--details` flag for additional information
+  - **Information Displayed**:
+    - Project name and environment
+    - Resource count (if state file exists)
+    - Last modified timestamp
+    - Lock status and lock holder information
+  - **Example**:
+    ```
+    Project: my-api (dev)
+    Resources: 15
+    Last Modified: 2025-01-15 10:30:00 UTC
+    Locked: No
+
+    Project: postgres-db (production)
+    Resources: 8
+    Last Modified: 2025-01-15 09:15:00 UTC
+    Locked: Yes (by user@hostname)
+    ```
+
+- **Drift Detection**:
+  - **Purpose**: Detect differences between desired and actual state
+  - **Usage**: `pmp state drift` or `pmp state drift <project>`
+  - **Mechanism**: Uses OpenTofu's `plan -detailed-exitcode`
+    - Exit code 0: No drift
+    - Exit code 2: Drift detected
+  - **Output**: Shows which projects have drift and the changes detected
+  - **Example**:
+    ```
+    Checking drift for my-api (dev)...
+    ⚠ Drift detected!
+    Changes:
+      ~ aws_instance.web: ami changed
+      + aws_s3_bucket.logs: will be created
+    ```
+
+- **State Locking**:
+  - **Lock**: `pmp state lock <project>`
+  - **Unlock**: `pmp state unlock <project>` or `pmp state unlock <project> --force`
+  - **Purpose**: Prevent concurrent modifications
+  - **Lock Information**:
+    - Lock ID (UUID)
+    - Operation type
+    - User and hostname
+    - Timestamp
+  - **Ownership**: Unlock checks lock ownership unless `--force` is used
+  - **Storage**: Locks stored in `.terraform/terraform.tfstate.lock.info`
+
+- **State Sync**:
+  - **Purpose**: Sync state with remote backend
+  - **Usage**: `pmp state sync`
+  - **Mechanism**: Runs `tofu refresh` on all project environments
+  - **Use Cases**:
+    - Update local state after manual changes
+    - Refresh state before planning changes
+    - Sync after backend configuration changes
+
+### CI Command (`src/commands/ci.rs`)
+- **Purpose**: Generate CI/CD pipeline configurations
+- **Usage**: `pmp ci generate <type> [--output FILE] [--environment ENV]`
+- **Supported Pipeline Types**:
+  - `github-actions`, `github` - GitHub Actions workflow
+  - `gitlab-ci`, `gitlab` - GitLab CI configuration
+  - `jenkins` - Jenkinsfile
+
+- **Features**:
+  - **Dependency-Aware**: Automatically organizes projects into stages based on dependencies
+  - **Parallel Execution**: Projects without dependencies run in parallel within stages
+  - **Topological Sorting**: Uses `group_by_dependency_level()` to determine execution order
+  - **Environment Filtering**: Generate pipelines for specific environments only
+  - **File Output**: Save to file with `--output` or print to stdout
+
+- **GitHub Actions Output**:
+  ```yaml
+  name: PMP Infrastructure Deployment
+
+  on:
+    push:
+      branches:
+        - main
+    pull_request:
+      branches:
+        - main
+    workflow_dispatch:
+
+  env:
+    TOFU_VERSION: "1.6.0"
+
+  jobs:
+    stage_0:
+      name: Deploy Stage 0
+      runs-on: ubuntu-latest
+      strategy:
+        matrix:
+          project:
+            - name: "postgres-db"
+              env: "production"
+              path: "projects/postgres_db/postgres_db/environments/production"
+      steps:
+        - name: Checkout
+          uses: actions/checkout@v4
+        - name: Setup OpenTofu
+          uses: opentofu/setup-opentofu@v1
+          with:
+            tofu_version: ${{ env.TOFU_VERSION }}
+        - name: Tofu Init
+          working-directory: ${{ matrix.project.path }}
+          run: tofu init
+        - name: Tofu Plan
+          working-directory: ${{ matrix.project.path }}
+          run: tofu plan -no-color
+        - name: Tofu Apply
+          if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+          working-directory: ${{ matrix.project.path }}
+          run: tofu apply -auto-approve
+  ```
+
+- **GitLab CI Output**:
+  ```yaml
+  # GitLab CI/CD Pipeline for PMP Infrastructure
+
+  stages:
+    - stage_0
+    - stage_1
+
+  variables:
+    TOFU_VERSION: "1.6.0"
+
+  default:
+    image: alpine:latest
+    before_script:
+      - apk add --no-cache curl
+      - curl -Lo /usr/local/bin/tofu https://github.com/opentofu/opentofu/...
+      - chmod +x /usr/local/bin/tofu
+
+  postgres_db_production:
+    stage: stage_0
+    script:
+      - cd projects/postgres_db/postgres_db/environments/production
+      - tofu init
+      - tofu validate
+      - tofu plan -no-color
+      - |
+        if [ "$CI_COMMIT_BRANCH" == "main" ]; then
+          tofu apply -auto-approve
+        fi
+    rules:
+      - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      - if: $CI_COMMIT_BRANCH == "main"
+  ```
+
+- **Jenkins Output**:
+  ```groovy
+  // Jenkinsfile for PMP Infrastructure
+
+  pipeline {
+      agent any
+
+      environment {
+          TOFU_VERSION = '1.6.0'
+      }
+
+      stages {
+          stage('Stage 0') {
+              parallel {
+                  stage('postgres-db:production') {
+                      steps {
+                          dir('projects/postgres_db/postgres_db/environments/production') {
+                              sh 'tofu init'
+                              sh 'tofu validate'
+                              sh 'tofu plan -no-color'
+                              script {
+                                  if (env.BRANCH_NAME == 'main') {
+                                      sh 'tofu apply -auto-approve'
+                                  }
+                              }
+                          }
+                      }
+                  }
+              }
+          }
+      }
+
+      post {
+          success {
+              echo 'Deployment successful!'
+          }
+          failure {
+              echo 'Deployment failed!'
+          }
+      }
+  }
+  ```
+
+- **Dependency Grouping Algorithm**:
+  - Projects are grouped into "stages" (levels)
+  - Stage 0: Projects with no dependencies
+  - Stage N: Projects whose dependencies are all satisfied in stages 0 through N-1
+  - Within each stage, projects execute in parallel
+  - If circular dependencies exist, all remaining projects are added to break the deadlock
+
+- **Usage Examples**:
+  ```bash
+  # Generate GitHub Actions workflow
+  pmp ci generate github-actions --output .github/workflows/deploy.yml
+
+  # Generate GitLab CI for production only
+  pmp ci generate gitlab-ci --environment production --output .gitlab-ci.yml
+
+  # Generate Jenkins pipeline and print to stdout
+  pmp ci generate jenkins
+
+  # Generate GitHub Actions for dev environment
+  pmp ci generate github --environment dev --output .github/workflows/deploy-dev.yml
+  ```
+
+### Template Command (`src/commands/template.rs`)
+- **Purpose**: Create and scaffold new template packs interactively
+- **Usage**: `pmp template scaffold [--output DIR]`
+
+- **Features**:
+  - **Interactive Creation**: Guided prompts for all template pack metadata
+  - **Auto-generation**: Automatically creates directory structure and starter files
+  - **Complete Package**: Generates README, template files, and variable definitions
+  - **Flexible Executors**: Support for OpenTofu, Terraform, or none (dependency-only)
+
+- **Interactive Prompts**:
+  - Template pack name and description
+  - Template name and description
+  - Resource kind (alphanumeric validation)
+  - Executor selection (opentofu, terraform, none)
+  - Input definitions (name, type, description, defaults)
+
+- **Generated Files**:
+  - `.pmp.template-pack.yaml` - Pack metadata
+  - `templates/<name>/.pmp.template.yaml` - Template definition
+  - `main.tf.hbs` - Main infrastructure code (if executor != none)
+  - `variables.tf.hbs` - Variable definitions
+  - `outputs.tf.hbs` - Output definitions
+  - `README.md` - Documentation with usage examples
+
+- **Example Output Structure**:
+  ```
+  my-pack/
+  ├── .pmp.template-pack.yaml
+  ├── README.md
+  └── templates/
+      └── my-template/
+          ├── .pmp.template.yaml
+          ├── main.tf.hbs
+          ├── variables.tf.hbs
+          └── outputs.tf.hbs
+  ```
+
+- **Usage Examples**:
+  ```bash
+  # Scaffold in current directory
+  pmp template scaffold
+
+  # Scaffold in custom location
+  pmp template scaffold --output ./custom-templates
+
+  # After scaffolding, use with:
+  pmp create --template-packs-paths ./my-pack
+  ```
+
+### Clone Command (`src/commands/clone.rs`)
+- **Purpose**: Clone existing projects with new names
+- **Usage**: `pmp clone [SOURCE] <NAME> [--environment ENV]`
+
+- **Features**:
+  - **Project Selection**: Interactive or direct project selection
+  - **Environment Filtering**: Clone specific environments or all
+  - **Metadata Update**: Automatically updates project name in configurations
+  - **Directory Structure**: Maintains original project structure
+
+- **Cloning Process**:
+  1. Select source project (interactive or by name)
+  2. Select environments to clone (multi-select or specific)
+  3. Confirm cloning operation
+  4. Create new project directory
+  5. Copy all files from source environments
+  6. Update `.pmp.project.yaml` and `.pmp.environment.yaml` with new name
+  7. Preserve all configuration and infrastructure code
+
+- **Use Cases**:
+  - Create similar projects with different configurations
+  - Replicate project structure for new services
+  - Environment-specific cloning (e.g., clone only production)
+  - Rapid prototyping from existing projects
+
+- **Usage Examples**:
+  ```bash
+  # Interactive selection
+  pmp clone new-project-name
+
+  # Clone specific project
+  pmp clone my-api new-api
+
+  # Clone only specific environment
+  pmp clone my-api new-api --environment production
+
+  # After cloning
+  cd projects/resource_kind/new-api/environments/production
+  tofu init
+  ```
+
+### Env Command (`src/commands/env.rs`)
+- **Purpose**: Manage and compare environments across projects
+- **Subcommands**:
+  - `pmp env diff <source> <target>` - Compare configurations
+  - `pmp env promote <source> <target> [--project FILTER]` - Promote configs
+  - `pmp env sync [--project FILTER]` - Find common settings
+  - `pmp env variables [--environment ENV] [--project FILTER]` - View variables
+
+- **Diff Features**:
+  - **Comparison**: Shows differences between two environments
+  - **Input Analysis**: Identifies inputs only in source, only in target, or with different values
+  - **Project Scope**: Compares all projects that have both environments
+  - **Output**:
+    ```
+    Project: my-api
+      Only in dev: debug_mode
+      Only in staging: monitoring_enabled
+      replicas: 1 → 3
+    ```
+
+- **Promote Features**:
+  - **Configuration Promotion**: Copy input values from source to target environment
+  - **Backup Creation**: Automatically creates `.yaml.backup` before changes
+  - **Dependency Preservation**: Keeps environment-specific dependencies intact
+  - **Safety**: Requires confirmation before overwriting
+  - **Project Filtering**: Optionally promote only matching projects
+
+- **Sync Features**:
+  - **Common Settings**: Identifies inputs with identical values across all environments
+  - **Consistency Check**: Helps find settings that should be synchronized
+  - **Multi-Environment**: Analyzes projects with 2+ environments
+
+- **Variables Features**:
+  - **Centralized View**: Display all environment variables in one place
+  - **Environment Filter**: Show variables for specific environment
+  - **Project Filter**: Show variables for specific project(s)
+  - **Grouped Display**: Variables grouped by environment and then by name
+
+- **Usage Examples**:
+  ```bash
+  # Compare dev and staging environments
+  pmp env diff dev staging
+
+  # Promote dev configs to staging (with confirmation)
+  pmp env promote dev staging
+
+  # Promote only for specific project
+  pmp env promote dev staging --project my-api
+
+  # Find common settings across environments
+  pmp env sync
+
+  # View all production variables
+  pmp env variables --environment production
+
+  # View variables for specific project across all environments
+  pmp env variables --project my-api
+
+  # View all variables for all projects
+  pmp env variables
+  ```
+
+- **Promote Output Example**:
+  ```
+  Environment Promotion
+  Infrastructure: My Infrastructure
+  Source Environment: dev
+  Target Environment: staging
+
+  Found 5 project(s) to promote
+
+  Promote dev → staging? This will overwrite target configurations. (y/N)
+
+  ✓ Promoted my-api (backup: .pmp.environment.yaml.backup)
+  ✓ Promoted my-worker (backup: .pmp.environment.yaml.backup)
+  ...
+
+  ✓ Promoted 5 project(s) from dev to staging
+  ```
 
 ## Testing Considerations
 
