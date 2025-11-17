@@ -89,7 +89,8 @@ impl DisasterRecoveryCommand {
         let resource = DynamicProjectEnvironmentResource::from_file(&*ctx.fs, &env_file)?;
 
         ctx.output.key_value("Project", &resource.metadata.name);
-        ctx.output.key_value("Environment", &resource.metadata.environment_name);
+        ctx.output
+            .key_value("Environment", &resource.metadata.environment_name);
         output::blank();
 
         // Get RTO and RPO
@@ -115,8 +116,10 @@ impl DisasterRecoveryCommand {
 
         ctx.output.success("Disaster recovery plan generated");
         ctx.output.key_value("Plan ID", &plan.id);
-        ctx.output.key_value("RTO", &format!("{} minutes", plan.rto_minutes));
-        ctx.output.key_value("RPO", &format!("{} minutes", plan.rpo_minutes));
+        ctx.output
+            .key_value("RTO", &format!("{} minutes", plan.rto_minutes));
+        ctx.output
+            .key_value("RPO", &format!("{} minutes", plan.rpo_minutes));
         ctx.output.key_value("Steps", &plan.steps.len().to_string());
         output::blank();
 
@@ -125,7 +128,11 @@ impl DisasterRecoveryCommand {
         output::blank();
 
         for step in &plan.steps {
-            let automation_marker = if step.automation_available { "🤖" } else { "👤" };
+            let automation_marker = if step.automation_available {
+                "🤖"
+            } else {
+                "👤"
+            };
             ctx.output.dimmed(&format!(
                 "{}. {} {} ({} min)",
                 step.order, automation_marker, step.title, step.estimated_duration_minutes
@@ -133,8 +140,15 @@ impl DisasterRecoveryCommand {
         }
 
         output::blank();
-        let total_duration: u32 = plan.steps.iter().map(|s| s.estimated_duration_minutes).sum();
-        ctx.output.dimmed(&format!("Total estimated recovery time: {} minutes", total_duration));
+        let total_duration: u32 = plan
+            .steps
+            .iter()
+            .map(|s| s.estimated_duration_minutes)
+            .sum();
+        ctx.output.dimmed(&format!(
+            "Total estimated recovery time: {} minutes",
+            total_duration
+        ));
 
         Ok(())
     }
@@ -155,7 +169,9 @@ impl DisasterRecoveryCommand {
             let plans = Self::list_plans(ctx, &infrastructure_root)?;
 
             if plans.is_empty() {
-                ctx.output.info("No DR plans found. Generate one first with 'pmp disaster-recovery plan'");
+                ctx.output.info(
+                    "No DR plans found. Generate one first with 'pmp disaster-recovery plan'",
+                );
                 return Ok(());
             }
 
@@ -175,19 +191,20 @@ impl DisasterRecoveryCommand {
         ctx.output.key_value("Plan ID", &plan.id);
         ctx.output.key_value("Project", &plan.project);
         ctx.output.key_value("Environment", &plan.environment);
-        ctx.output.key_value("RTO", &format!("{} minutes", plan.rto_minutes));
+        ctx.output
+            .key_value("RTO", &format!("{} minutes", plan.rto_minutes));
         output::blank();
 
         if dry_run {
-            ctx.output.info("Running in DRY RUN mode - no actual changes will be made");
+            ctx.output
+                .info("Running in DRY RUN mode - no actual changes will be made");
             output::blank();
         }
 
         // Confirm test
-        let confirm = ctx.input.confirm(
-            "This will test the DR procedure. Continue?",
-            false,
-        )?;
+        let confirm = ctx
+            .input
+            .confirm("This will test the DR procedure. Continue?", false)?;
 
         if !confirm {
             ctx.output.info("Test cancelled");
@@ -233,8 +250,12 @@ impl DisasterRecoveryCommand {
         }
 
         output::blank();
-        ctx.output.key_value("Status", &format!("{:?}", test_result.status));
-        ctx.output.key_value("Passed", &format!("{}/{}", passed, test_result.results.len()));
+        ctx.output
+            .key_value("Status", &format!("{:?}", test_result.status));
+        ctx.output.key_value(
+            "Passed",
+            &format!("{}/{}", passed, test_result.results.len()),
+        );
         if failed > 0 {
             ctx.output.warning(&format!("{} steps failed", failed));
         }
@@ -259,8 +280,12 @@ impl DisasterRecoveryCommand {
 
         for plan in &plans {
             ctx.output.dimmed(&format!("[{}]", plan.id));
-            ctx.output.dimmed(&format!("  {}/{}", plan.project, plan.environment));
-            ctx.output.dimmed(&format!("  RTO: {} min, RPO: {} min", plan.rto_minutes, plan.rpo_minutes));
+            ctx.output
+                .dimmed(&format!("  {}/{}", plan.project, plan.environment));
+            ctx.output.dimmed(&format!(
+                "  RTO: {} min, RPO: {} min",
+                plan.rto_minutes, plan.rpo_minutes
+            ));
             ctx.output.dimmed(&format!("  {} steps", plan.steps.len()));
             output::blank();
         }
@@ -429,10 +454,15 @@ impl DisasterRecoveryCommand {
             });
         }
 
-        let all_passed = results.iter().all(|r| matches!(r.status, StepStatus::Success));
+        let all_passed = results
+            .iter()
+            .all(|r| matches!(r.status, StepStatus::Success));
         let status = if all_passed {
             TestStatus::Passed
-        } else if results.iter().any(|r| matches!(r.status, StepStatus::Success)) {
+        } else if results
+            .iter()
+            .any(|r| matches!(r.status, StepStatus::Success))
+        {
             TestStatus::PartialSuccess
         } else {
             TestStatus::Failed

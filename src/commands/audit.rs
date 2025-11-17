@@ -118,7 +118,8 @@ impl AuditCommand {
                 AuditStatus::Partial => "⚠",
             };
 
-            ctx.output.dimmed(&format!("[{}] {}", log.id, log.timestamp));
+            ctx.output
+                .dimmed(&format!("[{}] {}", log.id, log.timestamp));
             ctx.output.dimmed(&format!(
                 "  {} {} - {}/{}",
                 status_icon, log.action, log.project, log.environment
@@ -141,7 +142,8 @@ impl AuditCommand {
             output::blank();
         }
 
-        ctx.output.success(&format!("Showing {} audit entries", display_logs.len()));
+        ctx.output
+            .success(&format!("Showing {} audit entries", display_logs.len()));
 
         Ok(())
     }
@@ -177,7 +179,8 @@ impl AuditCommand {
         let resource = DynamicProjectEnvironmentResource::from_file(&*ctx.fs, &env_file)?;
 
         ctx.output.key_value("Project", &resource.metadata.name);
-        ctx.output.key_value("Environment", &resource.metadata.environment_name);
+        ctx.output
+            .key_value("Environment", &resource.metadata.environment_name);
         output::blank();
 
         // Determine states to compare
@@ -394,9 +397,12 @@ impl AuditCommand {
         }
 
         ctx.output.subsection("Summary");
-        ctx.output.key_value("Resources Added", &format!("+{}", added));
-        ctx.output.key_value("Resources Modified", &format!("~{}", modified));
-        ctx.output.key_value("Resources Deleted", &format!("-{}", deleted));
+        ctx.output
+            .key_value("Resources Added", &format!("+{}", added));
+        ctx.output
+            .key_value("Resources Modified", &format!("~{}", modified));
+        ctx.output
+            .key_value("Resources Deleted", &format!("-{}", deleted));
         output::blank();
 
         ctx.output.success("Diff analysis complete");

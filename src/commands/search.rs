@@ -141,7 +141,11 @@ impl SearchCommand {
         Ok(())
     }
 
-    pub fn execute_by_resources(ctx: &Context, resource_type: Option<&str>, resource_name: Option<&str>) -> Result<()> {
+    pub fn execute_by_resources(
+        ctx: &Context,
+        resource_type: Option<&str>,
+        resource_name: Option<&str>,
+    ) -> Result<()> {
         ctx.output.section("Search by Resources");
         output::blank();
 
@@ -268,7 +272,9 @@ impl SearchCommand {
                 }
 
                 // Check environment name
-                if resource.metadata.environment_name.contains(pattern) && !resource.metadata.name.contains(pattern) {
+                if resource.metadata.environment_name.contains(pattern)
+                    && !resource.metadata.name.contains(pattern)
+                {
                     results.push(SearchResult {
                         project: resource.metadata.name.clone(),
                         environment: resource.metadata.environment_name.clone(),
@@ -357,10 +363,10 @@ impl SearchCommand {
         infrastructure_root: &Path,
         resource: &DynamicProjectEnvironmentResource,
     ) -> Result<crate::commands::tags::TagConfig> {
-        let tags_file = infrastructure_root
-            .join(".pmp")
-            .join("tags")
-            .join(format!("{}-{}.json", resource.metadata.name, resource.metadata.environment_name));
+        let tags_file = infrastructure_root.join(".pmp").join("tags").join(format!(
+            "{}-{}.json",
+            resource.metadata.name, resource.metadata.environment_name
+        ));
 
         if !tags_file.exists() {
             anyhow::bail!("No tags found");
@@ -460,7 +466,8 @@ impl SearchCommand {
         output::blank();
 
         for result in results {
-            ctx.output.dimmed(&format!("{}/{}", result.project, result.environment));
+            ctx.output
+                .dimmed(&format!("{}/{}", result.project, result.environment));
 
             for m in &result.matches {
                 ctx.output.dimmed(&format!("  {}: {}", m.field, m.value));
@@ -472,7 +479,8 @@ impl SearchCommand {
             output::blank();
         }
 
-        ctx.output.success(&format!("{} matches found", results.len()));
+        ctx.output
+            .success(&format!("{} matches found", results.len()));
 
         Ok(())
     }

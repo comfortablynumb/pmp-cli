@@ -51,7 +51,8 @@ impl WorkspaceCommand {
         let resource = DynamicProjectEnvironmentResource::from_file(&*ctx.fs, &env_file)?;
 
         ctx.output.key_value("Project", &resource.metadata.name);
-        ctx.output.key_value("Environment", &resource.metadata.environment_name);
+        ctx.output
+            .key_value("Environment", &resource.metadata.environment_name);
         output::blank();
 
         // Get workspaces
@@ -60,7 +61,8 @@ impl WorkspaceCommand {
 
         if workspaces.is_empty() {
             ctx.output.info("No workspaces found");
-            ctx.output.dimmed("Use 'pmp workspace new' to create a workspace");
+            ctx.output
+                .dimmed("Use 'pmp workspace new' to create a workspace");
             return Ok(());
         }
 
@@ -74,11 +76,15 @@ impl WorkspaceCommand {
                 "  "
             };
 
-            ctx.output.dimmed(&format!("{}{}", current_marker, workspace.name));
+            ctx.output
+                .dimmed(&format!("{}{}", current_marker, workspace.name));
             if let Some(desc) = &workspace.description {
                 ctx.output.dimmed(&format!("    {}", desc));
             }
-            ctx.output.dimmed(&format!("    Created by: {} at {}", workspace.created_by, workspace.created_at));
+            ctx.output.dimmed(&format!(
+                "    Created by: {} at {}",
+                workspace.created_by, workspace.created_at
+            ));
         }
 
         output::blank();
@@ -104,15 +110,15 @@ impl WorkspaceCommand {
         // Check if we're in an environment directory
         let env_file = current_path.join(".pmp.environment.yaml");
         if !ctx.fs.exists(&env_file) {
-            ctx.output
-                .warning("Not in an environment directory.");
+            ctx.output.warning("Not in an environment directory.");
             return Ok(());
         }
 
         let resource = DynamicProjectEnvironmentResource::from_file(&*ctx.fs, &env_file)?;
 
         ctx.output.key_value("Project", &resource.metadata.name);
-        ctx.output.key_value("Environment", &resource.metadata.environment_name);
+        ctx.output
+            .key_value("Environment", &resource.metadata.environment_name);
         ctx.output.key_value("Workspace", name);
         output::blank();
 
@@ -128,11 +134,7 @@ impl WorkspaceCommand {
             Some(d.to_string())
         } else {
             let input = ctx.input.text("Description (optional):", None)?;
-            if input.is_empty() {
-                None
-            } else {
-                Some(input)
-            }
+            if input.is_empty() { None } else { Some(input) }
         };
 
         // Create workspace
@@ -154,7 +156,8 @@ impl WorkspaceCommand {
         Self::init_workspace_state(ctx, &infrastructure_root, &workspace)?;
 
         ctx.output.success("Workspace created");
-        ctx.output.dimmed("Use 'pmp workspace select' to switch to this workspace");
+        ctx.output
+            .dimmed("Use 'pmp workspace select' to switch to this workspace");
 
         Ok(())
     }
@@ -172,8 +175,7 @@ impl WorkspaceCommand {
         // Check if we're in an environment directory
         let env_file = current_path.join(".pmp.environment.yaml");
         if !ctx.fs.exists(&env_file) {
-            ctx.output
-                .warning("Not in an environment directory.");
+            ctx.output.warning("Not in an environment directory.");
             return Ok(());
         }
 
@@ -183,7 +185,8 @@ impl WorkspaceCommand {
         let workspaces = Self::get_workspaces(ctx, &infrastructure_root, &resource)?;
         if !workspaces.iter().any(|w| w.name == name) {
             ctx.output.warning("Workspace does not exist");
-            ctx.output.dimmed("Use 'pmp workspace list' to see available workspaces");
+            ctx.output
+                .dimmed("Use 'pmp workspace list' to see available workspaces");
             return Ok(());
         }
 
@@ -192,7 +195,8 @@ impl WorkspaceCommand {
         config.current_workspace = Some(name.to_string());
         Self::save_workspace_config(ctx, &infrastructure_root, &resource, &config)?;
 
-        ctx.output.success(&format!("Switched to workspace '{}'", name));
+        ctx.output
+            .success(&format!("Switched to workspace '{}'", name));
 
         Ok(())
     }
@@ -210,8 +214,7 @@ impl WorkspaceCommand {
         // Check if we're in an environment directory
         let env_file = current_path.join(".pmp.environment.yaml");
         if !ctx.fs.exists(&env_file) {
-            ctx.output
-                .warning("Not in an environment directory.");
+            ctx.output.warning("Not in an environment directory.");
             return Ok(());
         }
 
@@ -268,8 +271,7 @@ impl WorkspaceCommand {
         // Check if we're in an environment directory
         let env_file = current_path.join(".pmp.environment.yaml");
         if !ctx.fs.exists(&env_file) {
-            ctx.output
-                .warning("Not in an environment directory.");
+            ctx.output.warning("Not in an environment directory.");
             return Ok(());
         }
 
@@ -280,7 +282,9 @@ impl WorkspaceCommand {
             n.to_string()
         } else {
             let config = Self::get_workspace_config(ctx, &infrastructure_root, &resource)?;
-            config.current_workspace.unwrap_or_else(|| "default".to_string())
+            config
+                .current_workspace
+                .unwrap_or_else(|| "default".to_string())
         };
 
         // Get workspace
@@ -298,7 +302,8 @@ impl WorkspaceCommand {
             }
             ctx.output.key_value("State path", &ws.state_path);
         } else {
-            ctx.output.info(&format!("Workspace '{}' not found", workspace_name));
+            ctx.output
+                .info(&format!("Workspace '{}' not found", workspace_name));
         }
 
         Ok(())
@@ -329,7 +334,10 @@ impl WorkspaceCommand {
         let config_file = infrastructure_root
             .join(".pmp")
             .join("workspaces")
-            .join(format!("{}-{}.json", resource.metadata.name, resource.metadata.environment_name));
+            .join(format!(
+                "{}-{}.json",
+                resource.metadata.name, resource.metadata.environment_name
+            ));
 
         if !config_file.exists() {
             return Ok(WorkspaceConfig {
@@ -353,7 +361,10 @@ impl WorkspaceCommand {
         let workspaces_dir = infrastructure_root.join(".pmp").join("workspaces");
         std::fs::create_dir_all(&workspaces_dir)?;
 
-        let config_file = workspaces_dir.join(format!("{}-{}.json", resource.metadata.name, resource.metadata.environment_name));
+        let config_file = workspaces_dir.join(format!(
+            "{}-{}.json",
+            resource.metadata.name, resource.metadata.environment_name
+        ));
         let content = serde_json::to_string_pretty(config)?;
         std::fs::write(&config_file, content)?;
 
@@ -372,14 +383,18 @@ impl WorkspaceCommand {
         }
 
         let mut workspaces = Vec::new();
-        let prefix = format!("{}-{}-", resource.metadata.name, resource.metadata.environment_name);
+        let prefix = format!(
+            "{}-{}-",
+            resource.metadata.name, resource.metadata.environment_name
+        );
 
         for entry in std::fs::read_dir(&workspaces_dir)? {
             let entry = entry?;
             let path = entry.path();
 
             if let Some(filename) = path.file_name().and_then(|n| n.to_str())
-                && filename.starts_with(&prefix) && filename.ends_with(".workspace.json")
+                && filename.starts_with(&prefix)
+                && filename.ends_with(".workspace.json")
             {
                 let content = std::fs::read_to_string(&path)?;
                 if let Ok(workspace) = serde_json::from_str::<Workspace>(&content) {
@@ -410,7 +425,10 @@ impl WorkspaceCommand {
         std::fs::write(&workspace_file, content)?;
 
         // Update config
-        let config_file = workspaces_dir.join(format!("{}-{}.json", workspace.project, workspace.environment));
+        let config_file = workspaces_dir.join(format!(
+            "{}-{}.json",
+            workspace.project, workspace.environment
+        ));
         let mut config = if config_file.exists() {
             let content = std::fs::read_to_string(&config_file)?;
             serde_json::from_str::<WorkspaceConfig>(&content)?
@@ -452,10 +470,13 @@ impl WorkspaceCommand {
         workspace: &Workspace,
     ) -> Result<()> {
         // Delete workspace file
-        let workspace_file = infrastructure_root.join(".pmp").join("workspaces").join(format!(
-            "{}-{}-{}.workspace.json",
-            workspace.project, workspace.environment, workspace.name
-        ));
+        let workspace_file = infrastructure_root
+            .join(".pmp")
+            .join("workspaces")
+            .join(format!(
+                "{}-{}-{}.workspace.json",
+                workspace.project, workspace.environment, workspace.name
+            ));
 
         if workspace_file.exists() {
             std::fs::remove_file(&workspace_file)?;
@@ -475,7 +496,10 @@ impl WorkspaceCommand {
         let config_file = infrastructure_root
             .join(".pmp")
             .join("workspaces")
-            .join(format!("{}-{}.json", workspace.project, workspace.environment));
+            .join(format!(
+                "{}-{}.json",
+                workspace.project, workspace.environment
+            ));
 
         if config_file.exists() {
             let content = std::fs::read_to_string(&config_file)?;

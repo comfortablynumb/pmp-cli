@@ -45,16 +45,22 @@ impl LockCommand {
         let resource = DynamicProjectEnvironmentResource::from_file(&*ctx.fs, &env_file)?;
 
         ctx.output.key_value("Project", &resource.metadata.name);
-        ctx.output.key_value("Environment", &resource.metadata.environment_name);
+        ctx.output
+            .key_value("Environment", &resource.metadata.environment_name);
         output::blank();
 
         // Check if already locked
-        if let Some(existing_lock) =
-            Self::get_lock(ctx, &infrastructure_root, &resource.metadata.name, &resource.metadata.environment_name)?
-        {
+        if let Some(existing_lock) = Self::get_lock(
+            ctx,
+            &infrastructure_root,
+            &resource.metadata.name,
+            &resource.metadata.environment_name,
+        )? {
             ctx.output.warning("Project is already locked");
-            ctx.output.dimmed(&format!("Locked by: {}", existing_lock.locked_by));
-            ctx.output.dimmed(&format!("Locked at: {}", existing_lock.locked_at));
+            ctx.output
+                .dimmed(&format!("Locked by: {}", existing_lock.locked_by));
+            ctx.output
+                .dimmed(&format!("Locked at: {}", existing_lock.locked_at));
             if let Some(reason) = &existing_lock.reason {
                 ctx.output.dimmed(&format!("Reason: {}", reason));
             }
@@ -69,11 +75,7 @@ impl LockCommand {
             Some(r.to_string())
         } else {
             let input = ctx.input.text("Reason for lock (optional):", None)?;
-            if input.is_empty() {
-                None
-            } else {
-                Some(input)
-            }
+            if input.is_empty() { None } else { Some(input) }
         };
 
         // Create lock
@@ -124,11 +126,17 @@ impl LockCommand {
         let resource = DynamicProjectEnvironmentResource::from_file(&*ctx.fs, &env_file)?;
 
         ctx.output.key_value("Project", &resource.metadata.name);
-        ctx.output.key_value("Environment", &resource.metadata.environment_name);
+        ctx.output
+            .key_value("Environment", &resource.metadata.environment_name);
         output::blank();
 
         // Check if locked
-        let lock = Self::get_lock(ctx, &infrastructure_root, &resource.metadata.name, &resource.metadata.environment_name)?;
+        let lock = Self::get_lock(
+            ctx,
+            &infrastructure_root,
+            &resource.metadata.name,
+            &resource.metadata.environment_name,
+        )?;
 
         if lock.is_none() {
             ctx.output.info("Project is not locked");
@@ -142,7 +150,8 @@ impl LockCommand {
         if lock.locked_by != current_user && !force {
             ctx.output.warning("Lock is owned by another user");
             ctx.output.dimmed(&format!("Locked by: {}", lock.locked_by));
-            ctx.output.dimmed("Use --force to override (requires admin privileges)");
+            ctx.output
+                .dimmed("Use --force to override (requires admin privileges)");
             return Ok(());
         }
 
@@ -180,12 +189,12 @@ impl LockCommand {
             output::blank();
 
             for lock in &locks {
-                ctx.output.dimmed(&format!(
-                    "{}/{}",
-                    lock.project, lock.environment
-                ));
-                ctx.output.dimmed(&format!("  Locked by: {}", lock.locked_by));
-                ctx.output.dimmed(&format!("  Locked at: {}", lock.locked_at));
+                ctx.output
+                    .dimmed(&format!("{}/{}", lock.project, lock.environment));
+                ctx.output
+                    .dimmed(&format!("  Locked by: {}", lock.locked_by));
+                ctx.output
+                    .dimmed(&format!("  Locked at: {}", lock.locked_at));
                 if let Some(reason) = &lock.reason {
                     ctx.output.dimmed(&format!("  Reason: {}", reason));
                 }
@@ -212,10 +221,16 @@ impl LockCommand {
             let resource = DynamicProjectEnvironmentResource::from_file(&*ctx.fs, &env_file)?;
 
             ctx.output.key_value("Project", &resource.metadata.name);
-            ctx.output.key_value("Environment", &resource.metadata.environment_name);
+            ctx.output
+                .key_value("Environment", &resource.metadata.environment_name);
             output::blank();
 
-            if let Some(lock) = Self::get_lock(ctx, &infrastructure_root, &resource.metadata.name, &resource.metadata.environment_name)? {
+            if let Some(lock) = Self::get_lock(
+                ctx,
+                &infrastructure_root,
+                &resource.metadata.name,
+                &resource.metadata.environment_name,
+            )? {
                 ctx.output.subsection("Lock Details");
                 ctx.output.key_value("Locked by", &lock.locked_by);
                 ctx.output.key_value("Locked at", &lock.locked_at);
@@ -271,11 +286,7 @@ impl LockCommand {
         Ok(Some(lock))
     }
 
-    fn save_lock(
-        _ctx: &Context,
-        infrastructure_root: &Path,
-        lock: &ProjectLock,
-    ) -> Result<()> {
+    fn save_lock(_ctx: &Context, infrastructure_root: &Path, lock: &ProjectLock) -> Result<()> {
         let locks_dir = infrastructure_root.join(".pmp").join("locks");
         std::fs::create_dir_all(&locks_dir)?;
 
@@ -286,11 +297,7 @@ impl LockCommand {
         Ok(())
     }
 
-    fn remove_lock(
-        _ctx: &Context,
-        infrastructure_root: &Path,
-        lock: &ProjectLock,
-    ) -> Result<()> {
+    fn remove_lock(_ctx: &Context, infrastructure_root: &Path, lock: &ProjectLock) -> Result<()> {
         let lock_file = infrastructure_root
             .join(".pmp")
             .join("locks")

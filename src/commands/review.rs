@@ -46,7 +46,11 @@ pub enum ApprovalDecision {
 }
 
 impl ReviewCommand {
-    pub fn execute_request(ctx: &Context, path: Option<&str>, description: Option<&str>) -> Result<()> {
+    pub fn execute_request(
+        ctx: &Context,
+        path: Option<&str>,
+        description: Option<&str>,
+    ) -> Result<()> {
         ctx.output.section("Request Peer Review");
         output::blank();
 
@@ -71,7 +75,8 @@ impl ReviewCommand {
         let resource = DynamicProjectEnvironmentResource::from_file(&*ctx.fs, &env_file)?;
 
         ctx.output.key_value("Project", &resource.metadata.name);
-        ctx.output.key_value("Environment", &resource.metadata.environment_name);
+        ctx.output
+            .key_value("Environment", &resource.metadata.environment_name);
         output::blank();
 
         // Get description
@@ -113,7 +118,8 @@ impl ReviewCommand {
 
         ctx.output.success("Review request created");
         ctx.output.dimmed(&format!("Review ID: {}", review.id));
-        ctx.output.dimmed(&format!("Required approvals: {}", required));
+        ctx.output
+            .dimmed(&format!("Required approvals: {}", required));
 
         Ok(())
     }
@@ -276,8 +282,12 @@ impl ReviewCommand {
                 ReviewStatus::Rejected => "✗",
             };
 
-            ctx.output.dimmed(&format!("{} [{}] {:?}", status_icon, review.id, review.status));
-            ctx.output.dimmed(&format!("  {}/{}", review.project, review.environment));
+            ctx.output.dimmed(&format!(
+                "{} [{}] {:?}",
+                status_icon, review.id, review.status
+            ));
+            ctx.output
+                .dimmed(&format!("  {}/{}", review.project, review.environment));
             ctx.output.dimmed(&format!("  By: {}", review.requester));
             ctx.output.dimmed(&format!("  {}", review.description));
             ctx.output.dimmed(&format!(
@@ -288,7 +298,8 @@ impl ReviewCommand {
             output::blank();
         }
 
-        ctx.output.success(&format!("{} review requests", filtered.len()));
+        ctx.output
+            .success(&format!("{} review requests", filtered.len()));
 
         Ok(())
     }

@@ -67,7 +67,8 @@ impl BackupCommand {
         let resource = DynamicProjectEnvironmentResource::from_file(&*ctx.fs, &env_file)?;
 
         ctx.output.key_value("Project", &resource.metadata.name);
-        ctx.output.key_value("Environment", &resource.metadata.environment_name);
+        ctx.output
+            .key_value("Environment", &resource.metadata.environment_name);
         output::blank();
 
         // Determine backup type
@@ -76,7 +77,11 @@ impl BackupCommand {
             Some("state") => BackupType::State,
             Some("configuration") => BackupType::Configuration,
             _ => {
-                let options = vec!["full".to_string(), "state".to_string(), "configuration".to_string()];
+                let options = vec![
+                    "full".to_string(),
+                    "state".to_string(),
+                    "configuration".to_string(),
+                ];
                 let selection = ctx.input.select("Backup type:", options)?;
                 match selection.as_str() {
                     "full" => BackupType::Full,
@@ -91,11 +96,7 @@ impl BackupCommand {
             Some(d.to_string())
         } else {
             let input = ctx.input.text("Description (optional):", None)?;
-            if input.is_empty() {
-                None
-            } else {
-                Some(input)
-            }
+            if input.is_empty() { None } else { Some(input) }
         };
 
         ctx.output.dimmed("Creating backup...");
@@ -112,12 +113,14 @@ impl BackupCommand {
 
         ctx.output.success("Backup created successfully");
         ctx.output.key_value("Backup ID", &backup.id);
-        ctx.output.key_value("Type", &format!("{:?}", backup.backup_type));
+        ctx.output
+            .key_value("Type", &format!("{:?}", backup.backup_type));
         ctx.output.key_value(
             "Size",
             &format!("{:.2} MB", backup.size_bytes as f64 / 1024.0 / 1024.0),
         );
-        ctx.output.key_value("Resources", &backup.metadata.resource_count.to_string());
+        ctx.output
+            .key_value("Resources", &backup.metadata.resource_count.to_string());
 
         Ok(())
     }
@@ -157,11 +160,15 @@ impl BackupCommand {
                 .collect();
 
             let selection = ctx.input.select("Select backup:", options)?;
-            let idx = backups.iter().enumerate()
-                .find(|(_, b)| format!(
-                    "{} - {}/{} ({:?}) - {}",
-                    b.id, b.project, b.environment, b.backup_type, b.created_at
-                ) == selection)
+            let idx = backups
+                .iter()
+                .enumerate()
+                .find(|(_, b)| {
+                    format!(
+                        "{} - {}/{} ({:?}) - {}",
+                        b.id, b.project, b.environment, b.backup_type, b.created_at
+                    ) == selection
+                })
                 .map(|(i, _)| i)
                 .unwrap_or(0);
             backups[idx].id.clone()
@@ -174,14 +181,14 @@ impl BackupCommand {
         ctx.output.key_value("Project", &backup.project);
         ctx.output.key_value("Environment", &backup.environment);
         ctx.output.key_value("Created", &backup.created_at);
-        ctx.output.key_value("Type", &format!("{:?}", backup.backup_type));
+        ctx.output
+            .key_value("Type", &format!("{:?}", backup.backup_type));
         output::blank();
 
         // Confirm restoration
-        let confirm = ctx.input.confirm(
-            "This will overwrite current state. Continue?",
-            false,
-        )?;
+        let confirm = ctx
+            .input
+            .confirm("This will overwrite current state. Continue?", false)?;
 
         if !confirm {
             ctx.output.info("Restoration cancelled");
@@ -201,7 +208,8 @@ impl BackupCommand {
         Self::restore_backup(ctx, &infrastructure_root, &backup, &target)?;
 
         ctx.output.success("Backup restored successfully");
-        ctx.output.warning("Remember to run 'pmp preview' before applying changes");
+        ctx.output
+            .warning("Remember to run 'pmp preview' before applying changes");
 
         Ok(())
     }
@@ -218,7 +226,12 @@ impl BackupCommand {
             CollectionDiscovery::find_collection(&*ctx.fs)?
                 .context("Infrastructure is required. Run 'pmp init' first.")?;
 
-        let backups = Self::list_backups(ctx, &infrastructure_root, project_filter, environment_filter)?;
+        let backups = Self::list_backups(
+            ctx,
+            &infrastructure_root,
+            project_filter,
+            environment_filter,
+        )?;
 
         if backups.is_empty() {
             ctx.output.info("No backups found");
@@ -229,9 +242,14 @@ impl BackupCommand {
         output::blank();
 
         for backup in &backups {
-            ctx.output.dimmed(&format!("[{}] {:?}", backup.id, backup.backup_type));
-            ctx.output.dimmed(&format!("  {}/{}", backup.project, backup.environment));
-            ctx.output.dimmed(&format!("  Created: {} by {}", backup.created_at, backup.created_by));
+            ctx.output
+                .dimmed(&format!("[{}] {:?}", backup.id, backup.backup_type));
+            ctx.output
+                .dimmed(&format!("  {}/{}", backup.project, backup.environment));
+            ctx.output.dimmed(&format!(
+                "  Created: {} by {}",
+                backup.created_at, backup.created_by
+            ));
             ctx.output.dimmed(&format!(
                 "  Size: {:.2} MB, {} resources",
                 backup.size_bytes as f64 / 1024.0 / 1024.0,
@@ -243,7 +261,8 @@ impl BackupCommand {
             output::blank();
         }
 
-        ctx.output.success(&format!("{} backups found", backups.len()));
+        ctx.output
+            .success(&format!("{} backups found", backups.len()));
 
         Ok(())
     }
@@ -437,11 +456,7 @@ impl BackupCommand {
         Ok(backups)
     }
 
-    fn load_backup(
-        _ctx: &Context,
-        infrastructure_root: &Path,
-        backup_id: &str,
-    ) -> Result<Backup> {
+    fn load_backup(_ctx: &Context, infrastructure_root: &Path, backup_id: &str) -> Result<Backup> {
         let backup_file = infrastructure_root
             .join(".pmp")
             .join("backups")
@@ -457,11 +472,7 @@ impl BackupCommand {
         Ok(backup)
     }
 
-    fn delete_backup(
-        _ctx: &Context,
-        infrastructure_root: &Path,
-        backup: &Backup,
-    ) -> Result<()> {
+    fn delete_backup(_ctx: &Context, infrastructure_root: &Path, backup: &Backup) -> Result<()> {
         let backups_dir = infrastructure_root.join(".pmp").join("backups");
 
         // Delete metadata file

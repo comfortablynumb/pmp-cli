@@ -76,8 +76,9 @@ impl MonitorCommand {
         ctx.output.section("Infrastructure Health Dashboard");
         output::blank();
 
-        let (_infrastructure, infrastructure_root) = CollectionDiscovery::find_collection(&*ctx.fs)?
-            .context("Infrastructure is required. Run 'pmp init' first.")?;
+        let (_infrastructure, infrastructure_root) =
+            CollectionDiscovery::find_collection(&*ctx.fs)?
+                .context("Infrastructure is required. Run 'pmp init' first.")?;
 
         let projects = if let Some(p) = path {
             let path = Path::new(p);
@@ -154,11 +155,16 @@ impl MonitorCommand {
             }
         }
 
-        ctx.output.key_value("Total Projects", &total_projects.to_string());
-        ctx.output.key_value("Total Environments", &total_environments.to_string());
-        ctx.output.key_value("Healthy", &format!("{} ✓", healthy_count));
-        ctx.output.key_value("Degraded", &format!("{} ⚠", degraded_count));
-        ctx.output.key_value("Unhealthy", &format!("{} ✗", unhealthy_count));
+        ctx.output
+            .key_value("Total Projects", &total_projects.to_string());
+        ctx.output
+            .key_value("Total Environments", &total_environments.to_string());
+        ctx.output
+            .key_value("Healthy", &format!("{} ✓", healthy_count));
+        ctx.output
+            .key_value("Degraded", &format!("{} ⚠", degraded_count));
+        ctx.output
+            .key_value("Unhealthy", &format!("{} ✗", unhealthy_count));
         output::blank();
 
         // Display detailed health status
@@ -206,7 +212,8 @@ impl MonitorCommand {
 
             if alerts.len() > 5 {
                 output::blank();
-                ctx.output.dimmed(&format!("... and {} more alerts", alerts.len() - 5));
+                ctx.output
+                    .dimmed(&format!("... and {} more alerts", alerts.len() - 5));
             }
 
             output::blank();
@@ -245,7 +252,8 @@ impl MonitorCommand {
         let resource = DynamicProjectEnvironmentResource::from_file(&*ctx.fs, &env_file)?;
 
         ctx.output.key_value("Project", &resource.metadata.name);
-        ctx.output.key_value("Environment", &resource.metadata.environment_name);
+        ctx.output
+            .key_value("Environment", &resource.metadata.environment_name);
         output::blank();
 
         // Collect metrics
@@ -315,15 +323,19 @@ impl MonitorCommand {
                         AlertSeverity::Info => "INFO",
                     };
 
-                    ctx.output.dimmed(&format!("[{}] {}", alert.id, severity_str));
+                    ctx.output
+                        .dimmed(&format!("[{}] {}", alert.id, severity_str));
                     ctx.output.dimmed(&format!("  Project: {}", alert.project));
-                    ctx.output.dimmed(&format!("  Environment: {}", alert.environment));
+                    ctx.output
+                        .dimmed(&format!("  Environment: {}", alert.environment));
                     ctx.output.dimmed(&format!("  Message: {}", alert.message));
-                    ctx.output.dimmed(&format!("  Triggered: {}", alert.triggered_at));
+                    ctx.output
+                        .dimmed(&format!("  Triggered: {}", alert.triggered_at));
                     output::blank();
                 }
 
-                ctx.output.success(&format!("{} active alerts", alerts.len()));
+                ctx.output
+                    .success(&format!("{} active alerts", alerts.len()));
             }
             "configure" => {
                 let current_path = if let Some(p) = path {
@@ -349,11 +361,7 @@ impl MonitorCommand {
 
     // Helper functions
 
-    fn check_health(
-        _ctx: &Context,
-        env_path: &Path,
-        project_name: &str,
-    ) -> Result<HealthStatus> {
+    fn check_health(_ctx: &Context, env_path: &Path, project_name: &str) -> Result<HealthStatus> {
         // In a real implementation:
         // 1. Read Terraform/OpenTofu state
         // 2. Check resource health via cloud provider APIs
@@ -484,7 +492,11 @@ impl MonitorCommand {
         let condition = ctx.input.text("Condition (>, <, ==):", Some(">"))?;
         let threshold: f64 = ctx.input.text("Threshold value:", None)?.parse()?;
 
-        let severity_options = vec!["critical".to_string(), "warning".to_string(), "info".to_string()];
+        let severity_options = vec![
+            "critical".to_string(),
+            "warning".to_string(),
+            "info".to_string(),
+        ];
         let severity_selection = ctx.input.select("Severity:", severity_options)?;
         let severity = match severity_selection.as_str() {
             "critical" => AlertSeverity::Critical,

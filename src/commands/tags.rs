@@ -34,11 +34,7 @@ pub struct ComplianceIssue {
 }
 
 impl TagsCommand {
-    pub fn execute_add(
-        ctx: &Context,
-        path: Option<&str>,
-        tag_pairs: Vec<String>,
-    ) -> Result<()> {
+    pub fn execute_add(ctx: &Context, path: Option<&str>, tag_pairs: Vec<String>) -> Result<()> {
         ctx.output.section("Add Tags");
         output::blank();
 
@@ -63,7 +59,8 @@ impl TagsCommand {
         let resource = DynamicProjectEnvironmentResource::from_file(&*ctx.fs, &env_file)?;
 
         ctx.output.key_value("Project", &resource.metadata.name);
-        ctx.output.key_value("Environment", &resource.metadata.environment_name);
+        ctx.output
+            .key_value("Environment", &resource.metadata.environment_name);
         output::blank();
 
         // Parse tag pairs
@@ -97,8 +94,8 @@ impl TagsCommand {
         }
 
         // Load existing tags
-        let mut tag_config = Self::load_tags(ctx, &infrastructure_root, &resource)
-            .unwrap_or_else(|_| TagConfig {
+        let mut tag_config =
+            Self::load_tags(ctx, &infrastructure_root, &resource).unwrap_or_else(|_| TagConfig {
                 tags: HashMap::new(),
                 last_updated: chrono::Utc::now().to_rfc3339(),
                 updated_by: Self::get_current_user().unwrap_or_default(),
@@ -106,7 +103,8 @@ impl TagsCommand {
 
         // Merge tags
         for (key, value) in tags {
-            ctx.output.dimmed(&format!("Adding tag: {} = {}", key, value));
+            ctx.output
+                .dimmed(&format!("Adding tag: {} = {}", key, value));
             tag_config.tags.insert(key, value);
         }
 
@@ -118,16 +116,13 @@ impl TagsCommand {
         Self::save_tags(ctx, &infrastructure_root, &resource, &tag_config)?;
 
         ctx.output.success("Tags added");
-        ctx.output.dimmed(&format!("Total tags: {}", tag_config.tags.len()));
+        ctx.output
+            .dimmed(&format!("Total tags: {}", tag_config.tags.len()));
 
         Ok(())
     }
 
-    pub fn execute_remove(
-        ctx: &Context,
-        path: Option<&str>,
-        tag_keys: Vec<String>,
-    ) -> Result<()> {
+    pub fn execute_remove(ctx: &Context, path: Option<&str>, tag_keys: Vec<String>) -> Result<()> {
         ctx.output.section("Remove Tags");
         output::blank();
 
@@ -143,8 +138,7 @@ impl TagsCommand {
 
         let env_file = current_path.join(".pmp.environment.yaml");
         if !ctx.fs.exists(&env_file) {
-            ctx.output
-                .warning("Not in an environment directory.");
+            ctx.output.warning("Not in an environment directory.");
             return Ok(());
         }
 
@@ -190,15 +184,15 @@ impl TagsCommand {
 
         let env_file = current_path.join(".pmp.environment.yaml");
         if !ctx.fs.exists(&env_file) {
-            ctx.output
-                .warning("Not in an environment directory.");
+            ctx.output.warning("Not in an environment directory.");
             return Ok(());
         }
 
         let resource = DynamicProjectEnvironmentResource::from_file(&*ctx.fs, &env_file)?;
 
         ctx.output.key_value("Project", &resource.metadata.name);
-        ctx.output.key_value("Environment", &resource.metadata.environment_name);
+        ctx.output
+            .key_value("Environment", &resource.metadata.environment_name);
         output::blank();
 
         // Load tags
@@ -221,7 +215,10 @@ impl TagsCommand {
         }
 
         output::blank();
-        ctx.output.dimmed(&format!("Last updated: {} by {}", tag_config.last_updated, tag_config.updated_by));
+        ctx.output.dimmed(&format!(
+            "Last updated: {} by {}",
+            tag_config.last_updated, tag_config.updated_by
+        ));
 
         Ok(())
     }
@@ -241,7 +238,8 @@ impl TagsCommand {
             &infrastructure_root,
         )?;
 
-        ctx.output.dimmed(&format!("Auditing {} projects...", projects.len()));
+        ctx.output
+            .dimmed(&format!("Auditing {} projects...", projects.len()));
         output::blank();
 
         let mut report = TagAuditReport {
@@ -310,12 +308,20 @@ impl TagsCommand {
         ctx.output.subsection("Audit Summary");
         output::blank();
 
-        ctx.output.key_value("Total Projects", &report.total_projects.to_string());
-        ctx.output.key_value("Compliant", &format!("{} ({:.1}%)",
-            report.compliant_projects,
-            (report.compliant_projects as f64 / report.total_projects as f64) * 100.0
-        ));
-        ctx.output.key_value("Non-Compliant", &report.non_compliant_projects.len().to_string());
+        ctx.output
+            .key_value("Total Projects", &report.total_projects.to_string());
+        ctx.output.key_value(
+            "Compliant",
+            &format!(
+                "{} ({:.1}%)",
+                report.compliant_projects,
+                (report.compliant_projects as f64 / report.total_projects as f64) * 100.0
+            ),
+        );
+        ctx.output.key_value(
+            "Non-Compliant",
+            &report.non_compliant_projects.len().to_string(),
+        );
         output::blank();
 
         if !report.non_compliant_projects.is_empty() {
@@ -323,9 +329,11 @@ impl TagsCommand {
             output::blank();
 
             for issue in &report.non_compliant_projects {
-                ctx.output.dimmed(&format!("{}/{}", issue.project, issue.environment));
+                ctx.output
+                    .dimmed(&format!("{}/{}", issue.project, issue.environment));
                 if !issue.missing_tags.is_empty() {
-                    ctx.output.dimmed(&format!("  Missing: {}", issue.missing_tags.join(", ")));
+                    ctx.output
+                        .dimmed(&format!("  Missing: {}", issue.missing_tags.join(", ")));
                 }
             }
 
@@ -344,7 +352,11 @@ impl TagsCommand {
         Ok(())
     }
 
-    pub fn execute_report(ctx: &Context, output_file: Option<&str>, format: Option<&str>) -> Result<()> {
+    pub fn execute_report(
+        ctx: &Context,
+        output_file: Option<&str>,
+        format: Option<&str>,
+    ) -> Result<()> {
         ctx.output.section("Tag Report");
         output::blank();
 
@@ -384,14 +396,11 @@ impl TagsCommand {
 
                 if let Ok(tag_config) = Self::load_tags(ctx, &infrastructure_root, &resource) {
                     for (key, value) in &tag_config.tags {
-                        tag_data
-                            .entry(key.clone())
-                            .or_default()
-                            .push((
-                                resource.metadata.name.clone(),
-                                resource.metadata.environment_name.clone(),
-                                value.clone(),
-                            ));
+                        tag_data.entry(key.clone()).or_default().push((
+                            resource.metadata.name.clone(),
+                            resource.metadata.environment_name.clone(),
+                            value.clone(),
+                        ));
                     }
                 }
             }
@@ -434,11 +443,13 @@ impl TagsCommand {
 
                 for key in keys {
                     let entries = &tag_data[key];
-                    ctx.output.dimmed(&format!("{}: {} projects", key, entries.len()));
+                    ctx.output
+                        .dimmed(&format!("{}: {} projects", key, entries.len()));
                 }
 
                 output::blank();
-                ctx.output.success(&format!("{} unique tag keys found", tag_data.len()));
+                ctx.output
+                    .success(&format!("{} unique tag keys found", tag_data.len()));
             }
         }
 
@@ -452,10 +463,10 @@ impl TagsCommand {
         infrastructure_root: &Path,
         resource: &DynamicProjectEnvironmentResource,
     ) -> Result<TagConfig> {
-        let tags_file = infrastructure_root
-            .join(".pmp")
-            .join("tags")
-            .join(format!("{}-{}.json", resource.metadata.name, resource.metadata.environment_name));
+        let tags_file = infrastructure_root.join(".pmp").join("tags").join(format!(
+            "{}-{}.json",
+            resource.metadata.name, resource.metadata.environment_name
+        ));
 
         if !tags_file.exists() {
             anyhow::bail!("No tags found");
@@ -476,7 +487,10 @@ impl TagsCommand {
         let tags_dir = infrastructure_root.join(".pmp").join("tags");
         std::fs::create_dir_all(&tags_dir)?;
 
-        let tags_file = tags_dir.join(format!("{}-{}.json", resource.metadata.name, resource.metadata.environment_name));
+        let tags_file = tags_dir.join(format!(
+            "{}-{}.json",
+            resource.metadata.name, resource.metadata.environment_name
+        ));
         let content = serde_json::to_string_pretty(config)?;
         std::fs::write(&tags_file, content)?;
 

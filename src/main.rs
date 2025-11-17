@@ -11,12 +11,12 @@ mod traits;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use commands::{
-    ApplyCommand, AuditCommand, BackupCommand, CiCommand, CloneCommand, CreateCommand,
-    DepsCommand, DestroyCommand, DevExCommand, DisasterRecoveryCommand, DriftCommand,
-    EnvCommand, FindCommand, GenerateCommand, GraphCommand, InitCommand, LockCommand,
-    MonitorCommand, PolicyCommand, PreviewCommand, ProviderCommand, RefreshCommand,
-    ReviewCommand, SearchCommand, StateCommand, TagsCommand, TemplateCommand,
-    TemplateMgmtCommand, TestCommand, UiCommand, UpdateCommand, WorkspaceCommand,
+    ApplyCommand, AuditCommand, BackupCommand, CiCommand, CloneCommand, CreateCommand, DepsCommand,
+    DestroyCommand, DevExCommand, DisasterRecoveryCommand, DriftCommand, EnvCommand, FindCommand,
+    GenerateCommand, GraphCommand, InfrastructureCommand, LockCommand, MonitorCommand,
+    PolicyCommand, PreviewCommand, ProviderCommand, RefreshCommand, ReviewCommand, SearchCommand,
+    StateCommand, TagsCommand, TemplateCommand, TemplateMgmtCommand, TestCommand, UiCommand,
+    UpdateCommand, WorkspaceCommand,
 };
 
 #[derive(Parser)]
@@ -29,37 +29,260 @@ struct Cli {
 }
 
 #[derive(Subcommand)]
-enum Commands {
-    /// Initialize a new Infrastructure
+enum InfrastructureSubcommands {
+    /// Initialize a new infrastructure
     #[command(
-        long_about = "Initialize a new Infrastructure in the current directory\n\nExamples:\n  pmp init\n  pmp init --name \"My Infrastructure\"\n  pmp init --name \"Dev Projects\" --description \"Development infrastructure\""
+        long_about = "Initialize a new infrastructure\n\nExamples:\n  pmp infrastructure init\n  pmp infrastructure init --name my-infra\n  pmp infrastructure init --template-packs-paths /custom/packs"
     )]
     Init {
-        /// Name of the infrastructure (defaults to "My Infrastructure")
+        /// Infrastructure name (optional, will prompt if not specified)
         #[arg(short, long)]
         name: Option<String>,
 
-        /// Description of the infrastructure
+        /// Infrastructure description (optional)
         #[arg(short, long)]
         description: Option<String>,
+
+        /// Additional template packs directories to search (colon-separated)
+        #[arg(long)]
+        template_packs_paths: Option<String>,
+    },
+
+    /// Create infrastructure from template
+    #[command(
+        long_about = "Create infrastructure from template\n\nExamples:\n  pmp infrastructure create\n  pmp infrastructure create --output ./my-infra\n  pmp infrastructure create --template-packs-paths /custom/packs"
+    )]
+    Create {
+        /// Output directory (optional, defaults to current directory)
+        #[arg(short, long)]
+        output: Option<String>,
+
+        /// Additional template packs directories to search (colon-separated)
+        #[arg(long)]
+        template_packs_paths: Option<String>,
+    },
+
+    /// List available infrastructures
+    #[command(long_about = "List available infrastructures")]
+    List,
+
+    /// Switch between infrastructures
+    #[command(
+        long_about = "Switch between infrastructures\n\nExamples:\n  pmp infrastructure switch\n  pmp infrastructure switch --name my-infra"
+    )]
+    Switch {
+        /// Infrastructure name (optional, will prompt if not specified)
+        #[arg(short, long)]
+        name: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum ProjectSubcommands {
+    /// Create a new project
+    #[command(
+        long_about = "Create a new project from a template\n\nExamples:\n  pmp project create\n  pmp project create --output ./my-project\n  pmp project create --template-packs-paths /custom/packs"
+    )]
+    Create {
+        /// Output directory for the project (optional)
+        #[arg(short, long)]
+        output: Option<String>,
+
+        /// Additional template packs directories to search (colon-separated)
+        #[arg(long)]
+        template_packs_paths: Option<String>,
+    },
+
+    /// Find projects in an Infrastructure
+    #[command(
+        long_about = "Find projects in an Infrastructure\n\nExamples:\n  pmp project find\n  pmp project find --name my-api\n  pmp project find --kind KubernetesWorkload"
+    )]
+    Find {
+        /// Filter by project name (case-insensitive substring match)
+        #[arg(short, long)]
+        name: Option<String>,
+
+        /// Filter by kind
+        #[arg(short, long)]
+        kind: Option<String>,
+    },
+
+    /// Update an existing project environment by regenerating files from the original template
+    #[command(
+        long_about = "Update an existing project environment by regenerating files from the original template\n\nExamples:\n  pmp project update\n  pmp project update --path ./my-project\n  pmp project update --template-packs-paths /custom/packs1:/custom/packs2"
+    )]
+    Update {
+        /// Path to the project directory (defaults to current directory)
+        #[arg(short, long)]
+        path: Option<String>,
 
         /// Additional template packs directories to search (colon-separated)
         #[arg(short, long)]
         template_packs_paths: Option<String>,
     },
 
-    /// Create a new project from a template
+    /// Clone an existing project
     #[command(
-        long_about = "Create a new project from a template\n\nExamples:\n  pmp create\n  pmp create --output ./my-project\n  pmp create --template-packs-paths /custom/packs1:/custom/packs2"
+        long_about = "Clone an existing project with a new name\n\nExamples:\n  pmp project clone my-api new-api\n  pmp project clone --source my-api --name new-api\n  pmp project clone my-api new-api --environment dev"
     )]
-    Create {
-        /// Output directory for the new project (defaults to current directory)
+    Clone {
+        /// Source project name (optional, prompts if not specified)
+        source: Option<String>,
+
+        /// New project name
+        name: String,
+
+        /// Environment to clone (optional, prompts if not specified)
+        #[arg(short, long)]
+        environment: Option<String>,
+    },
+
+    /// Preview changes (run IaC plan)
+    #[command(
+        long_about = "Preview changes (run IaC plan)\n\nYou can pass additional executor options after --:\n\nExamples:\n  pmp project preview\n  pmp project preview --path ./my-project\n  pmp project preview -- -no-color\n  pmp project preview -- -var=environment=prod"
+    )]
+    Preview {
+        /// Path to the project directory (defaults to current directory)
+        #[arg(short, long)]
+        path: Option<String>,
+
+        /// Additional arguments to pass to the executor (after --)
+        #[arg(last = true)]
+        executor_args: Vec<String>,
+    },
+
+    /// Apply changes (run IaC apply)
+    #[command(
+        long_about = "Apply changes (run IaC apply)\n\nYou can pass additional executor options after --:\n\nExamples:\n  pmp project apply\n  pmp project apply --path ./my-project\n  pmp project apply -- -auto-approve\n  pmp project apply -- -var=environment=prod -auto-approve"
+    )]
+    Apply {
+        /// Path to the project directory (defaults to current directory)
+        #[arg(short, long)]
+        path: Option<String>,
+
+        /// Additional arguments to pass to the executor (after --)
+        #[arg(last = true)]
+        executor_args: Vec<String>,
+    },
+
+    /// Destroy infrastructure (run IaC destroy)
+    #[command(
+        long_about = "Destroy infrastructure (run IaC destroy)\n\nWARNING: This will destroy all resources managed by the project!\nYou will be prompted for confirmation unless --yes is specified.\n\nYou can pass additional executor options after --:\n\nExamples:\n  pmp project destroy\n  pmp project destroy --yes\n  pmp project destroy --path ./my-project\n  pmp project destroy -- -auto-approve\n  pmp project destroy --yes -- -var=environment=prod"
+    )]
+    Destroy {
+        /// Path to the project directory (defaults to current directory)
+        #[arg(short, long)]
+        path: Option<String>,
+
+        /// Skip confirmation prompt
+        #[arg(short, long)]
+        yes: bool,
+
+        /// Additional arguments to pass to the executor (after --)
+        #[arg(last = true)]
+        executor_args: Vec<String>,
+    },
+
+    /// Refresh state (run IaC refresh)
+    #[command(
+        long_about = "Refresh state (run IaC refresh)\n\nUpdates the state file with the real infrastructure status without modifying resources.\n\nYou can pass additional executor options after --:\n\nExamples:\n  pmp project refresh\n  pmp project refresh --path ./my-project\n  pmp project refresh -- -var=environment=prod"
+    )]
+    Refresh {
+        /// Path to the project directory (defaults to current directory)
+        #[arg(short, long)]
+        path: Option<String>,
+
+        /// Additional arguments to pass to the executor (after --)
+        #[arg(last = true)]
+        executor_args: Vec<String>,
+    },
+
+    /// Visualize dependency graph
+    #[command(
+        long_about = "Visualize project dependency graphs\n\nSupports multiple output formats:\n- ASCII: Terminal-friendly tree visualization\n- Mermaid: Mermaid.js diagram format\n- DOT: GraphViz DOT format\n\nExamples:\n  pmp project graph\n  pmp project graph --all\n  pmp project graph --format mermaid --output graph.mmd\n  pmp project graph --format dot --output graph.dot"
+    )]
+    Graph {
+        /// Path to the project directory (defaults to current directory)
+        #[arg(short, long)]
+        path: Option<String>,
+
+        /// Output format (ascii, mermaid, dot)
+        #[arg(short, long)]
+        format: Option<String>,
+
+        /// Output file (defaults to stdout)
         #[arg(short, long)]
         output: Option<String>,
 
-        /// Additional template packs directories to search (colon-separated)
+        /// Show all projects in the infrastructure
         #[arg(short, long)]
-        template_packs_paths: Option<String>,
+        all: bool,
+    },
+
+    /// Dependency analysis and management
+    #[command(
+        long_about = "Analyze and manage project dependencies\n\nSubcommands:\n- analyze: Comprehensive dependency analysis\n- impact: Show projects affected by changes\n- validate: Validate dependency chains\n- order: Show optimal deployment order\n- why: Explain dependency relationships\n\nExamples:\n  pmp project deps analyze\n  pmp project deps impact my-api\n  pmp project deps validate\n  pmp project deps order\n  pmp project deps why my-api"
+    )]
+    Deps {
+        #[command(subcommand)]
+        command: DepsSubcommands,
+    },
+
+    /// Drift detection and reconciliation
+    #[command(
+        long_about = "Detect and reconcile infrastructure drift\n\nSubcommands:\n- detect: Detect drift in infrastructure\n- report: Generate drift report\n- reconcile: Reconcile drift by applying changes\n\nExamples:\n  pmp project drift detect\n  pmp project drift detect --path ./my-project/environments/dev\n  pmp project drift report --format json --output drift-report.json\n  pmp project drift reconcile --auto-approve"
+    )]
+    Drift {
+        #[command(subcommand)]
+        command: DriftSubcommands,
+    },
+
+    /// Policy validation and security scanning
+    #[command(
+        long_about = "Validate policies and scan for security issues\n\nSubcommands:\n- validate: Validate against organizational policies\n- scan: Run security scanning tools\n\nExamples:\n  pmp project policy validate\n  pmp project policy validate --policy naming\n  pmp project policy scan --scanner tfsec\n  pmp project policy scan --scanner checkov"
+    )]
+    Policy {
+        #[command(subcommand)]
+        command: PolicySubcommands,
+    },
+
+    /// State management and drift detection
+    #[command(
+        long_about = "Manage infrastructure state and detect drift\n\nSubcommands:\n- list: Show state across all projects\n- drift: Detect configuration drift\n- lock: Lock state for a project\n- unlock: Unlock state for a project\n- sync: Sync remote state\n\nExamples:\n  pmp project state list\n  pmp project state drift\n  pmp project state lock my-project\n  pmp project state unlock my-project --force"
+    )]
+    State {
+        #[command(subcommand)]
+        command: StateSubcommands,
+    },
+
+    /// Environment management
+    #[command(
+        long_about = "Manage and compare environments\n\nSubcommands:\n- diff: Compare two environments\n- promote: Promote configuration between environments\n- sync: Synchronize common settings\n- variables: Manage environment variables\n\nExamples:\n  pmp project env diff dev staging\n  pmp project env promote dev staging\n  pmp project env sync\n  pmp project env variables --environment production"
+    )]
+    Env {
+        #[command(subcommand)]
+        command: EnvSubcommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Infrastructure management commands
+    #[command(
+        long_about = "Manage infrastructures and infrastructure templates\n\nSubcommands:\n- init: Initialize a new infrastructure\n- create: Create infrastructure from template\n- list: List available infrastructures\n- switch: Switch between infrastructures\n\nExamples:\n  pmp infrastructure init\n  pmp infrastructure create\n  pmp infrastructure list"
+    )]
+    Infrastructure {
+        #[command(subcommand)]
+        command: InfrastructureSubcommands,
+    },
+
+    /// Project management commands
+    #[command(
+        long_about = "Manage projects within an infrastructure\n\nSubcommands:\n- create: Create a new project\n- find: Find existing projects\n- update: Update project configuration\n- clone: Clone an existing project\n- apply: Apply infrastructure changes\n- preview: Preview infrastructure changes\n- destroy: Destroy infrastructure\n- refresh: Refresh infrastructure state\n- graph: Visualize dependency graph\n- deps: Manage dependencies\n- state: Manage state\n- env: Manage environments\n\nExamples:\n  pmp project create\n  pmp project find --name my-api\n  pmp project apply"
+    )]
+    Project {
+        #[command(subcommand)]
+        command: ProjectSubcommands,
     },
 
     /// Generate files from a template without creating a project structure
@@ -84,94 +307,6 @@ enum Commands {
         template_packs_paths: Option<String>,
     },
 
-    /// Preview changes (run IaC plan)
-    #[command(
-        long_about = "Preview changes (run IaC plan)\n\nYou can pass additional executor options after --:\n\nExamples:\n  pmp preview\n  pmp preview --path ./my-project\n  pmp preview -- -no-color\n  pmp preview -- -var=environment=prod"
-    )]
-    Preview {
-        /// Path to the project directory (defaults to current directory)
-        #[arg(short, long)]
-        path: Option<String>,
-
-        /// Additional arguments to pass to the executor (after --)
-        #[arg(last = true)]
-        executor_args: Vec<String>,
-    },
-
-    /// Apply changes (run IaC apply)
-    #[command(
-        long_about = "Apply changes (run IaC apply)\n\nYou can pass additional executor options after --:\n\nExamples:\n  pmp apply\n  pmp apply --path ./my-project\n  pmp apply -- -auto-approve\n  pmp apply -- -var=environment=prod -auto-approve"
-    )]
-    Apply {
-        /// Path to the project directory (defaults to current directory)
-        #[arg(short, long)]
-        path: Option<String>,
-
-        /// Additional arguments to pass to the executor (after --)
-        #[arg(last = true)]
-        executor_args: Vec<String>,
-    },
-
-    /// Destroy infrastructure (run IaC destroy)
-    #[command(
-        long_about = "Destroy infrastructure (run IaC destroy)\n\nWARNING: This will destroy all resources managed by the project!\nYou will be prompted for confirmation unless --yes is specified.\n\nYou can pass additional executor options after --:\n\nExamples:\n  pmp destroy\n  pmp destroy --yes\n  pmp destroy --path ./my-project\n  pmp destroy -- -auto-approve\n  pmp destroy --yes -- -var=environment=prod"
-    )]
-    Destroy {
-        /// Path to the project directory (defaults to current directory)
-        #[arg(short, long)]
-        path: Option<String>,
-
-        /// Skip confirmation prompt
-        #[arg(short, long)]
-        yes: bool,
-
-        /// Additional arguments to pass to the executor (after --)
-        #[arg(last = true)]
-        executor_args: Vec<String>,
-    },
-
-    /// Refresh state (run IaC refresh)
-    #[command(
-        long_about = "Refresh state (run IaC refresh)\n\nUpdates the state file with the real infrastructure status without modifying resources.\n\nYou can pass additional executor options after --:\n\nExamples:\n  pmp refresh\n  pmp refresh --path ./my-project\n  pmp refresh -- -var=environment=prod"
-    )]
-    Refresh {
-        /// Path to the project directory (defaults to current directory)
-        #[arg(short, long)]
-        path: Option<String>,
-
-        /// Additional arguments to pass to the executor (after --)
-        #[arg(last = true)]
-        executor_args: Vec<String>,
-    },
-
-    /// Find projects in an Infrastructure
-    #[command(
-        long_about = "Find projects in an Infrastructure\n\nExamples:\n  pmp find\n  pmp find --name my-api\n  pmp find --kind KubernetesWorkload"
-    )]
-    Find {
-        /// Filter by project name (case-insensitive substring match)
-        #[arg(short, long)]
-        name: Option<String>,
-
-        /// Filter by kind
-        #[arg(short, long)]
-        kind: Option<String>,
-    },
-
-    /// Update an existing project environment by regenerating files from the original template
-    #[command(
-        long_about = "Update an existing project environment by regenerating files from the original template\n\nExamples:\n  pmp update\n  pmp update --path ./my-project\n  pmp update --template-packs-paths /custom/packs1:/custom/packs2"
-    )]
-    Update {
-        /// Path to the project directory (defaults to current directory)
-        #[arg(short, long)]
-        path: Option<String>,
-
-        /// Additional template packs directories to search (colon-separated)
-        #[arg(short, long)]
-        template_packs_paths: Option<String>,
-    },
-
     /// Start the web UI server
     #[command(
         long_about = "Start the web UI server\n\nProvides a web-based interface for managing PMP projects, templates, and infrastructure.\nThe UI exposes all CLI functionality through an intuitive web interface.\n\nExamples:\n  pmp ui\n  pmp ui --port 3000\n  pmp ui --host 0.0.0.0 --port 8080"
@@ -184,64 +319,6 @@ enum Commands {
         /// Host to bind the server to (defaults to 127.0.0.1)
         #[arg(long)]
         host: Option<String>,
-    },
-
-    /// Visualize dependency graph
-    #[command(
-        long_about = "Visualize project dependency graphs\n\nSupports multiple output formats:\n- ASCII: Terminal-friendly tree visualization\n- Mermaid: Mermaid.js diagram format\n- DOT: GraphViz DOT format\n\nExamples:\n  pmp graph\n  pmp graph --all\n  pmp graph --format mermaid --output graph.mmd\n  pmp graph --format dot --output graph.dot"
-    )]
-    Graph {
-        /// Path to the project directory (defaults to current directory)
-        #[arg(short, long)]
-        path: Option<String>,
-
-        /// Output format (ascii, mermaid, dot)
-        #[arg(short, long)]
-        format: Option<String>,
-
-        /// Output file (defaults to stdout)
-        #[arg(short, long)]
-        output: Option<String>,
-
-        /// Show all projects in the infrastructure
-        #[arg(short, long)]
-        all: bool,
-    },
-
-    /// Dependency analysis and management
-    #[command(
-        long_about = "Analyze and manage project dependencies\n\nSubcommands:\n- analyze: Comprehensive dependency analysis\n- impact: Show projects affected by changes\n- validate: Validate dependency chains\n- order: Show optimal deployment order\n- why: Explain dependency relationships\n\nExamples:\n  pmp deps analyze\n  pmp deps impact my-api\n  pmp deps validate\n  pmp deps order\n  pmp deps why my-api"
-    )]
-    Deps {
-        #[command(subcommand)]
-        command: DepsSubcommands,
-    },
-
-    /// Drift detection and reconciliation
-    #[command(
-        long_about = "Detect and reconcile infrastructure drift\n\nSubcommands:\n- detect: Detect drift in infrastructure\n- report: Generate drift report\n- reconcile: Reconcile drift by applying changes\n\nExamples:\n  pmp drift detect\n  pmp drift detect --path ./my-project/environments/dev\n  pmp drift report --format json --output drift-report.json\n  pmp drift reconcile --auto-approve"
-    )]
-    Drift {
-        #[command(subcommand)]
-        command: DriftSubcommands,
-    },
-
-    /// Policy validation and security scanning
-    #[command(
-        long_about = "Validate policies and scan for security issues\n\nSubcommands:\n- validate: Validate against organizational policies\n- scan: Run security scanning tools\n\nExamples:\n  pmp policy validate\n  pmp policy validate --policy naming\n  pmp policy scan --scanner tfsec\n  pmp policy scan --scanner checkov"
-    )]
-    Policy {
-        #[command(subcommand)]
-        command: PolicySubcommands,
-    },
-
-    /// State management and drift detection
-    #[command(
-        long_about = "Manage infrastructure state and detect drift\n\nSubcommands:\n- list: Show state across all projects\n- drift: Detect configuration drift\n- lock: Lock state for a project\n- unlock: Unlock state for a project\n- sync: Sync remote state\n\nExamples:\n  pmp state list\n  pmp state drift\n  pmp state lock my-project\n  pmp state unlock my-project --force"
-    )]
-    State {
-        #[command(subcommand)]
-        command: StateSubcommands,
     },
 
     /// CI/CD pipeline generation
@@ -260,31 +337,6 @@ enum Commands {
     Template {
         #[command(subcommand)]
         command: TemplateSubcommands,
-    },
-
-    /// Clone an existing project
-    #[command(
-        long_about = "Clone an existing project with a new name\n\nExamples:\n  pmp clone my-api new-api\n  pmp clone --source my-api --name new-api\n  pmp clone my-api new-api --environment dev"
-    )]
-    Clone {
-        /// Source project name (optional, prompts if not specified)
-        source: Option<String>,
-
-        /// New project name
-        name: String,
-
-        /// Environment to clone (optional, prompts if not specified)
-        #[arg(short, long)]
-        environment: Option<String>,
-    },
-
-    /// Environment management
-    #[command(
-        long_about = "Manage and compare environments\n\nSubcommands:\n- diff: Compare two environments\n- promote: Promote configuration between environments\n- sync: Synchronize common settings\n- variables: Manage environment variables\n\nExamples:\n  pmp env diff dev staging\n  pmp env promote dev staging\n  pmp env sync\n  pmp env variables --environment production"
-    )]
-    Env {
-        #[command(subcommand)]
-        command: EnvSubcommands,
     },
 
     /// Testing and validation
@@ -1233,9 +1285,7 @@ enum ReviewSubcommands {
 #[derive(Subcommand)]
 enum WorkspaceSubcommands {
     /// List available workspaces
-    #[command(
-        long_about = "List all available workspaces\n\nExample:\n  pmp workspace list"
-    )]
+    #[command(long_about = "List all available workspaces\n\nExample:\n  pmp workspace list")]
     List {
         /// Output format (text, json, yaml)
         #[arg(short, long)]
@@ -1278,7 +1328,9 @@ enum WorkspaceSubcommands {
     },
 
     /// Show current workspace
-    #[command(long_about = "Display current workspace information\n\nExample:\n  pmp workspace show")]
+    #[command(
+        long_about = "Display current workspace information\n\nExample:\n  pmp workspace show"
+    )]
     Show,
 }
 
@@ -1551,24 +1603,206 @@ fn main() -> Result<()> {
     let ctx = context::Context::new();
 
     match cli.command {
-        Commands::Init {
-            name,
-            description,
-            template_packs_paths,
-        } => {
-            InitCommand::execute(
-                &ctx,
-                name.as_deref(),
-                description.as_deref(),
-                template_packs_paths.as_deref(),
-            )?;
-        }
-        Commands::Create {
-            output,
-            template_packs_paths,
-        } => {
-            CreateCommand::execute(&ctx, output.as_deref(), template_packs_paths.as_deref())?;
-        }
+        Commands::Infrastructure { command } => match command {
+            InfrastructureSubcommands::Init {
+                name,
+                description,
+                template_packs_paths,
+            } => {
+                InfrastructureCommand::execute_init(
+                    &ctx,
+                    name.as_deref(),
+                    description.as_deref(),
+                    template_packs_paths.as_deref(),
+                )?;
+            }
+            InfrastructureSubcommands::Create {
+                output,
+                template_packs_paths,
+            } => {
+                InfrastructureCommand::execute_create(
+                    &ctx,
+                    output.as_deref(),
+                    template_packs_paths.as_deref(),
+                )?;
+            }
+            InfrastructureSubcommands::List => {
+                InfrastructureCommand::execute_list(&ctx)?;
+            }
+            InfrastructureSubcommands::Switch { name } => {
+                InfrastructureCommand::execute_switch(&ctx, name.as_deref().unwrap_or(""))?;
+            }
+        },
+        Commands::Project { command } => match command {
+            ProjectSubcommands::Create {
+                output,
+                template_packs_paths,
+            } => {
+                CreateCommand::execute(&ctx, output.as_deref(), template_packs_paths.as_deref())?;
+            }
+            ProjectSubcommands::Find { name, kind } => {
+                FindCommand::execute(&ctx, name.as_deref(), kind.as_deref())?;
+            }
+            ProjectSubcommands::Update {
+                path,
+                template_packs_paths,
+            } => {
+                UpdateCommand::execute(&ctx, path.as_deref(), template_packs_paths.as_deref())?;
+            }
+            ProjectSubcommands::Clone {
+                source,
+                name,
+                environment,
+            } => {
+                CloneCommand::execute(&ctx, source.as_deref(), &name, environment.as_deref())?;
+            }
+            ProjectSubcommands::Preview {
+                path,
+                executor_args,
+            } => {
+                PreviewCommand::execute(&ctx, path.as_deref(), &executor_args)?;
+            }
+            ProjectSubcommands::Apply {
+                path,
+                executor_args,
+            } => {
+                ApplyCommand::execute(&ctx, path.as_deref(), &executor_args)?;
+            }
+            ProjectSubcommands::Destroy {
+                path,
+                yes,
+                executor_args,
+            } => {
+                DestroyCommand::execute(&ctx, path.as_deref(), yes, &executor_args)?;
+            }
+            ProjectSubcommands::Refresh {
+                path,
+                executor_args,
+            } => {
+                RefreshCommand::execute(&ctx, path.as_deref(), &executor_args)?;
+            }
+            ProjectSubcommands::Graph {
+                path,
+                format,
+                output,
+                all,
+            } => {
+                GraphCommand::execute(
+                    &ctx,
+                    path.as_deref(),
+                    format.as_deref(),
+                    output.as_deref(),
+                    all,
+                )?;
+            }
+            ProjectSubcommands::Deps { command } => match command {
+                DepsSubcommands::Analyze => {
+                    DepsCommand::execute_analyze(&ctx)?;
+                }
+                DepsSubcommands::Impact { project } => {
+                    DepsCommand::execute_impact(&ctx, &project)?;
+                }
+                DepsSubcommands::Validate => {
+                    DepsCommand::execute_validate(&ctx)?;
+                }
+                DepsSubcommands::Order => {
+                    DepsCommand::execute_order(&ctx)?;
+                }
+                DepsSubcommands::Why { project } => {
+                    DepsCommand::execute_why(&ctx, &project)?;
+                }
+            },
+            ProjectSubcommands::Drift { command } => match command {
+                DriftSubcommands::Detect { path, format } => {
+                    DriftCommand::execute_detect(&ctx, path.as_deref(), format.as_deref())?;
+                }
+                DriftSubcommands::Report {
+                    path,
+                    output,
+                    format,
+                } => {
+                    DriftCommand::execute_report(
+                        &ctx,
+                        path.as_deref(),
+                        output.as_deref(),
+                        format.as_deref(),
+                    )?;
+                }
+                DriftSubcommands::Reconcile { path, auto_approve } => {
+                    DriftCommand::execute_reconcile(&ctx, path.as_deref(), auto_approve)?;
+                }
+            },
+            ProjectSubcommands::Policy { command } => match command {
+                PolicySubcommands::Validate { path, policy } => {
+                    PolicyCommand::execute_validate(&ctx, path.as_deref(), policy.as_deref())?;
+                }
+                PolicySubcommands::Scan { path, scanner } => {
+                    PolicyCommand::execute_scan(&ctx, path.as_deref(), scanner.as_deref())?;
+                }
+            },
+            ProjectSubcommands::State { command } => match command {
+                StateSubcommands::List { details } => {
+                    StateCommand::execute_list(&ctx, details)?;
+                }
+                StateSubcommands::Drift { project } => {
+                    StateCommand::execute_drift(&ctx, project.as_deref())?;
+                }
+                StateSubcommands::Lock {
+                    project,
+                    environment,
+                } => {
+                    StateCommand::execute_lock(&ctx, &project, environment.as_deref())?;
+                }
+                StateSubcommands::Unlock {
+                    project,
+                    environment,
+                    force,
+                } => {
+                    StateCommand::execute_unlock(&ctx, &project, environment.as_deref(), force)?;
+                }
+                StateSubcommands::Sync => {
+                    StateCommand::execute_sync(&ctx)?;
+                }
+                StateSubcommands::Backup { path } => {
+                    StateCommand::execute_backup(&ctx, path.as_deref())?;
+                }
+                StateSubcommands::Restore {
+                    backup_id,
+                    path,
+                    force,
+                } => {
+                    StateCommand::execute_restore(&ctx, &backup_id, path.as_deref(), force)?;
+                }
+                StateSubcommands::Migrate { backend_type, path } => {
+                    StateCommand::execute_migrate(&ctx, &backend_type, path.as_deref())?;
+                }
+            },
+            ProjectSubcommands::Env { command } => match command {
+                EnvSubcommands::Diff { source, target } => {
+                    EnvCommand::execute_diff(&ctx, &source, &target)?;
+                }
+                EnvSubcommands::Promote {
+                    source,
+                    target,
+                    project,
+                } => {
+                    EnvCommand::execute_promote(&ctx, &source, &target, project.as_deref())?;
+                }
+                EnvSubcommands::Sync { project } => {
+                    EnvCommand::execute_sync(&ctx, project.as_deref())?;
+                }
+                EnvSubcommands::Variables {
+                    environment,
+                    project,
+                } => {
+                    EnvCommand::execute_variables(
+                        &ctx,
+                        environment.as_deref(),
+                        project.as_deref(),
+                    )?;
+                }
+            },
+        },
         Commands::Generate {
             template_pack,
             template,
@@ -1583,139 +1817,9 @@ fn main() -> Result<()> {
                 template_packs_paths.as_deref(),
             )?;
         }
-        Commands::Preview {
-            path,
-            executor_args,
-        } => {
-            PreviewCommand::execute(&ctx, path.as_deref(), &executor_args)?;
-        }
-        Commands::Apply {
-            path,
-            executor_args,
-        } => {
-            ApplyCommand::execute(&ctx, path.as_deref(), &executor_args)?;
-        }
-        Commands::Destroy {
-            path,
-            yes,
-            executor_args,
-        } => {
-            DestroyCommand::execute(&ctx, path.as_deref(), yes, &executor_args)?;
-        }
-        Commands::Refresh {
-            path,
-            executor_args,
-        } => {
-            RefreshCommand::execute(&ctx, path.as_deref(), &executor_args)?;
-        }
-        Commands::Find { name, kind } => {
-            FindCommand::execute(&ctx, name.as_deref(), kind.as_deref())?;
-        }
-        Commands::Update {
-            path,
-            template_packs_paths,
-        } => {
-            UpdateCommand::execute(&ctx, path.as_deref(), template_packs_paths.as_deref())?;
-        }
         Commands::Ui { port, host } => {
             UiCommand::execute(&ctx, port, host)?;
         }
-        Commands::Graph {
-            path,
-            format,
-            output,
-            all,
-        } => {
-            GraphCommand::execute(
-                &ctx,
-                path.as_deref(),
-                format.as_deref(),
-                output.as_deref(),
-                all,
-            )?;
-        }
-        Commands::Deps { command } => match command {
-            DepsSubcommands::Analyze => {
-                DepsCommand::execute_analyze(&ctx)?;
-            }
-            DepsSubcommands::Impact { project } => {
-                DepsCommand::execute_impact(&ctx, &project)?;
-            }
-            DepsSubcommands::Validate => {
-                DepsCommand::execute_validate(&ctx)?;
-            }
-            DepsSubcommands::Order => {
-                DepsCommand::execute_order(&ctx)?;
-            }
-            DepsSubcommands::Why { project } => {
-                DepsCommand::execute_why(&ctx, &project)?;
-            }
-        },
-        Commands::Drift { command } => match command {
-            DriftSubcommands::Detect { path, format } => {
-                DriftCommand::execute_detect(&ctx, path.as_deref(), format.as_deref())?;
-            }
-            DriftSubcommands::Report {
-                path,
-                output,
-                format,
-            } => {
-                DriftCommand::execute_report(
-                    &ctx,
-                    path.as_deref(),
-                    output.as_deref(),
-                    format.as_deref(),
-                )?;
-            }
-            DriftSubcommands::Reconcile { path, auto_approve } => {
-                DriftCommand::execute_reconcile(&ctx, path.as_deref(), auto_approve)?;
-            }
-        },
-        Commands::Policy { command } => match command {
-            PolicySubcommands::Validate { path, policy } => {
-                PolicyCommand::execute_validate(&ctx, path.as_deref(), policy.as_deref())?;
-            }
-            PolicySubcommands::Scan { path, scanner } => {
-                PolicyCommand::execute_scan(&ctx, path.as_deref(), scanner.as_deref())?;
-            }
-        },
-        Commands::State { command } => match command {
-            StateSubcommands::List { details } => {
-                StateCommand::execute_list(&ctx, details)?;
-            }
-            StateSubcommands::Drift { project } => {
-                StateCommand::execute_drift(&ctx, project.as_deref())?;
-            }
-            StateSubcommands::Lock {
-                project,
-                environment,
-            } => {
-                StateCommand::execute_lock(&ctx, &project, environment.as_deref())?;
-            }
-            StateSubcommands::Unlock {
-                project,
-                environment,
-                force,
-            } => {
-                StateCommand::execute_unlock(&ctx, &project, environment.as_deref(), force)?;
-            }
-            StateSubcommands::Sync => {
-                StateCommand::execute_sync(&ctx)?;
-            }
-            StateSubcommands::Backup { path } => {
-                StateCommand::execute_backup(&ctx, path.as_deref())?;
-            }
-            StateSubcommands::Restore {
-                backup_id,
-                path,
-                force,
-            } => {
-                StateCommand::execute_restore(&ctx, &backup_id, path.as_deref(), force)?;
-            }
-            StateSubcommands::Migrate { backend_type, path } => {
-                StateCommand::execute_migrate(&ctx, &backend_type, path.as_deref())?;
-            }
-        },
         Commands::Ci { command } => match command {
             CiSubcommands::Generate {
                 pipeline_type,
@@ -1733,34 +1837,6 @@ fn main() -> Result<()> {
         Commands::Template { command } => match command {
             TemplateSubcommands::Scaffold { output } => {
                 TemplateCommand::execute_scaffold(&ctx, output.as_deref())?;
-            }
-        },
-        Commands::Clone {
-            source,
-            name,
-            environment,
-        } => {
-            CloneCommand::execute(&ctx, source.as_deref(), &name, environment.as_deref())?;
-        }
-        Commands::Env { command } => match command {
-            EnvSubcommands::Diff { source, target } => {
-                EnvCommand::execute_diff(&ctx, &source, &target)?;
-            }
-            EnvSubcommands::Promote {
-                source,
-                target,
-                project,
-            } => {
-                EnvCommand::execute_promote(&ctx, &source, &target, project.as_deref())?;
-            }
-            EnvSubcommands::Sync { project } => {
-                EnvCommand::execute_sync(&ctx, project.as_deref())?;
-            }
-            EnvSubcommands::Variables {
-                environment,
-                project,
-            } => {
-                EnvCommand::execute_variables(&ctx, environment.as_deref(), project.as_deref())?;
             }
         },
         Commands::Test { command } => match command {
@@ -1931,23 +2007,14 @@ fn main() -> Result<()> {
                 metric,
                 format: _,
             } => {
-                MonitorCommand::execute_metrics(
-                    &ctx,
-                    None,
-                    metric.as_deref(),
-                )?;
+                MonitorCommand::execute_metrics(&ctx, None, metric.as_deref())?;
             }
             MonitorSubcommands::Alerts {
                 environment: _,
                 severity: _,
                 format: _,
             } => {
-                MonitorCommand::execute_alerts(
-                    &ctx,
-                    "list",
-                    None,
-                    None,
-                )?;
+                MonitorCommand::execute_alerts(&ctx, "list", None, None)?;
             }
         },
         Commands::Audit { command } => match command {
@@ -1959,12 +2026,7 @@ fn main() -> Result<()> {
                 limit,
                 format: _,
             } => {
-                AuditCommand::execute_log(
-                    &ctx,
-                    None,
-                    limit,
-                    None,
-                )?;
+                AuditCommand::execute_log(&ctx, None, limit, None)?;
             }
             AuditSubcommands::Diff {
                 project: _,
@@ -1989,11 +2051,7 @@ fn main() -> Result<()> {
                 reason,
                 timeout: _,
             } => {
-                LockCommand::execute_acquire(
-                    &ctx,
-                    None,
-                    reason.as_deref(),
-                )?;
+                LockCommand::execute_acquire(&ctx, None, reason.as_deref())?;
             }
             LockSubcommands::Release {
                 project: _,
@@ -2007,11 +2065,7 @@ fn main() -> Result<()> {
                 environment: _,
                 format: _,
             } => {
-                LockCommand::execute_status(
-                    &ctx,
-                    None,
-                    false,
-                )?;
+                LockCommand::execute_status(&ctx, None, false)?;
             }
         },
         Commands::Review { command } => match command {
@@ -2021,17 +2075,15 @@ fn main() -> Result<()> {
                 reviewer: _,
                 description,
             } => {
-                ReviewCommand::execute_request(
-                    &ctx,
-                    None,
-                    description.as_deref(),
-                )?;
+                ReviewCommand::execute_request(&ctx, None, description.as_deref())?;
             }
-            ReviewSubcommands::Approve {
-                review_id,
-                comment,
-            } => {
-                ReviewCommand::execute_approve(&ctx, Some(&review_id), "approve", comment.as_deref())?;
+            ReviewSubcommands::Approve { review_id, comment } => {
+                ReviewCommand::execute_approve(
+                    &ctx,
+                    Some(&review_id),
+                    "approve",
+                    comment.as_deref(),
+                )?;
             }
             ReviewSubcommands::List {
                 status,
@@ -2039,10 +2091,7 @@ fn main() -> Result<()> {
                 project: _,
                 format: _,
             } => {
-                ReviewCommand::execute_list(
-                    &ctx,
-                    status.as_deref(),
-                )?;
+                ReviewCommand::execute_list(&ctx, status.as_deref())?;
             }
         },
         Commands::Workspace { command } => match command {
@@ -2075,7 +2124,10 @@ fn main() -> Result<()> {
                     description.as_deref(),
                 )?;
             }
-            BackupSubcommands::Restore { backup_id, force: _ } => {
+            BackupSubcommands::Restore {
+                backup_id,
+                force: _,
+            } => {
                 BackupCommand::execute_restore(&ctx, Some(&backup_id), None)?;
             }
             BackupSubcommands::List {
@@ -2083,11 +2135,7 @@ fn main() -> Result<()> {
                 environment,
                 format: _,
             } => {
-                BackupCommand::execute_list(
-                    &ctx,
-                    project.as_deref(),
-                    environment.as_deref(),
-                )?;
+                BackupCommand::execute_list(&ctx, project.as_deref(), environment.as_deref())?;
             }
             BackupSubcommands::Delete { backup_id, force } => {
                 BackupCommand::execute_delete(&ctx, &backup_id, force)?;
@@ -2100,10 +2148,7 @@ fn main() -> Result<()> {
                 output: _,
                 format: _,
             } => {
-                DisasterRecoveryCommand::execute_plan(
-                    &ctx,
-                    project.as_deref(),
-                )?;
+                DisasterRecoveryCommand::execute_plan(&ctx, project.as_deref())?;
             }
             DisasterRecoverySubcommands::Test {
                 plan_id,
@@ -2112,7 +2157,10 @@ fn main() -> Result<()> {
             } => {
                 DisasterRecoveryCommand::execute_test(&ctx, Some(&plan_id), dry_run)?;
             }
-            DisasterRecoverySubcommands::List { project: _, format: _ } => {
+            DisasterRecoverySubcommands::List {
+                project: _,
+                format: _,
+            } => {
                 DisasterRecoveryCommand::execute_list(&ctx)?;
             }
         },
@@ -2129,21 +2177,14 @@ fn main() -> Result<()> {
                 project,
                 environment: _,
             } => {
-                TagsCommand::execute_remove(
-                    &ctx,
-                    project.as_deref(),
-                    tags,
-                )?;
+                TagsCommand::execute_remove(&ctx, project.as_deref(), tags)?;
             }
             TagsSubcommands::List {
                 project,
                 environment: _,
                 format: _,
             } => {
-                TagsCommand::execute_list(
-                    &ctx,
-                    project.as_deref(),
-                )?;
+                TagsCommand::execute_list(&ctx, project.as_deref())?;
             }
             TagsSubcommands::Audit {
                 project: _,
@@ -2151,10 +2192,7 @@ fn main() -> Result<()> {
                 format: _,
             } => {
                 // Execute audit with empty required tags (will use defaults from infrastructure)
-                TagsCommand::execute_audit(
-                    &ctx,
-                    Vec::new(),
-                )?;
+                TagsCommand::execute_audit(&ctx, Vec::new())?;
             }
             TagsSubcommands::Report { output, format } => {
                 TagsCommand::execute_report(&ctx, output.as_deref(), format.as_deref())?;
