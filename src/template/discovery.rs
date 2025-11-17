@@ -1,4 +1,4 @@
-use super::metadata::{PluginResource, TemplatePackResource, TemplateResource};
+use super::metadata::{InfrastructureTemplateResource, PluginResource, TemplatePackResource, TemplateResource};
 use anyhow::Result;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -218,6 +218,47 @@ impl TemplateDiscovery {
         Ok(plugins)
     }
 
+    /// Discover infrastructure templates within a template pack
+    pub fn discover_infrastructure_templates_in_pack(
+        fs: &dyn crate::traits::FileSystem,
+        output: &dyn crate::traits::Output,
+        pack_path: &Path,
+    ) -> Result<Vec<InfrastructureTemplateInfo>> {
+        let mut infrastructure_templates = Vec::new();
+        let infra_templates_dir = pack_path.join("infrastructure-templates");
+
+        if !fs.exists(&infra_templates_dir) {
+            return Ok(infrastructure_templates);
+        }
+
+        // Walk through infrastructure template subdirectories recursively looking for .pmp.infrastructure-template.yaml files
+        let entries = fs.walk_dir(&infra_templates_dir, 100)?;
+
+        for entry_path in entries {
+            if fs.is_file(&entry_path)
+                && entry_path.file_name() == Some(std::ffi::OsStr::new(".pmp.infrastructure-template.yaml"))
+                && let Some(infra_template_dir) = entry_path.parent()
+            {
+                match InfrastructureTemplateResource::from_file(fs, &entry_path) {
+                    Ok(resource) => {
+                        infrastructure_templates.push(InfrastructureTemplateInfo {
+                            resource,
+                            path: infra_template_dir.to_path_buf(),
+                        });
+                    }
+                    Err(e) => {
+                        output.warning(&format!(
+                            "Failed to load infrastructure template from {:?}: {}",
+                            entry_path, e
+                        ));
+                    }
+                }
+            }
+        }
+
+        Ok(infrastructure_templates)
+    }
+
     /// Find all templates in standard locations (DEPRECATED - use discover_template_packs instead)
     /// Checks:
     /// 1. Current directory's .pmp/template-packs
@@ -369,4 +410,13 @@ pub struct PluginInfo {
     pub path: PathBuf,
     /// Name of the template pack containing this plugin
     pub template_pack_name: String,
+}
+
+/// Information about a discovered infrastructure template
+#[derive(Debug, Clone)]
+pub struct InfrastructureTemplateInfo {
+    /// Infrastructure template resource from .pmp.infrastructure-template.yaml
+    pub resource: InfrastructureTemplateResource,
+    /// Path to the infrastructure template directory
+    pub path: PathBuf,
 }

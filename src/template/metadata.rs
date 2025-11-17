@@ -304,6 +304,46 @@ pub struct PluginSpec {
 }
 
 // ============================================================================
+// InfrastructureTemplate Resource (Kubernetes-style)
+// ============================================================================
+
+/// Kubernetes-style InfrastructureTemplate resource
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InfrastructureTemplateResource {
+    /// API version (e.g., "pmp.io/v1")
+    #[serde(rename = "apiVersion")]
+    pub api_version: String,
+
+    /// Kind of resource (always "InfrastructureTemplate")
+    pub kind: String,
+
+    /// Metadata about the infrastructure template
+    pub metadata: InfrastructureTemplateMetadata,
+
+    /// InfrastructureTemplate specification
+    pub spec: InfrastructureTemplateSpec,
+}
+
+/// InfrastructureTemplate metadata (Kubernetes-style)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InfrastructureTemplateMetadata {
+    /// Name of the infrastructure template
+    pub name: String,
+
+    /// Description of what this infrastructure template creates
+    #[serde(default)]
+    pub description: Option<String>,
+}
+
+/// InfrastructureTemplate specification
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InfrastructureTemplateSpec {
+    /// Inputs for this infrastructure template (supports both array and object format)
+    #[serde(default, deserialize_with = "deserialize_inputs")]
+    pub inputs: Vec<InputDefinition>,
+}
+
+// ============================================================================
 // Legacy/Deprecated Structures
 // ============================================================================
 
@@ -1283,6 +1323,24 @@ impl PluginResource {
         // Validate kind
         if resource.kind != "Plugin" {
             anyhow::bail!("Expected kind 'Plugin', got '{}'", resource.kind);
+        }
+
+        Ok(resource)
+    }
+}
+
+impl InfrastructureTemplateResource {
+    /// Load infrastructure template resource from a .pmp.infrastructure-template.yaml file
+    pub fn from_file(
+        fs: &dyn crate::traits::FileSystem,
+        path: &std::path::Path,
+    ) -> anyhow::Result<Self> {
+        let content = fs.read_to_string(path)?;
+        let resource: InfrastructureTemplateResource = serde_yaml::from_str(&content)?;
+
+        // Validate kind
+        if resource.kind != "InfrastructureTemplate" {
+            anyhow::bail!("Expected kind 'InfrastructureTemplate', got '{}'", resource.kind);
         }
 
         Ok(resource)

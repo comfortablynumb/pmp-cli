@@ -68,7 +68,7 @@ impl InitCommand {
         } else {
             let desc = ctx
                 .input
-                .text("Description (optional):", Some(""))
+                .text("Description (optional):", None)
                 .context("Failed to get description")?;
             if desc.is_empty() { None } else { Some(desc) }
         };
@@ -216,7 +216,7 @@ impl InitCommand {
             // Prompt for optional description
             let env_description = ctx
                 .input
-                .text("Environment description (optional):", Some(""))
+                .text("Environment description (optional):", None)
                 .context("Failed to get environment description")?;
 
             environments.insert(
@@ -711,7 +711,7 @@ impl InitCommand {
         // Prompt for optional description
         let env_description = ctx
             .input
-            .text("Environment description (optional):", Some(""))
+            .text("Environment description (optional):", None)
             .context("Failed to get environment description")?;
 
         environments.insert(

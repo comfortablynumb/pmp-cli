@@ -52,7 +52,7 @@ pub fn warning(message: &str) {
 pub fn info(message: &str) {
     // Pastel sky blue: RGB(160, 200, 255)
     println!(
-        "{} {}",
+        "{}  {}",
         "ℹ".truecolor(160, 200, 255).bold(),
         message.bright_white()
     );

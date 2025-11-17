@@ -2682,8 +2682,7 @@ impl CreateCommand {
                 }
             }
 
-            // Add templates from current category (if we're inside a category)
-            // OR templates from all root categories (if we're at root)
+            // Add templates from current category (only if we're inside a category)
             if let Some(cat) = current_category {
                 // We're inside a specific category - show its templates
                 for template_ref in &cat.templates {
@@ -2716,45 +2715,8 @@ impl CreateCommand {
                         ));
                     }
                 }
-            } else {
-                // We're at root - show templates from all root categories
-                for category in current_subcategories {
-                    for template_ref in &category.templates {
-                        if discovered_templates.contains(&(
-                            template_ref.template_pack.clone(),
-                            template_ref.template.clone(),
-                        )) {
-                            let desc = filtered_packs_with_templates
-                                .iter()
-                                .find(|(p, _)| {
-                                    p.resource.metadata.name == template_ref.template_pack
-                                })
-                                .and_then(|(_, templates)| {
-                                    templates
-                                        .iter()
-                                        .find(|(t, _)| {
-                                            t.resource.metadata.name == template_ref.template
-                                        })
-                                        .and_then(|(t, _)| {
-                                            t.resource.metadata.description.as_deref()
-                                        })
-                                })
-                                .unwrap_or("");
-
-                            let display = if desc.is_empty() {
-                                format!("📄 {}", template_ref.template)
-                            } else {
-                                format!("📄 {} - {}", template_ref.template, desc)
-                            };
-                            options.push(display);
-                            option_types.push(OptionType::Template(
-                                template_ref.template_pack.clone(),
-                                template_ref.template.clone(),
-                            ));
-                        }
-                    }
-                }
             }
+            // Note: At root level, we only show categories, not templates
 
             // Add "Back" option at the end if not at root
             if !nav_stack.is_empty() {
