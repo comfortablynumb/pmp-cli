@@ -42,6 +42,7 @@ impl CiCommand {
         pipeline_type: &str,
         output_file: Option<&str>,
         environment: Option<&str>,
+        static_mode: bool,
     ) -> Result<()> {
         ctx.output.section("CI/CD Pipeline Generation");
 
@@ -55,6 +56,8 @@ impl CiCommand {
             .key_value("Infrastructure", &infrastructure.metadata.name);
         ctx.output
             .key_value("Pipeline Type", &format!("{:?}", pipeline));
+        ctx.output
+            .key_value("Mode", if static_mode { "Static (all projects)" } else { "Dynamic (changed projects)" });
         output::blank();
 
         // Discover all projects
@@ -70,13 +73,29 @@ impl CiCommand {
         let project_infos =
             Self::build_project_infos(ctx, &projects, &infrastructure_root, environment)?;
 
-        // Generate pipeline based on type
-        let pipeline_content = match pipeline {
-            PipelineType::GitHubActions => {
-                Self::generate_github_actions(&project_infos, environment)?
+        // Generate pipeline based on type and mode
+        let pipeline_content = if static_mode {
+            // Static mode: Generate pipeline that runs all projects
+            match pipeline {
+                PipelineType::GitHubActions => {
+                    Self::generate_github_actions_static(&project_infos, environment)?
+                }
+                PipelineType::GitLabCI => Self::generate_gitlab_ci_static(&project_infos, environment)?,
+                PipelineType::Jenkins => Self::generate_jenkins_static(&project_infos, environment)?,
             }
-            PipelineType::GitLabCI => Self::generate_gitlab_ci(&project_infos, environment)?,
-            PipelineType::Jenkins => Self::generate_jenkins(&project_infos, environment)?,
+        } else {
+            // Dynamic mode: Generate pipeline with change detection
+            match pipeline {
+                PipelineType::GitHubActions => {
+                    Self::generate_github_actions_dynamic(&project_infos, environment)?
+                }
+                PipelineType::GitLabCI => Self::generate_gitlab_ci_dynamic(&project_infos, environment)?,
+                PipelineType::Jenkins => {
+                    // Jenkins doesn't support dynamic mode yet, fall back to static
+                    ctx.output.warning("Jenkins does not support dynamic mode yet. Generating static pipeline.");
+                    Self::generate_jenkins_static(&project_infos, environment)?
+                }
+            }
         };
 
         // Output or save pipeline
@@ -145,8 +164,8 @@ impl CiCommand {
         Ok(project_infos)
     }
 
-    /// Generate GitHub Actions workflow
-    fn generate_github_actions(
+    /// Generate static GitHub Actions workflow (runs all projects)
+    fn generate_github_actions_static(
         projects: &[ProjectInfo],
         _environment: Option<&str>,
     ) -> Result<String> {
@@ -206,31 +225,164 @@ impl CiCommand {
             yaml.push_str("        with:\n");
             yaml.push_str("          tofu_version: ${{ env.TOFU_VERSION }}\n\n");
 
-            yaml.push_str("      - name: Tofu Init\n");
-            yaml.push_str("        working-directory: ${{ matrix.project.path }}\n");
-            yaml.push_str("        run: tofu init\n\n");
+            yaml.push_str("      # TODO: Install PMP binary\n");
+            yaml.push_str("      # - name: Install PMP\n");
+            yaml.push_str("      #   run: |\n");
+            yaml.push_str("      #     # Download and install PMP\n\n");
 
-            yaml.push_str("      - name: Tofu Validate\n");
+            yaml.push_str("      - name: Preview (Plan)\n");
+            yaml.push_str("        if: github.event_name == 'pull_request'\n");
             yaml.push_str("        working-directory: ${{ matrix.project.path }}\n");
-            yaml.push_str("        run: tofu validate\n\n");
+            yaml.push_str("        run: pmp project preview\n\n");
 
-            yaml.push_str("      - name: Tofu Plan\n");
-            yaml.push_str("        working-directory: ${{ matrix.project.path }}\n");
-            yaml.push_str("        run: tofu plan -no-color\n\n");
-
-            yaml.push_str("      - name: Tofu Apply\n");
+            yaml.push_str("      - name: Apply\n");
             yaml.push_str(
                 "        if: github.ref == 'refs/heads/main' && github.event_name == 'push'\n",
             );
             yaml.push_str("        working-directory: ${{ matrix.project.path }}\n");
-            yaml.push_str("        run: tofu apply -auto-approve\n\n");
+            yaml.push_str("        run: pmp project apply\n\n");
         }
 
         Ok(yaml)
     }
 
-    /// Generate GitLab CI configuration
-    fn generate_gitlab_ci(projects: &[ProjectInfo], _environment: Option<&str>) -> Result<String> {
+    /// Generate dynamic GitHub Actions workflow (runs only changed projects)
+    fn generate_github_actions_dynamic(
+        _projects: &[ProjectInfo],
+        _environment: Option<&str>,
+    ) -> Result<String> {
+        let mut yaml = String::new();
+
+        yaml.push_str("name: PMP Infrastructure Deployment\n\n");
+
+        yaml.push_str("on:\n");
+        yaml.push_str("  push:\n");
+        yaml.push_str("    branches:\n");
+        yaml.push_str("      - main\n");
+        yaml.push_str("    tags:\n");
+        yaml.push_str("      - '*'\n");
+        yaml.push_str("  pull_request:\n");
+        yaml.push_str("    branches:\n");
+        yaml.push_str("      - main\n");
+        yaml.push_str("  workflow_dispatch:\n\n");
+
+        yaml.push_str("env:\n");
+        yaml.push_str("  TOFU_VERSION: \"1.6.0\"\n\n");
+
+        yaml.push_str("jobs:\n");
+
+        // Detect changes job
+        yaml.push_str("  detect-changes:\n");
+        yaml.push_str("    name: Detect Changed Projects\n");
+        yaml.push_str("    runs-on: ubuntu-latest\n");
+        yaml.push_str("    outputs:\n");
+        yaml.push_str("      projects: ${{ steps.detect.outputs.projects }}\n");
+        yaml.push_str("      has_changes: ${{ steps.detect.outputs.has_changes }}\n");
+        yaml.push_str("    steps:\n");
+        yaml.push_str("      - name: Checkout\n");
+        yaml.push_str("        uses: actions/checkout@v4\n");
+        yaml.push_str("        with:\n");
+        yaml.push_str("          fetch-depth: 0  # Need full history for git diff\n\n");
+
+        // TODO: Add PMP installation step here (could be from GitHub release or build from source)
+        yaml.push_str("      # TODO: Install PMP binary (from GitHub release or build)\n");
+        yaml.push_str("      # - name: Install PMP\n");
+        yaml.push_str("      #   run: |\n");
+        yaml.push_str("      #     # Download and install PMP from GitHub releases\n");
+        yaml.push_str("      #     # or build from source\n\n");
+
+        yaml.push_str("      - name: Detect changed projects\n");
+        yaml.push_str("        id: detect\n");
+        yaml.push_str("        run: |\n");
+        yaml.push_str("          # Determine base ref based on event type\n");
+        yaml.push_str("          if [ \"${{ github.event_name }}\" = \"pull_request\" ]; then\n");
+        yaml.push_str("            BASE_REF=\"origin/${{ github.event.pull_request.base.ref }}\"\n");
+        yaml.push_str("          else\n");
+        yaml.push_str("            BASE_REF=\"origin/main\"\n");
+        yaml.push_str("          fi\n");
+        yaml.push_str("          \n");
+        yaml.push_str("          HEAD_REF=\"${{ github.sha }}\"\n");
+        yaml.push_str("          \n");
+        yaml.push_str("          # Run PMP detect-changes command\n");
+        yaml.push_str("          PROJECTS=$(pmp ci detect-changes --base \"$BASE_REF\" --head \"$HEAD_REF\" --output-format json 2>&1) || EXIT_CODE=$?\n");
+        yaml.push_str("          \n");
+        yaml.push_str("          # Check exit code\n");
+        yaml.push_str("          if [ \"${EXIT_CODE:-0}\" -eq 2 ]; then\n");
+        yaml.push_str("            echo \"Infrastructure configuration changed - skipping project CI\"\n");
+        yaml.push_str("            echo \"has_changes=false\" >> $GITHUB_OUTPUT\n");
+        yaml.push_str("            echo \"projects=[]\" >> $GITHUB_OUTPUT\n");
+        yaml.push_str("            exit 0\n");
+        yaml.push_str("          fi\n");
+        yaml.push_str("          \n");
+        yaml.push_str("          # Output results\n");
+        yaml.push_str("          echo \"projects=$PROJECTS\" >> $GITHUB_OUTPUT\n");
+        yaml.push_str("          if [ \"$PROJECTS\" = \"[]\" ]; then\n");
+        yaml.push_str("            echo \"has_changes=false\" >> $GITHUB_OUTPUT\n");
+        yaml.push_str("          else\n");
+        yaml.push_str("            echo \"has_changes=true\" >> $GITHUB_OUTPUT\n");
+        yaml.push_str("          fi\n\n");
+
+        // Preview job (on PR)
+        yaml.push_str("  preview:\n");
+        yaml.push_str("    name: Preview ${{ matrix.project.name }} (${{ matrix.project.env }})\n");
+        yaml.push_str("    needs: detect-changes\n");
+        yaml.push_str("    if: github.event_name == 'pull_request' && needs.detect-changes.outputs.has_changes == 'true'\n");
+        yaml.push_str("    runs-on: ubuntu-latest\n");
+        yaml.push_str("    strategy:\n");
+        yaml.push_str("      fail-fast: false\n");
+        yaml.push_str("      matrix:\n");
+        yaml.push_str("        project: ${{ fromJSON(needs.detect-changes.outputs.projects) }}\n");
+        yaml.push_str("    steps:\n");
+        yaml.push_str("      - name: Checkout\n");
+        yaml.push_str("        uses: actions/checkout@v4\n\n");
+
+        yaml.push_str("      - name: Setup OpenTofu\n");
+        yaml.push_str("        uses: opentofu/setup-opentofu@v1\n");
+        yaml.push_str("        with:\n");
+        yaml.push_str("          tofu_version: ${{ env.TOFU_VERSION }}\n\n");
+
+        yaml.push_str("      # TODO: Install PMP binary\n");
+        yaml.push_str("      # - name: Install PMP\n");
+        yaml.push_str("      #   run: |\n");
+        yaml.push_str("      #     # Download and install PMP\n\n");
+
+        yaml.push_str("      - name: Preview changes\n");
+        yaml.push_str("        working-directory: ${{ matrix.project.path }}\n");
+        yaml.push_str("        run: pmp project preview\n\n");
+
+        // Apply job (on push to main or tags)
+        yaml.push_str("  apply:\n");
+        yaml.push_str("    name: Apply ${{ matrix.project.name }} (${{ matrix.project.env }})\n");
+        yaml.push_str("    needs: detect-changes\n");
+        yaml.push_str("    if: (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) && github.event_name == 'push' && needs.detect-changes.outputs.has_changes == 'true'\n");
+        yaml.push_str("    runs-on: ubuntu-latest\n");
+        yaml.push_str("    strategy:\n");
+        yaml.push_str("      fail-fast: false\n");
+        yaml.push_str("      matrix:\n");
+        yaml.push_str("        project: ${{ fromJSON(needs.detect-changes.outputs.projects) }}\n");
+        yaml.push_str("    steps:\n");
+        yaml.push_str("      - name: Checkout\n");
+        yaml.push_str("        uses: actions/checkout@v4\n\n");
+
+        yaml.push_str("      - name: Setup OpenTofu\n");
+        yaml.push_str("        uses: opentofu/setup-opentofu@v1\n");
+        yaml.push_str("        with:\n");
+        yaml.push_str("          tofu_version: ${{ env.TOFU_VERSION }}\n\n");
+
+        yaml.push_str("      # TODO: Install PMP binary\n");
+        yaml.push_str("      # - name: Install PMP\n");
+        yaml.push_str("      #   run: |\n");
+        yaml.push_str("      #     # Download and install PMP\n\n");
+
+        yaml.push_str("      - name: Apply changes\n");
+        yaml.push_str("        working-directory: ${{ matrix.project.path }}\n");
+        yaml.push_str("        run: pmp project apply\n\n");
+
+        Ok(yaml)
+    }
+
+    /// Generate static GitLab CI configuration (runs all projects)
+    fn generate_gitlab_ci_static(projects: &[ProjectInfo], _environment: Option<&str>) -> Result<String> {
         let mut yaml = String::new();
 
         yaml.push_str("# GitLab CI/CD Pipeline for PMP Infrastructure\n\n");
@@ -254,7 +406,8 @@ impl CiCommand {
         yaml.push_str("  before_script:\n");
         yaml.push_str("    - apk add --no-cache curl\n");
         yaml.push_str("    - curl -Lo /usr/local/bin/tofu https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}/tofu_${TOFU_VERSION}_linux_amd64.zip\n");
-        yaml.push_str("    - chmod +x /usr/local/bin/tofu\n\n");
+        yaml.push_str("    - chmod +x /usr/local/bin/tofu\n");
+        yaml.push_str("    # TODO: Install PMP binary\n\n");
 
         // Generate jobs for each stage
         for (level, group_projects) in execution_groups.iter().enumerate() {
@@ -268,12 +421,12 @@ impl CiCommand {
                     "    - cd {}\n",
                     proj.path.display().to_string().replace('\\', "/")
                 ));
-                yaml.push_str("    - tofu init\n");
-                yaml.push_str("    - tofu validate\n");
-                yaml.push_str("    - tofu plan -no-color\n");
                 yaml.push_str("    - |\n");
-                yaml.push_str("      if [ \"$CI_COMMIT_BRANCH\" == \"main\" ]; then\n");
-                yaml.push_str("        tofu apply -auto-approve\n");
+                yaml.push_str("      # Run preview on MR, apply on main branch\n");
+                yaml.push_str("      if [ \"$CI_PIPELINE_SOURCE\" == \"merge_request_event\" ]; then\n");
+                yaml.push_str("        pmp project preview\n");
+                yaml.push_str("      elif [ \"$CI_COMMIT_BRANCH\" == \"main\" ]; then\n");
+                yaml.push_str("        pmp project apply\n");
                 yaml.push_str("      fi\n");
                 yaml.push_str("  rules:\n");
                 yaml.push_str("    - if: $CI_PIPELINE_SOURCE == \"merge_request_event\"\n");
@@ -284,8 +437,117 @@ impl CiCommand {
         Ok(yaml)
     }
 
-    /// Generate Jenkins pipeline
-    fn generate_jenkins(projects: &[ProjectInfo], _environment: Option<&str>) -> Result<String> {
+    /// Generate dynamic GitLab CI configuration (runs only changed projects)
+    fn generate_gitlab_ci_dynamic(
+        _projects: &[ProjectInfo],
+        _environment: Option<&str>,
+    ) -> Result<String> {
+        let mut yaml = String::new();
+
+        yaml.push_str("# GitLab CI/CD Pipeline for PMP Infrastructure (Dynamic - Change Detection)\n\n");
+
+        yaml.push_str("stages:\n");
+        yaml.push_str("  - detect\n");
+        yaml.push_str("  - preview\n");
+        yaml.push_str("  - apply\n\n");
+
+        yaml.push_str("variables:\n");
+        yaml.push_str("  TOFU_VERSION: \"1.6.0\"\n\n");
+
+        yaml.push_str("default:\n");
+        yaml.push_str("  image: alpine:latest\n");
+        yaml.push_str("  before_script:\n");
+        yaml.push_str("    - apk add --no-cache curl git jq\n");
+        yaml.push_str("    - |\n");
+        yaml.push_str("      # Download and install OpenTofu\n");
+        yaml.push_str("      curl -Lo /tmp/tofu.tar.gz https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}/tofu_${TOFU_VERSION}_linux_amd64.tar.gz\n");
+        yaml.push_str("      tar -xzf /tmp/tofu.tar.gz -C /usr/local/bin\n");
+        yaml.push_str("      chmod +x /usr/local/bin/tofu\n");
+        yaml.push_str("    # TODO: Install PMP binary\n\n");
+
+        // Detect changes job
+        yaml.push_str("detect-changes:\n");
+        yaml.push_str("  stage: detect\n");
+        yaml.push_str("  before_script:\n");
+        yaml.push_str("    - apk add --no-cache git\n");
+        yaml.push_str("    # TODO: Install PMP binary (from release or build from source)\n");
+        yaml.push_str("  script:\n");
+        yaml.push_str("    - |\n");
+        yaml.push_str("      # Determine base ref\n");
+        yaml.push_str("      if [ -n \"$CI_MERGE_REQUEST_TARGET_BRANCH_NAME\" ]; then\n");
+        yaml.push_str("        BASE_REF=\"origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME\"\n");
+        yaml.push_str("      else\n");
+        yaml.push_str("        BASE_REF=\"origin/main\"\n");
+        yaml.push_str("      fi\n");
+        yaml.push_str("      \n");
+        yaml.push_str("      HEAD_REF=\"$CI_COMMIT_SHA\"\n");
+        yaml.push_str("      \n");
+        yaml.push_str("      # Run PMP detect-changes\n");
+        yaml.push_str("      PROJECTS=$(pmp ci detect-changes --base \"$BASE_REF\" --head \"$HEAD_REF\" --output-format json 2>&1) || EXIT_CODE=$?\n");
+        yaml.push_str("      \n");
+        yaml.push_str("      if [ \"${EXIT_CODE:-0}\" -eq 2 ]; then\n");
+        yaml.push_str("        echo \"Infrastructure changed - skipping project CI\"\n");
+        yaml.push_str("        echo \"CHANGED_PROJECTS=[]\" >> variables.env\n");
+        yaml.push_str("        echo \"HAS_CHANGES=false\" >> variables.env\n");
+        yaml.push_str("        exit 0\n");
+        yaml.push_str("      fi\n");
+        yaml.push_str("      \n");
+        yaml.push_str("      echo \"CHANGED_PROJECTS=$PROJECTS\" >> variables.env\n");
+        yaml.push_str("      if [ \"$PROJECTS\" = \"[]\" ]; then\n");
+        yaml.push_str("        echo \"HAS_CHANGES=false\" >> variables.env\n");
+        yaml.push_str("      else\n");
+        yaml.push_str("        echo \"HAS_CHANGES=true\" >> variables.env\n");
+        yaml.push_str("      fi\n");
+        yaml.push_str("  artifacts:\n");
+        yaml.push_str("    reports:\n");
+        yaml.push_str("      dotenv: variables.env\n\n");
+
+        // Preview job (for MRs)
+        yaml.push_str("preview-projects:\n");
+        yaml.push_str("  stage: preview\n");
+        yaml.push_str("  needs:\n");
+        yaml.push_str("    - job: detect-changes\n");
+        yaml.push_str("      artifacts: true\n");
+        yaml.push_str("  rules:\n");
+        yaml.push_str("    - if: $CI_PIPELINE_SOURCE == \"merge_request_event\" && $HAS_CHANGES == \"true\"\n");
+        yaml.push_str("  script:\n");
+        yaml.push_str("    - |\n");
+        yaml.push_str("      # Parse CHANGED_PROJECTS JSON and run pmp project preview for each\n");
+        yaml.push_str("      echo \"$CHANGED_PROJECTS\" | jq -r '.[] | \"\\(.path)\"' | while read -r project_path; do\n");
+        yaml.push_str("        echo \"Previewing project: $project_path\"\n");
+        yaml.push_str("        cd \"$project_path\"\n");
+        yaml.push_str("        pmp project preview\n");
+        yaml.push_str("        cd -\n");
+        yaml.push_str("      done\n\n");
+
+        // Apply job (on push to main)
+        yaml.push_str("apply-projects:\n");
+        yaml.push_str("  stage: apply\n");
+        yaml.push_str("  needs:\n");
+        yaml.push_str("    - job: detect-changes\n");
+        yaml.push_str("      artifacts: true\n");
+        yaml.push_str("  rules:\n");
+        yaml.push_str("    - if: $CI_COMMIT_BRANCH == \"main\" && $CI_PIPELINE_SOURCE == \"push\" && $HAS_CHANGES == \"true\"\n");
+        yaml.push_str("    - if: $CI_COMMIT_TAG && $HAS_CHANGES == \"true\"\n");
+        yaml.push_str("  script:\n");
+        yaml.push_str("    - |\n");
+        yaml.push_str("      # Parse CHANGED_PROJECTS JSON and run pmp project apply for each\n");
+        yaml.push_str("      echo \"$CHANGED_PROJECTS\" | jq -r '.[] | \"\\(.path)\"' | while read -r project_path; do\n");
+        yaml.push_str("        echo \"Applying project: $project_path\"\n");
+        yaml.push_str("        cd \"$project_path\"\n");
+        yaml.push_str("        pmp project apply\n");
+        yaml.push_str("        cd -\n");
+        yaml.push_str("      done\n\n");
+
+        yaml.push_str("# NOTE: This implementation uses jq to parse the JSON array of changed projects\n");
+        yaml.push_str("# and runs pmp project preview/apply for each project in sequence.\n");
+        yaml.push_str("# For parallel execution, consider using GitLab dynamic child pipelines.\n");
+
+        Ok(yaml)
+    }
+
+    /// Generate static Jenkins pipeline (runs all projects)
+    fn generate_jenkins_static(projects: &[ProjectInfo], _environment: Option<&str>) -> Result<String> {
         let mut groovy = String::new();
 
         groovy.push_str("// Jenkinsfile for PMP Infrastructure\n\n");
@@ -316,15 +578,14 @@ impl CiCommand {
                     "                        dir('{}') {{\n",
                     proj.path.display().to_string().replace('\\', "/")
                 ));
-                groovy.push_str("                            sh 'tofu init'\n");
-                groovy.push_str("                            sh 'tofu validate'\n");
-                groovy.push_str("                            sh 'tofu plan -no-color'\n");
                 groovy.push_str("                            script {\n");
-                groovy
-                    .push_str("                                if (env.BRANCH_NAME == 'main') {\n");
-                groovy.push_str(
-                    "                                    sh 'tofu apply -auto-approve'\n",
-                );
+                groovy.push_str("                                // Run preview on PR, apply on main branch\n");
+                groovy.push_str("                                if (env.CHANGE_ID) {\n");
+                groovy.push_str("                                    // Pull request\n");
+                groovy.push_str("                                    sh 'pmp project preview'\n");
+                groovy.push_str("                                } else if (env.BRANCH_NAME == 'main') {\n");
+                groovy.push_str("                                    // Main branch\n");
+                groovy.push_str("                                    sh 'pmp project apply'\n");
                 groovy.push_str("                                }\n");
                 groovy.push_str("                            }\n");
                 groovy.push_str("                        }\n");

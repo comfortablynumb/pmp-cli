@@ -9,19 +9,8 @@ use std::path::PathBuf;
 pub struct InfrastructureCommand;
 
 impl InfrastructureCommand {
-    /// Initialize a new infrastructure
+    /// Initialize a new infrastructure from an infrastructure template
     pub fn execute_init(
-        ctx: &Context,
-        name: Option<&str>,
-        description: Option<&str>,
-        template_packs_paths: Option<&str>,
-    ) -> Result<()> {
-        // Delegate to the existing init command
-        crate::commands::InitCommand::execute(ctx, name, description, template_packs_paths)
-    }
-
-    /// Create a new infrastructure from an infrastructure template
-    pub fn execute_create(
         ctx: &Context,
         output_dir: Option<&str>,
         template_packs_paths: Option<&str>,
@@ -243,25 +232,62 @@ impl InfrastructureCommand {
         output::key_value("Environments", &format!("{}", infrastructure.spec.environments.len()));
         output::key_value("Categories", &format!("{}", infrastructure.spec.categories.len()));
         output::blank();
+
+        // Step 15: Ask if user wants to generate CI job files
+        let generate_ci = ctx
+            .input
+            .confirm("Generate CI/CD pipeline files?", false)
+            .context("Failed to get CI generation confirmation")?;
+
+        if generate_ci {
+            output::blank();
+            output::subsection("CI/CD Pipeline Generation");
+
+            // Ask for CI provider
+            let ci_providers = vec![
+                "github-actions".to_string(),
+                "gitlab-ci".to_string(),
+                "jenkins".to_string(),
+            ];
+
+            let ci_provider = ctx
+                .input
+                .select("Select CI provider:", ci_providers)?;
+
+            output::blank();
+            output::info(&format!("Generating {} pipeline...", ci_provider));
+
+            // Call CiCommand::execute_generate
+            let ci_result = crate::commands::CiCommand::execute_generate(
+                ctx,
+                &ci_provider,
+                None,  // output_file - will use defaults
+                None,  // environment - will include all environments
+                false, // static_mode - use dynamic by default
+            );
+
+            match ci_result {
+                Ok(()) => {
+                    output::success("CI/CD pipeline files generated successfully");
+                    output::blank();
+                }
+                Err(e) => {
+                    output::warning(&format!("Failed to generate CI pipeline: {}", e));
+                    output::blank();
+                }
+            }
+        }
+
         output::info("Next steps:");
         output::info("  1. Review the generated .pmp.infrastructure.yaml file");
-        output::info("  2. Run 'pmp create' to create your first project");
+        if generate_ci {
+            output::info("  2. Review the generated CI/CD pipeline files");
+            output::info("  3. Run 'pmp create' to create your first project");
+        } else {
+            output::info("  2. Run 'pmp create' to create your first project");
+        }
         output::blank();
 
-        Ok(())
-    }
-
-    /// List all infrastructures in the current directory tree
-    pub fn execute_list(_ctx: &Context) -> Result<()> {
-        output::info("Infrastructure listing is not yet fully implemented.");
-        output::info("This feature will show all available infrastructures in the future.");
-        Ok(())
-    }
-
-    /// Switch to a different infrastructure (placeholder for future multi-infrastructure support)
-    pub fn execute_switch(_ctx: &Context, _name: &str) -> Result<()> {
-        output::info("Infrastructure switching is not yet implemented.");
-        output::info("This feature will allow managing multiple infrastructures in the future.");
         Ok(())
     }
 

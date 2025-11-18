@@ -11,48 +11,32 @@ mod traits;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use commands::{
-    ApplyCommand, AuditCommand, BackupCommand, CiCommand, CloneCommand, CreateCommand, DepsCommand,
-    DestroyCommand, DevExCommand, DisasterRecoveryCommand, DriftCommand, EnvCommand, FindCommand,
-    GenerateCommand, GraphCommand, InfrastructureCommand, LockCommand, MonitorCommand,
-    PolicyCommand, PreviewCommand, ProviderCommand, RefreshCommand, ReviewCommand, SearchCommand,
-    StateCommand, TagsCommand, TemplateCommand, TemplateMgmtCommand, TestCommand, UiCommand,
-    UpdateCommand, WorkspaceCommand,
+    ApplyCommand, AuditCommand, BackupCommand, CiCommand, CiDetectChangesCommand, CloneCommand,
+    CreateCommand, DepsCommand, DestroyCommand, DevExCommand, DisasterRecoveryCommand,
+    DriftCommand, EnvCommand, FindCommand, GenerateCommand, GraphCommand, InfrastructureCommand,
+    LockCommand, MonitorCommand, PolicyCommand, PreviewCommand, ProviderCommand, RefreshCommand,
+    ReviewCommand, SearchCommand, StateCommand, TagsCommand, TemplateCommand,
+    TemplateMgmtCommand, TestCommand, UiCommand, UpdateCommand, WorkspaceCommand,
 };
 
 #[derive(Parser)]
 #[command(name = "pmp")]
 #[command(about = "Poor Man's Platform - A CLI for managing Infrastructure as Code projects", long_about = None)]
 #[command(version)]
+#[command(next_display_order = None)]  // Sort subcommands alphabetically
 struct Cli {
     #[command(subcommand)]
     command: Commands,
 }
 
 #[derive(Subcommand)]
+#[command(next_display_order = None)]  // Sort subcommands alphabetically
 enum InfrastructureSubcommands {
-    /// Initialize a new infrastructure
+    /// Initialize a new infrastructure from template
     #[command(
-        long_about = "Initialize a new infrastructure\n\nExamples:\n  pmp infrastructure init\n  pmp infrastructure init --name my-infra\n  pmp infrastructure init --template-packs-paths /custom/packs"
+        long_about = "Initialize a new infrastructure from template\n\nExamples:\n  pmp infrastructure init\n  pmp infrastructure init --output ./my-infra\n  pmp infrastructure init --template-packs-paths /custom/packs"
     )]
     Init {
-        /// Infrastructure name (optional, will prompt if not specified)
-        #[arg(short, long)]
-        name: Option<String>,
-
-        /// Infrastructure description (optional)
-        #[arg(short, long)]
-        description: Option<String>,
-
-        /// Additional template packs directories to search (colon-separated)
-        #[arg(long)]
-        template_packs_paths: Option<String>,
-    },
-
-    /// Create infrastructure from template
-    #[command(
-        long_about = "Create infrastructure from template\n\nExamples:\n  pmp infrastructure create\n  pmp infrastructure create --output ./my-infra\n  pmp infrastructure create --template-packs-paths /custom/packs"
-    )]
-    Create {
         /// Output directory (optional, defaults to current directory)
         #[arg(short, long)]
         output: Option<String>,
@@ -61,23 +45,10 @@ enum InfrastructureSubcommands {
         #[arg(long)]
         template_packs_paths: Option<String>,
     },
-
-    /// List available infrastructures
-    #[command(long_about = "List available infrastructures")]
-    List,
-
-    /// Switch between infrastructures
-    #[command(
-        long_about = "Switch between infrastructures\n\nExamples:\n  pmp infrastructure switch\n  pmp infrastructure switch --name my-infra"
-    )]
-    Switch {
-        /// Infrastructure name (optional, will prompt if not specified)
-        #[arg(short, long)]
-        name: Option<String>,
-    },
 }
 
 #[derive(Subcommand)]
+#[command(next_display_order = None)]  // Sort subcommands alphabetically
 enum ProjectSubcommands {
     /// Create a new project
     #[command(
@@ -266,10 +237,11 @@ enum ProjectSubcommands {
 }
 
 #[derive(Subcommand)]
+#[command(next_display_order = None)]  // Sort commands alphabetically
 enum Commands {
     /// Infrastructure management commands
     #[command(
-        long_about = "Manage infrastructures and infrastructure templates\n\nSubcommands:\n- init: Initialize a new infrastructure\n- create: Create infrastructure from template\n- list: List available infrastructures\n- switch: Switch between infrastructures\n\nExamples:\n  pmp infrastructure init\n  pmp infrastructure create\n  pmp infrastructure list"
+        long_about = "Initialize infrastructure from template\n\nExamples:\n  pmp infrastructure init\n  pmp infrastructure init --output ./my-infra\n  pmp infrastructure init --template-packs-paths /custom/packs"
     )]
     Infrastructure {
         #[command(subcommand)]
@@ -458,6 +430,7 @@ enum Commands {
 }
 
 #[derive(Subcommand)]
+#[command(next_display_order = None)]  // Sort subcommands alphabetically
 enum DepsSubcommands {
     /// Analyze dependencies across all projects
     #[command(
@@ -497,6 +470,7 @@ enum DepsSubcommands {
 }
 
 #[derive(Subcommand)]
+#[command(next_display_order = None)]  // Sort subcommands alphabetically
 enum StateSubcommands {
     /// List state across all projects
     #[command(
@@ -593,6 +567,7 @@ enum StateSubcommands {
 }
 
 #[derive(Subcommand)]
+#[command(next_display_order = None)]  // Sort subcommands alphabetically
 enum DriftSubcommands {
     /// Detect drift in infrastructure
     #[command(
@@ -642,6 +617,7 @@ enum DriftSubcommands {
 }
 
 #[derive(Subcommand)]
+#[command(next_display_order = None)]  // Sort subcommands alphabetically
 enum PolicySubcommands {
     /// Validate against organizational policies
     #[command(
@@ -673,10 +649,11 @@ enum PolicySubcommands {
 }
 
 #[derive(Subcommand)]
+#[command(next_display_order = None)]  // Sort subcommands alphabetically
 enum CiSubcommands {
     /// Generate CI/CD pipeline configuration
     #[command(
-        long_about = "Generate CI/CD pipeline configuration\n\nSupported types:\n- github-actions, github\n- gitlab-ci, gitlab\n- jenkins\n\nExample:\n  pmp ci generate github-actions\n  pmp ci generate gitlab-ci --output .gitlab-ci.yml"
+        long_about = "Generate CI/CD pipeline configuration\n\nSupported types:\n- github-actions, github\n- gitlab-ci, gitlab\n- jenkins\n\nBy default, generates dynamic pipelines that only run changed projects.\nUse --static to generate pipelines that run all projects.\n\nExample:\n  pmp ci generate github-actions\n  pmp ci generate gitlab-ci --output .gitlab-ci.yml\n  pmp ci generate github-actions --static"
     )]
     Generate {
         /// Pipeline type (github-actions, gitlab-ci, jenkins)
@@ -689,10 +666,37 @@ enum CiSubcommands {
         /// Environment filter (optional, includes all if not specified)
         #[arg(short, long)]
         environment: Option<String>,
+
+        /// Generate static pipeline (run all projects, disable change detection)
+        #[arg(long)]
+        static_mode: bool,
+    },
+
+    /// Detect changed projects based on git diff
+    #[command(
+        long_about = "Detect which projects have changed files based on git diff\n\nThis command is used internally by generated CI pipelines to determine\nwhich projects need to be previewed or applied.\n\nExit codes:\n- 0: Success, changed projects found\n- 1: No projects changed\n- 2: Infrastructure file changed (skip project CI)\n\nExample:\n  pmp ci detect-changes --base origin/main --head HEAD\n  pmp ci detect-changes --base $CI_MERGE_REQUEST_TARGET_BRANCH_NAME --head $CI_COMMIT_SHA\n  pmp ci detect-changes --base main --head feature-branch --environment production"
+    )]
+    DetectChanges {
+        /// Base git reference for comparison (e.g., origin/main, main)
+        #[arg(long)]
+        base: String,
+
+        /// Head git reference for comparison (e.g., HEAD, commit SHA)
+        #[arg(long)]
+        head: String,
+
+        /// Filter by environment (optional)
+        #[arg(short, long)]
+        environment: Option<String>,
+
+        /// Output format (json, yaml)
+        #[arg(short = 'f', long, default_value = "json")]
+        output_format: String,
     },
 }
 
 #[derive(Subcommand)]
+#[command(next_display_order = None)]  // Sort subcommands alphabetically
 enum TemplateSubcommands {
     /// Scaffold a new template pack interactively
     #[command(
@@ -706,6 +710,7 @@ enum TemplateSubcommands {
 }
 
 #[derive(Subcommand)]
+#[command(next_display_order = None)]  // Sort subcommands alphabetically
 enum EnvSubcommands {
     /// Compare two environments
     #[command(
@@ -761,6 +766,7 @@ enum EnvSubcommands {
 }
 
 #[derive(Subcommand)]
+#[command(next_display_order = None)]  // Sort subcommands alphabetically
 enum TestSubcommands {
     /// Run integration tests
     #[command(
@@ -833,6 +839,7 @@ enum TestSubcommands {
 }
 
 #[derive(Subcommand)]
+#[command(next_display_order = None)]  // Sort subcommands alphabetically
 enum DevExSubcommands {
     /// Interactive shell
     #[command(
@@ -911,6 +918,7 @@ enum DevExSubcommands {
 }
 
 #[derive(Subcommand)]
+#[command(next_display_order = None)]  // Sort subcommands alphabetically
 enum TemplateMgmtSubcommands {
     /// Validate template
     #[command(
@@ -989,6 +997,7 @@ enum TemplateMgmtSubcommands {
 }
 
 #[derive(Subcommand)]
+#[command(next_display_order = None)]  // Sort subcommands alphabetically
 enum ProviderSubcommands {
     /// Install provider plugin
     #[command(
@@ -1048,6 +1057,7 @@ enum ProviderSubcommands {
 }
 
 #[derive(Subcommand)]
+#[command(next_display_order = None)]  // Sort subcommands alphabetically
 enum MonitorSubcommands {
     /// Display monitoring dashboard
     #[command(
@@ -1105,6 +1115,7 @@ enum MonitorSubcommands {
 }
 
 #[derive(Subcommand)]
+#[command(next_display_order = None)]  // Sort subcommands alphabetically
 enum AuditSubcommands {
     /// View audit logs
     #[command(
@@ -1164,6 +1175,7 @@ enum AuditSubcommands {
 }
 
 #[derive(Subcommand)]
+#[command(next_display_order = None)]  // Sort subcommands alphabetically
 enum LockSubcommands {
     /// Acquire a lock
     #[command(
@@ -1223,6 +1235,7 @@ enum LockSubcommands {
 }
 
 #[derive(Subcommand)]
+#[command(next_display_order = None)]  // Sort subcommands alphabetically
 enum ReviewSubcommands {
     /// Request review for changes
     #[command(
@@ -1283,6 +1296,7 @@ enum ReviewSubcommands {
 }
 
 #[derive(Subcommand)]
+#[command(next_display_order = None)]  // Sort subcommands alphabetically
 enum WorkspaceSubcommands {
     /// List available workspaces
     #[command(long_about = "List all available workspaces\n\nExample:\n  pmp workspace list")]
@@ -1335,6 +1349,7 @@ enum WorkspaceSubcommands {
 }
 
 #[derive(Subcommand)]
+#[command(next_display_order = None)]  // Sort subcommands alphabetically
 enum BackupSubcommands {
     /// Create a backup
     #[command(
@@ -1400,6 +1415,7 @@ enum BackupSubcommands {
 }
 
 #[derive(Subcommand)]
+#[command(next_display_order = None)]  // Sort subcommands alphabetically
 enum DisasterRecoverySubcommands {
     /// Create disaster recovery plan
     #[command(
@@ -1456,6 +1472,7 @@ enum DisasterRecoverySubcommands {
 }
 
 #[derive(Subcommand)]
+#[command(next_display_order = None)]  // Sort subcommands alphabetically
 enum TagsSubcommands {
     /// Add tags to resources
     #[command(
@@ -1543,6 +1560,7 @@ enum TagsSubcommands {
 }
 
 #[derive(Subcommand)]
+#[command(next_display_order = None)]  // Sort subcommands alphabetically
 #[allow(clippy::enum_variant_names)]
 enum SearchSubcommands {
     /// Search by tags
@@ -1605,32 +1623,14 @@ fn main() -> Result<()> {
     match cli.command {
         Commands::Infrastructure { command } => match command {
             InfrastructureSubcommands::Init {
-                name,
-                description,
+                output,
                 template_packs_paths,
             } => {
                 InfrastructureCommand::execute_init(
                     &ctx,
-                    name.as_deref(),
-                    description.as_deref(),
-                    template_packs_paths.as_deref(),
-                )?;
-            }
-            InfrastructureSubcommands::Create {
-                output,
-                template_packs_paths,
-            } => {
-                InfrastructureCommand::execute_create(
-                    &ctx,
                     output.as_deref(),
                     template_packs_paths.as_deref(),
                 )?;
-            }
-            InfrastructureSubcommands::List => {
-                InfrastructureCommand::execute_list(&ctx)?;
-            }
-            InfrastructureSubcommands::Switch { name } => {
-                InfrastructureCommand::execute_switch(&ctx, name.as_deref().unwrap_or(""))?;
             }
         },
         Commands::Project { command } => match command {
@@ -1825,12 +1825,28 @@ fn main() -> Result<()> {
                 pipeline_type,
                 output,
                 environment,
+                static_mode,
             } => {
                 CiCommand::execute_generate(
                     &ctx,
                     &pipeline_type,
                     output.as_deref(),
                     environment.as_deref(),
+                    static_mode,
+                )?;
+            }
+            CiSubcommands::DetectChanges {
+                base,
+                head,
+                environment,
+                output_format,
+            } => {
+                CiDetectChangesCommand::execute(
+                    &ctx,
+                    &base,
+                    &head,
+                    environment.as_deref(),
+                    &output_format,
                 )?;
             }
         },
