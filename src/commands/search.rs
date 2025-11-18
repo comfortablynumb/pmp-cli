@@ -7,6 +7,12 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
 
+// Stub for removed tags functionality
+#[derive(Debug, Serialize, Deserialize)]
+struct TagConfig {
+    tags: HashMap<String, String>,
+}
+
 pub struct SearchCommand;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -360,22 +366,11 @@ impl SearchCommand {
 
     fn load_tags(
         _ctx: &Context,
-        infrastructure_root: &Path,
-        resource: &DynamicProjectEnvironmentResource,
-    ) -> Result<crate::commands::tags::TagConfig> {
-        let tags_file = infrastructure_root.join(".pmp").join("tags").join(format!(
-            "{}-{}.json",
-            resource.metadata.name, resource.metadata.environment_name
-        ));
-
-        if !tags_file.exists() {
-            anyhow::bail!("No tags found");
-        }
-
-        let content = std::fs::read_to_string(&tags_file)?;
-        let config: crate::commands::tags::TagConfig = serde_json::from_str(&content)?;
-
-        Ok(config)
+        _infrastructure_root: &Path,
+        _resource: &DynamicProjectEnvironmentResource,
+    ) -> Result<TagConfig> {
+        // Tags functionality has been removed
+        anyhow::bail!("Tags functionality is not available")
     }
 
     fn search_terraform_resources(
