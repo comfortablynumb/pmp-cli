@@ -199,6 +199,13 @@ impl DestroyCommand {
             HooksRunner::run_hooks(&hooks.pre_destroy, env_dir_str, "pre-destroy")?;
         }
 
+        // Run helm repo update if configured
+        crate::commands::ExecutionHelper::run_helm_repo_update_if_needed(
+            ctx,
+            &collection,
+            executor.get_name(),
+        )?;
+
         // Initialize executor
         ctx.output.subsection("Initialization");
         ctx.output

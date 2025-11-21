@@ -86,6 +86,65 @@ pmp find --kind KubernetesWorkload
 
 For full documentation, see the complete README sections below.
 
+## Executor Configuration
+
+PMP supports configuring executors at the infrastructure level. This allows you to set up backend configurations and executor-specific settings that apply to all projects.
+
+### OpenTofu/Terraform Backend Configuration
+
+Configure remote state backends in your `.pmp.infrastructure.yaml`:
+
+```yaml
+apiVersion: pmp.io/v1
+kind: Infrastructure
+metadata:
+  name: "My Infrastructure"
+spec:
+  environments:
+    dev:
+      name: "Development"
+    prod:
+      name: "Production"
+
+  executor:
+    name: opentofu
+    config:
+      backend:
+        type: s3
+        bucket: my-terraform-state
+        key: project/terraform.tfstate
+        region: us-west-2
+        encrypt: true
+        dynamodb_table: terraform-locks
+```
+
+Supported backend types: `s3`, `azurerm`, `gcs`, `kubernetes`, `pg`, `consul`, `http`, and more.
+
+### Helm Provider Configuration
+
+When using the Terraform/OpenTofu Helm provider, you can enable automatic repository updates before running commands:
+
+```yaml
+apiVersion: pmp.io/v1
+kind: Infrastructure
+metadata:
+  name: "My Infrastructure"
+spec:
+  executor:
+    name: opentofu
+    config:
+      helm_provider:
+        auto_repo_update: true  # Default: false
+```
+
+When enabled, PMP will automatically run `helm repo update` before executing `tofu init` for any command (preview, apply, destroy). This is useful for:
+
+- Ensuring you always get the latest chart versions
+- Avoiding "chart not found" errors when new versions are released
+- Working around Helm provider limitations
+
+**Note**: This is a workaround for the Terraform Helm provider issue where it doesn't automatically update repositories before installation. See: https://github.com/hashicorp/terraform-provider-helm/issues/1475
+
 ## Template Structure
 
 Templates must have a `.pmp.template.yaml` file with `apiVersion: pmp.io/v1` and `kind: Template`.

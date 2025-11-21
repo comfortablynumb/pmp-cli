@@ -1,14 +1,60 @@
 use crate::collection::{DependencyGraph, DependencyNode};
 use crate::executor::{Executor, ExecutorConfig, NoneExecutor, OpenTofuExecutor};
 use crate::hooks::HooksRunner;
+use crate::template::metadata::InfrastructureResource;
 use crate::template::DynamicProjectEnvironmentResource;
 use anyhow::{Context, Result};
 use std::path::Path;
+use std::process::Command;
 
 /// Helper functions for executing commands with dependency support
 pub struct ExecutionHelper;
 
 impl ExecutionHelper {
+    /// Run helm repo update if configured in infrastructure
+    ///
+    /// This is a workaround for the Terraform Helm provider issue where it doesn't
+    /// automatically update Helm repositories before installation, which can lead to
+    /// "chart not found" errors when new chart versions are available.
+    ///
+    /// Reference: https://github.com/hashicorp/terraform-provider-helm/issues/1475
+    pub fn run_helm_repo_update_if_needed(
+        ctx: &crate::context::Context,
+        infrastructure: &InfrastructureResource,
+        executor_name: &str,
+    ) -> Result<()> {
+        // Only run for opentofu executor
+        if executor_name != "opentofu" {
+            return Ok(());
+        }
+
+        // Check if helm_provider.auto_repo_update is enabled
+        if let Some(executor_config) = &infrastructure.spec.executor {
+            if let Some(helm_provider_config) = executor_config.config.get("helm_provider") {
+                if let Some(auto_update) = helm_provider_config.get("auto_repo_update") {
+                    if auto_update.as_bool().unwrap_or(false) {
+                        ctx.output.dimmed("Running helm repo update (auto_repo_update enabled)...");
+
+                        let output = Command::new("helm")
+                            .arg("repo")
+                            .arg("update")
+                            .output()
+                            .context("Failed to execute helm repo update. Is helm installed?")?;
+
+                        if !output.status.success() {
+                            let stderr = String::from_utf8_lossy(&output.stderr);
+                            anyhow::bail!("helm repo update failed: {}", stderr);
+                        }
+
+                        ctx.output.success("Helm repositories updated");
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     /// Check and display dependencies before execution
     /// Returns true if execution should proceed, false otherwise
     pub fn check_and_display_dependencies(
@@ -173,6 +219,9 @@ impl ExecutionHelper {
             HooksRunner::run_hooks(&hooks.pre_preview, env_dir_str, "pre-preview")?;
         }
 
+        // Run helm repo update if configured
+        Self::run_helm_repo_update_if_needed(ctx, &collection, executor.get_name())?;
+
         // Initialize executor
         ctx.output
             .dimmed(&format!("Initializing {}...", executor.get_name()));
@@ -248,6 +297,9 @@ impl ExecutionHelper {
             HooksRunner::run_hooks(&hooks.pre_apply, env_dir_str, "pre-apply")?;
         }
 
+        // Run helm repo update if configured
+        Self::run_helm_repo_update_if_needed(ctx, &collection, executor.get_name())?;
+
         // Initialize executor
         ctx.output
             .dimmed(&format!("Initializing {}...", executor.get_name()));
@@ -322,6 +374,9 @@ impl ExecutionHelper {
         if !hooks.pre_destroy.is_empty() {
             HooksRunner::run_hooks(&hooks.pre_destroy, env_dir_str, "pre-destroy")?;
         }
+
+        // Run helm repo update if configured
+        Self::run_helm_repo_update_if_needed(ctx, &collection, executor.get_name())?;
 
         // Initialize executor
         ctx.output
