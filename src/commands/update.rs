@@ -2009,6 +2009,14 @@ impl UpdateCommand {
                         // For arrays, use the default value directly
                         default.clone()
                     }
+                    Value::Null => {
+                        // Null default is treated as no default
+                        let answer = ctx
+                            .input
+                            .text(&description, None)
+                            .context("Failed to get input")?;
+                        Value::String(answer)
+                    }
                     _ => {
                         // Fallback to string input
                         let answer = ctx

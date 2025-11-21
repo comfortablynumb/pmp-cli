@@ -1545,10 +1545,23 @@ impl CreateCommand {
                     }
                 }
                 serde_json::Value::String(s) => {
-                    let prompt_text = format!("{} [default: {}]", description, s);
+                    // Don't show default in prompt if empty
+                    let prompt_text = if !s.is_empty() {
+                        format!("{} [default: {}]", description, s)
+                    } else {
+                        description.to_string()
+                    };
                     let answer = ctx
                         .input
                         .text(&prompt_text, Some(s))
+                        .context("Failed to get input")?;
+                    Ok(serde_json::Value::String(answer))
+                }
+                serde_json::Value::Null => {
+                    // Null default is treated as no default
+                    let answer = ctx
+                        .input
+                        .text(&description, None)
                         .context("Failed to get input")?;
                     Ok(serde_json::Value::String(answer))
                 }

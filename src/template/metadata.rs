@@ -1306,6 +1306,30 @@ impl TemplateResource {
             );
         }
 
+        // Validate that user-defined input names do not start with underscore
+        // (underscore prefix is reserved for PMP-provided variables)
+        for input in &resource.spec.inputs {
+            if input.name.starts_with('_') {
+                anyhow::bail!(
+                    "Input name '{}' is invalid: input names starting with underscore are reserved for PMP-provided variables",
+                    input.name
+                );
+            }
+        }
+
+        // Validate environment-specific input overrides
+        for (env_name, env_overrides) in &resource.spec.environments {
+            for input in &env_overrides.overrides.inputs {
+                if input.name.starts_with('_') {
+                    anyhow::bail!(
+                        "Input name '{}' in environment '{}' is invalid: input names starting with underscore are reserved for PMP-provided variables",
+                        input.name,
+                        env_name
+                    );
+                }
+            }
+        }
+
         Ok(resource)
     }
 }
@@ -1323,6 +1347,17 @@ impl PluginResource {
         // Validate kind
         if resource.kind != "Plugin" {
             anyhow::bail!("Expected kind 'Plugin', got '{}'", resource.kind);
+        }
+
+        // Validate that user-defined input names do not start with underscore
+        // (underscore prefix is reserved for PMP-provided variables)
+        for input in &resource.spec.inputs {
+            if input.name.starts_with('_') {
+                anyhow::bail!(
+                    "Plugin input name '{}' is invalid: input names starting with underscore are reserved for PMP-provided variables",
+                    input.name
+                );
+            }
         }
 
         Ok(resource)

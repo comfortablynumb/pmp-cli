@@ -5,7 +5,8 @@ use std::collections::HashMap;
 
 /// Interpolate environment variables in a string value
 ///
-/// Replaces patterns like ${env:ENV_VAR_NAME} with environment variable values
+/// Replaces patterns like ${env:ENV_VAR_NAME} or ${env:ENV_VAR_NAME:default} with environment variable values
+/// If the environment variable is not set and a default is provided, the default value is used
 ///
 /// # Arguments
 /// * `input` - The input string that may contain environment variable references
@@ -15,9 +16,13 @@ use std::collections::HashMap;
 /// std::env::set_var("DOCKER_USERNAME", "myuser");
 /// let result = interpolate_env_variables("namespace-${env:DOCKER_USERNAME}")?;
 /// assert_eq!(result, "namespace-myuser");
+///
+/// let result = interpolate_env_variables("namespace-${env:NONEXISTENT:defaultns}")?;
+/// assert_eq!(result, "namespace-defaultns");
 /// ```
 pub fn interpolate_env_variables(input: &str) -> Result<String> {
-    let re = Regex::new(r"\$\{env:([a-zA-Z_][a-zA-Z0-9_]*)\}").unwrap();
+    // Pattern supports both ${env:VAR} and ${env:VAR:default}
+    let re = Regex::new(r"\$\{env:([a-zA-Z_][a-zA-Z0-9_]*)(?::([^}]*))?\}").unwrap();
 
     let mut result = input.to_string();
     let mut errors = Vec::new();
@@ -25,13 +30,18 @@ pub fn interpolate_env_variables(input: &str) -> Result<String> {
     for cap in re.captures_iter(input) {
         let full_match = cap.get(0).unwrap().as_str();
         let env_var_name = cap.get(1).unwrap().as_str();
+        let default_value = cap.get(2).map(|m| m.as_str());
 
         match std::env::var(env_var_name) {
             Ok(value) => {
                 result = result.replace(full_match, &value);
             }
             Err(_) => {
-                errors.push(format!("Environment variable '{}' not found", env_var_name));
+                if let Some(default) = default_value {
+                    result = result.replace(full_match, default);
+                } else {
+                    errors.push(format!("Environment variable '{}' not found", env_var_name));
+                }
             }
         }
     }
@@ -281,6 +291,32 @@ mod tests {
                 .to_string()
                 .contains("Environment variable 'NONEXISTENT_VAR' not found")
         );
+    }
+
+    #[test]
+    fn test_interpolate_env_with_default() {
+        let result = interpolate_env_variables("namespace-${env:NONEXISTENT_VAR:default-ns}").unwrap();
+        assert_eq!(result, "namespace-default-ns");
+    }
+
+    #[test]
+    fn test_interpolate_env_with_empty_default() {
+        let result = interpolate_env_variables("namespace-${env:NONEXISTENT_VAR:}").unwrap();
+        assert_eq!(result, "namespace-");
+    }
+
+    #[test]
+    fn test_interpolate_env_existing_overrides_default() {
+        unsafe {
+            std::env::set_var("TEST_WITH_DEFAULT", "actual-value");
+        }
+
+        let result = interpolate_env_variables("namespace-${env:TEST_WITH_DEFAULT:default-value}").unwrap();
+        assert_eq!(result, "namespace-actual-value");
+
+        unsafe {
+            std::env::remove_var("TEST_WITH_DEFAULT");
+        }
     }
 
     #[test]
