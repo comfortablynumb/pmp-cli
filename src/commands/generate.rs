@@ -419,7 +419,7 @@ impl GenerateCommand {
                     Ok(serde_json::Value::Bool(answer))
                 }
                 serde_json::Value::Number(n) => {
-                    let prompt_text = format!("{} (default: {})", description, n);
+                    let prompt_text = format!("{} [default: {}]", description, n);
                     let answer = ctx
                         .input
                         .text(&prompt_text, Some(&n.to_string()))
@@ -439,7 +439,7 @@ impl GenerateCommand {
                 serde_json::Value::String(s) => {
                     // Don't show default in prompt if empty
                     let prompt_text = if !s.is_empty() {
-                        format!("{} (default: {})", description, s)
+                        format!("{} [default: {}]", description, s)
                     } else {
                         description.to_string()
                     };

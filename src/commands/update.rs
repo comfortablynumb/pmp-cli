@@ -529,6 +529,7 @@ impl UpdateCommand {
                                                         .name
                                                         .clone(),
                                                     inputs: Vec::new(),
+                                                    order: 0,
                                                 });
 
                                             compatible_projects.push(CompatibleProject {
@@ -574,6 +575,7 @@ impl UpdateCommand {
                             template_pack_name: pack_info.resource.metadata.name.clone(),
                             plugin_name: plugin_info.resource.metadata.name.clone(),
                             inputs: Vec::new(),
+                            order: 0,
                         });
 
                     // Add plugin with empty compatible projects list (no reference project needed)
@@ -801,6 +803,7 @@ impl UpdateCommand {
                     .name
                     .clone(),
                 inputs: Vec::new(),
+                order: 0,
             };
         }
 
@@ -1931,6 +1934,11 @@ impl UpdateCommand {
             // Get variables for interpolation
             let mut vars = HashMap::new();
             vars.insert("_name".to_string(), Value::String(project_name.to_string()));
+
+            // Add hyphenated version of project name (replacing underscores with hyphens)
+            let project_name_hyphens = project_name.replace('_', "-");
+            vars.insert("_project_name_hyphens".to_string(), Value::String(project_name_hyphens));
+
             for (key, value) in &inputs {
                 vars.insert(key.clone(), value.clone());
             }
@@ -1978,7 +1986,7 @@ impl UpdateCommand {
                         Value::Bool(answer)
                     }
                     Value::Number(n) => {
-                        let prompt_text = format!("{} (default: {})", description, n);
+                        let prompt_text = format!("{} [default: {}]", description, n);
                         let answer = ctx
                             .input
                             .text(&prompt_text, Some(&n.to_string()))
@@ -1995,7 +2003,7 @@ impl UpdateCommand {
                     }
                     Value::String(s) => {
                         let prompt_text = if !s.is_empty() {
-                            format!("{} (default: {})", description, s)
+                            format!("{} [default: {}]", description, s)
                         } else {
                             description.to_string()
                         };
@@ -2086,6 +2094,11 @@ impl UpdateCommand {
             // Get variables for interpolation
             let mut vars = HashMap::new();
             vars.insert("_name".to_string(), Value::String(project_name.to_string()));
+
+            // Add hyphenated version of project name (replacing underscores with hyphens)
+            let project_name_hyphens = project_name.replace('_', "-");
+            vars.insert("_project_name_hyphens".to_string(), Value::String(project_name_hyphens));
+
             for (key, value) in &inputs {
                 vars.insert(key.clone(), value.clone());
             }

@@ -104,6 +104,11 @@ pub struct TemplateSpec {
     /// If set, user must select projects matching these dependencies when creating a project
     #[serde(default)]
     pub dependencies: Vec<TemplateDependency>,
+
+    /// Order for input collection (default: 0)
+    /// Lower values are collected first. When equal with plugins, template has precedence.
+    #[serde(default)]
+    pub order: i32,
 }
 
 /// Custom deserializer for inputs that supports both HashMap and Vec formats
@@ -182,6 +187,11 @@ pub struct AllowedPluginConfig {
     /// Optional input overrides/requirements for this plugin (supports both array and object format)
     #[serde(default, deserialize_with = "deserialize_inputs")]
     pub inputs: Vec<InputDefinition>,
+
+    /// Order for input collection (default: 0)
+    /// Lower values are collected first. When equal, maintains YAML order.
+    #[serde(default)]
+    pub order: i32,
 }
 
 /// Reference to a template that provides the plugin (used for requires_project_with_template)
@@ -193,6 +203,15 @@ pub struct PluginTemplateRef {
 
     /// Kind of the template
     pub kind: String,
+
+    /// Optional label selectors for filtering projects
+    #[serde(default)]
+    pub label_selector: Option<HashMap<String, String>>,
+
+    /// Optional description to show to user when selecting reference project
+    /// If provided, this is shown instead of kind and label selectors
+    #[serde(default)]
+    pub description: Option<String>,
 
     /// Optional remote state configuration
     #[serde(default)]
@@ -231,6 +250,11 @@ pub struct TemplateProjectRef {
     /// All labels must match (AND logic)
     #[serde(default)]
     pub label_selector: HashMap<String, String>,
+
+    /// Optional description to show to user when selecting reference project
+    /// If provided, this is shown instead of kind and label selectors
+    #[serde(default)]
+    pub description: Option<String>,
 
     /// Remote state configuration for accessing the reference project
     #[serde(default)]
