@@ -419,10 +419,9 @@ impl GenerateCommand {
                     Ok(serde_json::Value::Bool(answer))
                 }
                 serde_json::Value::Number(n) => {
-                    let prompt_text = format!("{} [default: {}]", description, n);
                     let answer = ctx
                         .input
-                        .text(&prompt_text, Some(&n.to_string()))
+                        .text(&description, Some(&n.to_string()))
                         .context("Failed to get input")?;
 
                     // Try to parse as number
@@ -437,15 +436,11 @@ impl GenerateCommand {
                     }
                 }
                 serde_json::Value::String(s) => {
-                    // Don't show default in prompt if empty
-                    let prompt_text = if !s.is_empty() {
-                        format!("{} [default: {}]", description, s)
-                    } else {
-                        description.to_string()
-                    };
+                    // Don't pass empty string as default to avoid "()" display
+                    let default = if s.is_empty() { None } else { Some(s.as_str()) };
                     let answer = ctx
                         .input
-                        .text(&prompt_text, Some(s))
+                        .text(&description, default)
                         .context("Failed to get input")?;
                     Ok(serde_json::Value::String(answer))
                 }

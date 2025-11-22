@@ -1731,10 +1731,9 @@ impl UpdateCommand {
                         serde_json::Value::Bool(answer)
                     }
                     Some(serde_json::Value::Number(n)) => {
-                        let prompt_text = format!("{} [current: {}]", description, n);
                         let answer = ctx
                             .input
-                            .text(&prompt_text, Some(&n.to_string()))
+                            .text(&description, Some(&n.to_string()))
                             .context("Failed to get input")?;
 
                         // Try to parse as number
@@ -1747,10 +1746,11 @@ impl UpdateCommand {
                         }
                     }
                     Some(serde_json::Value::String(s)) => {
-                        let prompt_text = format!("{} [current: {}]", description, s);
+                        // Don't pass empty string as default to avoid "()" display
+                        let default = if s.is_empty() { None } else { Some(s.as_str()) };
                         let answer = ctx
                             .input
-                            .text(&prompt_text, Some(s))
+                            .text(&description, default)
                             .context("Failed to get input")?;
                         serde_json::Value::String(answer)
                     }
@@ -1986,10 +1986,9 @@ impl UpdateCommand {
                         Value::Bool(answer)
                     }
                     Value::Number(n) => {
-                        let prompt_text = format!("{} [default: {}]", description, n);
                         let answer = ctx
                             .input
-                            .text(&prompt_text, Some(&n.to_string()))
+                            .text(&description, Some(&n.to_string()))
                             .context("Failed to get input")?;
 
                         // Try to parse as number
@@ -2002,14 +2001,11 @@ impl UpdateCommand {
                         }
                     }
                     Value::String(s) => {
-                        let prompt_text = if !s.is_empty() {
-                            format!("{} [default: {}]", description, s)
-                        } else {
-                            description.to_string()
-                        };
+                        // Don't pass empty string as default to avoid "()" display
+                        let default = if s.is_empty() { None } else { Some(s.as_str()) };
                         let answer = ctx
                             .input
-                            .text(&prompt_text, Some(s))
+                            .text(&description, default)
                             .context("Failed to get input")?;
                         Value::String(answer)
                     }
@@ -2151,10 +2147,9 @@ impl UpdateCommand {
                         Value::Bool(answer)
                     }
                     Some(Value::Number(n)) => {
-                        let prompt_text = format!("{} (current: {})", description, n);
                         let answer = ctx
                             .input
-                            .text(&prompt_text, Some(&n.to_string()))
+                            .text(&description, Some(&n.to_string()))
                             .context("Failed to get input")?;
 
                         // Try to parse as number
@@ -2167,14 +2162,11 @@ impl UpdateCommand {
                         }
                     }
                     Some(Value::String(s)) => {
-                        let prompt_text = if !s.is_empty() {
-                            format!("{} (current: {})", description, s)
-                        } else {
-                            description.to_string()
-                        };
+                        // Don't pass empty string as default to avoid "()" display
+                        let default = if s.is_empty() { None } else { Some(s.as_str()) };
                         let answer = ctx
                             .input
-                            .text(&prompt_text, Some(s))
+                            .text(&description, default)
                             .context("Failed to get input")?;
                         Value::String(answer)
                     }
@@ -2187,14 +2179,11 @@ impl UpdateCommand {
                         let current_str = current_value
                             .and_then(|v| serde_json::to_string(v).ok())
                             .unwrap_or_default();
-                        let prompt_text = if !current_str.is_empty() {
-                            format!("{} (current: {})", description, current_str)
-                        } else {
-                            description.to_string()
-                        };
+                        // Don't pass empty string as default to avoid "()" display
+                        let default = if current_str.is_empty() { None } else { Some(current_str.as_str()) };
                         let answer = ctx
                             .input
-                            .text(&prompt_text, Some(&current_str))
+                            .text(&description, default)
                             .context("Failed to get input")?;
                         Value::String(answer)
                     }

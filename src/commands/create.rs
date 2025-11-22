@@ -1691,10 +1691,9 @@ impl CreateCommand {
                     Ok(serde_json::Value::Bool(answer))
                 }
                 serde_json::Value::Number(n) => {
-                    let prompt_text = format!("{} [default: {}]", description, n);
                     let answer = ctx
                         .input
-                        .text(&prompt_text, Some(&n.to_string()))
+                        .text(&description, Some(&n.to_string()))
                         .context("Failed to get input")?;
 
                     // Try to parse as number
@@ -1709,15 +1708,11 @@ impl CreateCommand {
                     }
                 }
                 serde_json::Value::String(s) => {
-                    // Don't show default in prompt if empty
-                    let prompt_text = if !s.is_empty() {
-                        format!("{} [default: {}]", description, s)
-                    } else {
-                        description.to_string()
-                    };
+                    // Don't pass empty string as default to avoid "()" display
+                    let default = if s.is_empty() { None } else { Some(s.as_str()) };
                     let answer = ctx
                         .input
-                        .text(&prompt_text, Some(s))
+                        .text(&description, default)
                         .context("Failed to get input")?;
                     Ok(serde_json::Value::String(answer))
                 }
@@ -1762,32 +1757,27 @@ impl CreateCommand {
 
         match input_type {
             InputType::String => {
-                let prompt_text = if let Some(def) = default_str {
-                    // Don't show default in prompt if empty
-                    if !def.is_empty() {
-                        format!("{} [default: {}]", description, def)
-                    } else {
-                        description.to_string()
-                    }
-                } else {
+                let is_empty = default_str.map(|s| s.is_empty()).unwrap_or(true);
+                let prompt_text = if is_empty {
                     format!("{} [required]", description)
+                } else {
+                    description.to_string()
                 };
+                // Don't pass empty string as default to avoid "()" display
+                let default = if is_empty { None } else { default_str };
                 let answer = ctx
                     .input
-                    .text(&prompt_text, default_str)
+                    .text(&prompt_text, default)
                     .context("Failed to get input")?;
                 Ok(Value::String(answer))
             }
             InputType::Boolean => {
                 // Implement as select with Yes/No options
                 let options = vec!["Yes".to_string(), "No".to_string()];
-                let default_bool = default.and_then(|v| v.as_bool()).unwrap_or(false);
-                let default_str = if default_bool { "Yes" } else { "No" };
 
-                let prompt_text = format!("{} [default: {}]", description, default_str);
                 let selected = ctx
                     .input
-                    .select(&prompt_text, options)
+                    .select(&description, options)
                     .context("Failed to get input")?;
 
                 Ok(Value::Bool(selected == "Yes"))
@@ -2062,21 +2052,13 @@ impl CreateCommand {
             constraints.push(format!("max: {}", max_val));
         }
 
-        let default_part = if let Some(def) = default {
-            format!("default: {}", def)
-        } else {
-            "required".to_string()
-        };
-
+        // Build constraint text without default (inquire will show the default)
         let constraint_text = if !constraints.is_empty() {
-            format!(
-                "{}, {} - {}",
-                type_str,
-                constraints.join(", "),
-                default_part
-            )
+            format!("{}, {}", type_str, constraints.join(", "))
+        } else if default.is_none() {
+            format!("{} - required", type_str)
         } else {
-            format!("{} - {}", type_str, default_part)
+            type_str.to_string()
         };
 
         prompt.push_str(&format!(" [{}]", constraint_text));
