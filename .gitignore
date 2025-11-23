@@ -43,3 +43,4 @@ target
 
 /nul
 /examples/template-packs
+*.bak

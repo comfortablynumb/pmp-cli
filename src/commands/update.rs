@@ -1679,6 +1679,14 @@ impl UpdateCommand {
                 "_name".to_string(),
                 serde_json::Value::String(project_name.to_string()),
             );
+
+            // Add hyphenated version of project name (replacing underscores with hyphens)
+            let project_name_hyphens = project_name.replace('_', "-");
+            vars.insert(
+                "_project_name_hyphens".to_string(),
+                serde_json::Value::String(project_name_hyphens),
+            );
+
             for (key, value) in &inputs {
                 vars.insert(key.clone(), value.clone());
             }
