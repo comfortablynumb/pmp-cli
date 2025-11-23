@@ -5,88 +5,48 @@ metadata:
   description: This example project demonstrates all the functionalities found on PMP
 spec:
   categories:
-  - id: applications
-    name: Applications
-    description: Application workloads and services
-    subcategories:
-    - id: applications_gitops
-      name: GitOps
-      description: GitOps and continuous deployment tools
-      subcategories: []
-      templates:
-      - template_pack: argo-cd
-        template: argo-cd
-      - template_pack: argo-cd
-        template: helm-application
-    - id: applications_microservices
-      name: Microservices
-      description: Microservices and API applications
-      subcategories: []
-      templates:
-      - template_pack: examples
-        template: application
-    - id: applications_platform
+    - id: applications
+      name: Applications
+      description: Application workloads and services
+      subcategories:
+        - id: applications_argocd
+          name: ArgoCD Applications
+          description: Applications deployed with ArgoCD
+          subcategories: []
+          templates:
+            - template_pack: argo-cd
+              template: helm-application
+      templates: []
+    - id: platform-services
       name: Platform Services
       description: Core platform services and utilities
-      subcategories: []
-      templates:
-      - template_pack: kubernetes-workloads
-        template: helm
-      - template_pack: vault
-        template: vault
-    - id: applications_development
-      name: Development & Testing
-      description: Development and testing applications
-      subcategories: []
-      templates:
-      - template_pack: minikube-http-echo
-        template: minikube-http-echo
-    templates: []
-  - id: infrastructure
-    name: Infrastructure
-    description: Core infrastructure components and services
-    subcategories:
-    - id: infrastructure_databases
-      name: Databases
-      description: Database systems and data stores
-      subcategories: []
-      templates:
-      - template_pack: postgres
-        template: postgres
-    - id: infrastructure_networking
-      name: Networking
-      description: Service mesh and networking components
-      subcategories: []
-      templates:
-      - template_pack: kubernetes
-        template: linkerd
-    - id: infrastructure_observability
-      name: Observability
-      description: Monitoring, logging, and tracing
-      subcategories: []
-      templates:
-      - template_pack: kubernetes
-        template: k8s-monitoring
-    templates: []
-  - id: devops
-    name: DevOps
-    description: Development and operations tools
-    subcategories:
-    - id: devops_source_control
-      name: Source Control
-      description: Version control repositories
-      subcategories: []
-      templates:
-      - template_pack: github
-        template: repository
-    - id: devops_registries
-      name: Container Registries
-      description: Container image registries
-      subcategories: []
-      templates:
-      - template_pack: aws
-        template: ecr
-    templates: []
+      subcategories:
+        - id: platform-deployment-tools
+          name: Deployment Tools
+          description: Tools that simplify the deployment of applications
+          subcategories:
+            - id: platform-deployment-tools-argo-cd
+              name: ArgoCD
+              description: ArgoCD + Related Templates
+              subcategories: [ ]
+              templates:
+                - template_pack: argo-cd
+                  template: argo-cd
+                - template_pack: argo-cd
+                  template: argo-cd-core-configuration
+        - id: platform-secrets-managers
+          name: Secrets Managers
+          description: Tools that allow to manage secrets
+          subcategories:
+            - id: platform-secrets-managers-vault
+              name: Vault
+              description: Vault + Related Templates
+              subcategories: [ ]
+              templates:
+                - template_pack: vault
+                  template: vault
+                - template_pack: vault
+                  template: vault-core-configuration
   template_packs:
     postgres:
       templates:

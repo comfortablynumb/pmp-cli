@@ -367,10 +367,26 @@ impl SearchCommand {
     fn load_tags(
         _ctx: &Context,
         _infrastructure_root: &Path,
-        _resource: &DynamicProjectEnvironmentResource,
+        resource: &DynamicProjectEnvironmentResource,
     ) -> Result<TagConfig> {
-        // Tags functionality has been removed
-        anyhow::bail!("Tags functionality is not available")
+        // Extract tags from inputs
+        // Tags are stored in inputs with "tag_" prefix (e.g., tag_environment, tag_owner)
+        let mut tags = HashMap::new();
+
+        for (key, value) in &resource.spec.inputs {
+            if key.starts_with("tag_") {
+                let tag_name = key.strip_prefix("tag_").unwrap();
+                let tag_value = match value {
+                    serde_json::Value::String(s) => s.clone(),
+                    serde_json::Value::Number(n) => n.to_string(),
+                    serde_json::Value::Bool(b) => b.to_string(),
+                    _ => value.to_string(),
+                };
+                tags.insert(tag_name.to_string(), tag_value);
+            }
+        }
+
+        Ok(TagConfig { tags })
     }
 
     fn search_terraform_resources(
@@ -381,12 +397,10 @@ impl SearchCommand {
     ) -> Result<Vec<Match>> {
         let mut matches = Vec::new();
 
-        // In a real implementation:
-        // 1. Parse Terraform files (.tf)
-        // 2. Extract resource definitions
-        // 3. Match against criteria
+        // Parse Terraform files (.tf) to find resource definitions
+        // Format: resource "type" "name" { ... }
+        let resource_regex = regex::Regex::new(r#"resource\s+"([^"]+)"\s+"([^"]+)"\s*\{"#).unwrap();
 
-        // Mock implementation - search in .tf files
         for entry in std::fs::read_dir(env_path)? {
             let entry = entry?;
             let path = entry.path();
@@ -394,25 +408,35 @@ impl SearchCommand {
             if path.extension().and_then(|s| s.to_str()) == Some("tf")
                 && let Ok(content) = std::fs::read_to_string(&path)
             {
-                for line in content.lines() {
-                    if let Some(rtype) = resource_type
-                        && line.contains(&format!("resource \"{}\"", rtype))
-                    {
-                        matches.push(Match {
-                            field: "resource_type".to_string(),
-                            value: rtype.to_string(),
-                            context: Some(line.trim().to_string()),
-                        });
-                    }
+                for (line_num, line) in content.lines().enumerate() {
+                    if let Some(captures) = resource_regex.captures(line) {
+                        let res_type = captures.get(1).map(|m| m.as_str()).unwrap_or("");
+                        let res_name = captures.get(2).map(|m| m.as_str()).unwrap_or("");
 
-                    if let Some(rname) = resource_name
-                        && line.contains(rname)
-                    {
-                        matches.push(Match {
-                            field: "resource_name".to_string(),
-                            value: rname.to_string(),
-                            context: Some(line.trim().to_string()),
-                        });
+                        // Check if type matches (if specified)
+                        let type_matches = resource_type.is_none() ||
+                            resource_type == Some(res_type);
+
+                        // Check if name matches (if specified)
+                        let name_matches = resource_name.is_none() ||
+                            resource_name.map(|n| res_name.contains(n)).unwrap_or(false);
+
+                        if type_matches && name_matches {
+                            let file_name = path.file_name()
+                                .and_then(|n| n.to_str())
+                                .unwrap_or("unknown");
+
+                            matches.push(Match {
+                                field: "resource".to_string(),
+                                value: format!("{}.{}", res_type, res_name),
+                                context: Some(format!(
+                                    "{}:{} - {}",
+                                    file_name,
+                                    line_num + 1,
+                                    line.trim()
+                                )),
+                            });
+                        }
                     }
                 }
             }
@@ -428,7 +452,10 @@ impl SearchCommand {
     ) -> Result<Vec<Match>> {
         let mut matches = Vec::new();
 
-        // Search in .tf files for output definitions
+        // Parse Terraform files (.tf) to find output definitions
+        // Format: output "name" { ... }
+        let output_regex = regex::Regex::new(r#"output\s+"([^"]+)"\s*\{"#).unwrap();
+
         for entry in std::fs::read_dir(env_path)? {
             let entry = entry?;
             let path = entry.path();
@@ -436,13 +463,27 @@ impl SearchCommand {
             if path.extension().and_then(|s| s.to_str()) == Some("tf")
                 && let Ok(content) = std::fs::read_to_string(&path)
             {
-                for line in content.lines() {
-                    if line.contains(&format!("output \"{}\"", output_name)) {
-                        matches.push(Match {
-                            field: "output".to_string(),
-                            value: output_name.to_string(),
-                            context: Some(line.trim().to_string()),
-                        });
+                for (line_num, line) in content.lines().enumerate() {
+                    if let Some(captures) = output_regex.captures(line) {
+                        let out_name = captures.get(1).map(|m| m.as_str()).unwrap_or("");
+
+                        // Check if output name matches (exact or contains)
+                        if out_name == output_name || out_name.contains(output_name) {
+                            let file_name = path.file_name()
+                                .and_then(|n| n.to_str())
+                                .unwrap_or("unknown");
+
+                            matches.push(Match {
+                                field: "output".to_string(),
+                                value: out_name.to_string(),
+                                context: Some(format!(
+                                    "{}:{} - {}",
+                                    file_name,
+                                    line_num + 1,
+                                    line.trim()
+                                )),
+                            });
+                        }
                     }
                 }
             }

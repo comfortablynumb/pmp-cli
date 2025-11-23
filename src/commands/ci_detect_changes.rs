@@ -5,7 +5,7 @@ use crate::template::DynamicProjectEnvironmentResource;
 use anyhow::{Context as _, Result};
 use serde::Serialize;
 use std::collections::{HashSet, HashMap};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 #[derive(Debug, Serialize, Clone)]
@@ -69,12 +69,11 @@ impl CiDetectChangesCommand {
             if let Ok(env_entries) = ctx.fs.read_dir(&environments_dir) {
                 for env_path in env_entries {
                     let env_file = env_path.join(".pmp.environment.yaml");
-                    if ctx.fs.exists(&env_file) {
-                        if let Ok(resource) = DynamicProjectEnvironmentResource::from_file(&*ctx.fs, &env_file) {
+                    if ctx.fs.exists(&env_file)
+                        && let Ok(resource) = DynamicProjectEnvironmentResource::from_file(&*ctx.fs, &env_file) {
                             let key = (resource.metadata.name.clone(), resource.metadata.environment_name.clone());
                             project_envs.insert(key, env_path);
                         }
-                    }
                 }
             }
         }
@@ -96,7 +95,7 @@ impl CiDetectChangesCommand {
     /// Check if infrastructure configuration file changed
     fn has_infrastructure_changes(base_ref: &str, head_ref: &str) -> Result<bool> {
         let output = Command::new("git")
-            .args(&[
+            .args([
                 "diff",
                 "--name-only",
                 &format!("{}...{}", base_ref, head_ref),
@@ -121,7 +120,7 @@ impl CiDetectChangesCommand {
     /// Get list of changed files from git diff
     fn get_changed_files(base_ref: &str, head_ref: &str) -> Result<Vec<String>> {
         let output = Command::new("git")
-            .args(&[
+            .args([
                 "diff",
                 "--name-only",
                 &format!("{}...{}", base_ref, head_ref),
@@ -156,11 +155,10 @@ impl CiDetectChangesCommand {
                 let environment = parts[4].to_string();
 
                 // Apply environment filter if specified
-                if let Some(filter_env) = environment_filter {
-                    if environment != filter_env {
+                if let Some(filter_env) = environment_filter
+                    && environment != filter_env {
                         continue;
                     }
-                }
 
                 projects.insert((project_name, environment));
             }
@@ -174,7 +172,7 @@ impl CiDetectChangesCommand {
         changed_projects: &HashSet<(String, String)>,
         project_envs: &HashMap<(String, String), PathBuf>,
         ctx: &Context,
-        infrastructure_root: &PathBuf,
+        infrastructure_root: &Path,
     ) -> Result<Vec<ChangedProject>> {
         let mut affected = HashSet::new();
 

@@ -6,6 +6,9 @@ use anyhow::{Context as _, Result};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+// Type alias for template selection result
+type TemplateSelectionResult = (Vec<String>, HashMap<String, (String, String, String, String)>);
+
 pub struct InfrastructureCommand;
 
 impl InfrastructureCommand {
@@ -368,7 +371,7 @@ impl InfrastructureCommand {
     fn select_allowed_templates(
         ctx: &Context,
         template_packs: &[TemplatePackInfo],
-    ) -> Result<(Vec<String>, HashMap<String, (String, String, String, String)>)> {
+    ) -> Result<TemplateSelectionResult> {
         // Discover all templates across all packs
         let mut all_templates: Vec<(String, crate::template::TemplateInfo)> = Vec::new();
         for pack in template_packs {

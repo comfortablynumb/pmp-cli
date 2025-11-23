@@ -421,7 +421,7 @@ impl GenerateCommand {
                 serde_json::Value::Number(n) => {
                     let answer = ctx
                         .input
-                        .text(&description, Some(&n.to_string()))
+                        .text(description, Some(&n.to_string()))
                         .context("Failed to get input")?;
 
                     // Try to parse as number
@@ -440,7 +440,7 @@ impl GenerateCommand {
                     let default = if s.is_empty() { None } else { Some(s.as_str()) };
                     let answer = ctx
                         .input
-                        .text(&description, default)
+                        .text(description, default)
                         .context("Failed to get input")?;
                     Ok(serde_json::Value::String(answer))
                 }
@@ -448,7 +448,7 @@ impl GenerateCommand {
                     // Null default is treated as no default
                     let answer = ctx
                         .input
-                        .text(&description, None)
+                        .text(description, None)
                         .context("Failed to get input")?;
                     Ok(serde_json::Value::String(answer))
                 }

@@ -337,3 +337,28 @@ impl Default for OpenTofuExecutor {
         Self::new()
     }
 }
+
+// Additional methods for OpenTofuExecutor (not part of the Executor trait)
+impl OpenTofuExecutor {
+    /// Run plan and capture output for drift detection
+    /// Uses -detailed-exitcode which returns:
+    /// - 0: no changes
+    /// - 1: error
+    /// - 2: changes detected
+    pub fn plan_with_output(
+        &self,
+        working_dir: &str,
+        extra_args: &[&str],
+    ) -> Result<Output> {
+        let mut args = vec!["plan", "-detailed-exitcode", "-no-color"];
+        args.extend(extra_args);
+
+        let output = Command::new("tofu")
+            .args(&args)
+            .current_dir(working_dir)
+            .output()
+            .context("Failed to execute tofu plan command")?;
+
+        Ok(output)
+    }
+}

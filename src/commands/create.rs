@@ -247,11 +247,11 @@ impl CreateCommand {
 
         let plugin_inputs = if customize {
             ctx.output.dimmed("  Collecting plugin inputs...");
-            Self::collect_plugin_inputs(ctx, &merged_inputs, project_name)?
+            Self::collect_plugin_inputs(ctx, &merged_inputs, project_name, None)?
         } else {
             // Use defaults
             ctx.output.dimmed("  Using default values...");
-            Self::build_default_inputs(&merged_inputs, project_name)?
+            Self::build_default_inputs(&merged_inputs, project_name, None)?
         };
 
         Ok(Some(CollectedPluginInfo {
@@ -341,6 +341,7 @@ impl CreateCommand {
     fn build_default_inputs(
         inputs_spec: &[crate::template::metadata::InputDefinition],
         project_name: &str,
+        environment_name: Option<&str>,
     ) -> Result<HashMap<String, Value>> {
         let mut inputs = HashMap::new();
 
@@ -355,7 +356,7 @@ impl CreateCommand {
 
             if let Some(default) = &input_def.default {
                 // Build variables map for interpolation
-                let vars = Self::get_interpolation_variables(&inputs, project_name);
+                let vars = Self::get_interpolation_variables(&inputs, project_name, environment_name);
 
                 // Interpolate both ${env:...} and ${var:...} patterns in the default value
                 let interpolated_value =
@@ -401,6 +402,7 @@ impl CreateCommand {
         ctx: &crate::context::Context,
         inputs_spec: &[crate::template::metadata::InputDefinition],
         project_name: &str,
+        environment_name: Option<&str>,
     ) -> Result<HashMap<String, Value>> {
         let mut inputs = HashMap::new();
 
@@ -416,7 +418,7 @@ impl CreateCommand {
             }
 
             // Get variables for interpolation
-            let vars = Self::get_interpolation_variables(&inputs, project_name);
+            let vars = Self::get_interpolation_variables(&inputs, project_name, environment_name);
 
             // Interpolate variables in the description (supports both ${env:...} and ${var:...})
             let description = if let Some(desc) = &input_def.description {
@@ -1302,6 +1304,7 @@ impl CreateCommand {
                         ctx,
                         &merged_inputs,
                         &project_name,
+                        Some(&selected_environment),
                         collection_overrides,
                     )
                     .context("Failed to collect inputs")?;
@@ -1531,6 +1534,7 @@ impl CreateCommand {
         ctx: &crate::context::Context,
         inputs_spec: &[crate::template::metadata::InputDefinition],
         project_name: &str,
+        environment_name: Option<&str>,
         collection_overrides: Option<
             &std::collections::HashMap<String, crate::template::metadata::InputOverride>,
         >,
@@ -1557,7 +1561,7 @@ impl CreateCommand {
                 if !override_cfg.show_as_default {
                     // Use the override value directly without prompting the user
                     // Still need to interpolate variables in the override value (supports ${env:...} and ${var:...})
-                    let vars = Self::get_interpolation_variables(&inputs, project_name);
+                    let vars = Self::get_interpolation_variables(&inputs, project_name, environment_name);
                     crate::template::utils::interpolate_value_all(&override_cfg.value, &vars)?
                 } else {
                     // Show the override value as the default and let user override
@@ -1568,6 +1572,7 @@ impl CreateCommand {
                         Some(&override_cfg.value),
                         &inputs,
                         project_name,
+                        environment_name,
                     )?
                 }
             } else {
@@ -1579,6 +1584,7 @@ impl CreateCommand {
                     None,
                     &inputs,
                     project_name,
+                    environment_name,
                 )?
             };
 
@@ -1592,6 +1598,7 @@ impl CreateCommand {
     fn get_interpolation_variables(
         inputs: &HashMap<String, Value>,
         project_name: &str,
+        environment_name: Option<&str>,
     ) -> HashMap<String, Value> {
         let mut vars = HashMap::new();
         vars.insert("_name".to_string(), Value::String(project_name.to_string()));
@@ -1599,6 +1606,11 @@ impl CreateCommand {
         // Add hyphenated version of project name (replacing underscores with hyphens)
         let project_name_hyphens = project_name.replace('_', "-");
         vars.insert("_project_name_hyphens".to_string(), Value::String(project_name_hyphens));
+
+        // Add environment name if provided
+        if let Some(env_name) = environment_name {
+            vars.insert("_environment_name".to_string(), Value::String(env_name.to_string()));
+        }
 
         // Add all collected inputs so far (for progressive interpolation)
         for (key, value) in inputs {
@@ -1616,9 +1628,10 @@ impl CreateCommand {
         collection_default: Option<&serde_json::Value>,
         current_inputs: &HashMap<String, Value>,
         project_name: &str,
+        environment_name: Option<&str>,
     ) -> Result<serde_json::Value> {
         // Get variables for interpolation
-        let vars = Self::get_interpolation_variables(current_inputs, project_name);
+        let vars = Self::get_interpolation_variables(current_inputs, project_name, environment_name);
 
         // Interpolate variables in the description (supports both ${env:...} and ${var:...})
         let description = if let Some(desc) = &input_spec.description {
@@ -1773,7 +1786,7 @@ impl CreateCommand {
 
                 let selected = ctx
                     .input
-                    .select(&description, options)
+                    .select(description, options)
                     .context("Failed to get input")?;
 
                 Ok(Value::Bool(selected == "Yes"))
@@ -3986,6 +3999,68 @@ spec:
         assert!(
             env_content.contains("docker_image: registry/my_service:latest"),
             "Infrastructure override should be interpolated"
+        );
+    }
+
+    #[test]
+    fn test_string_interpolation_environment_name() {
+        // Set up mock filesystem
+        let fs = Arc::new(MockFileSystem::new());
+
+        // Set up template pack with interpolated default value using _environment_name
+        setup_template_pack(
+            &fs,
+            "test-pack",
+            "test-template",
+            "TestResource",
+            r#"    bucket_name:
+      default: "${var:_name}-${var:_environment_name}"
+      description: "Bucket name with environment""#,
+        );
+
+        setup_infrastructure(
+            &fs,
+            r#"    - apiVersion: pmp.io/v1
+      kind: TestResource"#,
+        );
+
+        // Set up mock user input
+        let input = MockUserInput::new();
+        input.add_response(MockResponse::Select(
+            "📁 TestResource (pmp.io/v1) - Test resource type".to_string(),
+        )); // category selection
+        input.add_response(MockResponse::Select(
+            "📄 test-template - Test template".to_string(),
+        )); // template selection
+        input.add_response(MockResponse::Text("myapp".to_string())); // project name
+        input.add_response(MockResponse::Text("myapp-dev".to_string())); // Accept the interpolated default
+        input.add_response(MockResponse::Confirm(false)); // apply after create
+
+        let ctx = create_test_context(Arc::clone(&fs), input);
+
+        // Run create command
+        let result = CreateCommand::execute(&ctx, None, None);
+
+        assert!(
+            result.is_ok(),
+            "Create command should succeed: {:?}",
+            result
+        );
+
+        // Verify the interpolated default was used with environment name
+        let current_dir = std::env::current_dir().unwrap();
+        let env_file_path = current_dir
+            .join("projects/test_resource/myapp/environments/dev/.pmp.environment.yaml");
+        assert!(
+            fs.has_file(&env_file_path),
+            "Environment file should be created"
+        );
+
+        let env_content = fs.get_file_contents(&env_file_path).unwrap();
+        assert!(
+            env_content.contains("bucket_name: myapp-dev"),
+            "Default value should be interpolated with project name and environment name. Got: {}",
+            env_content
         );
     }
 

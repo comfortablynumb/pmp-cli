@@ -306,12 +306,13 @@ impl DriftCommand {
 
         executor.refresh(&config, env_path_str, &[])?;
 
-        // Run plan to detect changes
+        // Run plan to detect changes with output capture
         ctx.output.dimmed("Detecting changes...");
 
-        // For drift detection, we would analyze the plan output
-        // For now, this is a simplified version
-        let changes = Vec::new(); // Placeholder - would parse actual plan output
+        let plan_output = executor.plan_with_output(env_path_str, &[])?;
+
+        // Parse plan output to extract changes
+        let changes = Self::parse_plan_output(&plan_output)?;
 
         Ok(DriftReport {
             project: resource.metadata.name.clone(),
@@ -320,6 +321,86 @@ impl DriftCommand {
             has_drift: !changes.is_empty(),
             changes,
         })
+    }
+
+    /// Parse Terraform/OpenTofu plan output to extract drift changes
+    fn parse_plan_output(output: &std::process::Output) -> Result<Vec<DriftChange>> {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let mut changes = Vec::new();
+
+        // Parse the plan output
+        // Terraform/OpenTofu plan shows changes in this format:
+        // # resource_address will be created/updated/destroyed
+        // + attribute = "value"  (added)
+        // ~ attribute = "old" -> "new"  (modified)
+        // - attribute = "value"  (removed)
+
+        let lines: Vec<&str> = stdout.lines().collect();
+        let mut current_resource = String::new();
+
+        // Regex patterns for parsing
+        let resource_pattern = regex::Regex::new(r"^#\s+(.+?)\s+(will be|must be)\s+(created|updated|destroyed|replaced)").unwrap();
+        let change_pattern = regex::Regex::new(r"^\s+([+~-])\s+(.+?)\s+=\s+(.+)$").unwrap();
+        let arrow_pattern = regex::Regex::new(r#""(.+?)"\s+->\s+"(.+?)""#).unwrap();
+
+        for line in lines {
+            // Check for resource declaration
+            if let Some(caps) = resource_pattern.captures(line) {
+                current_resource = caps.get(1).map(|m| m.as_str()).unwrap_or("").to_string();
+            }
+            // Check for attribute changes
+            else if let Some(caps) = change_pattern.captures(line) {
+                let symbol = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+                let attribute = caps.get(2).map(|m| m.as_str()).unwrap_or("").trim();
+                let value_part = caps.get(3).map(|m| m.as_str()).unwrap_or("").trim();
+
+                let change_type = match symbol {
+                    "+" => ChangeType::Added,
+                    "-" => ChangeType::Removed,
+                    "~" => ChangeType::Modified,
+                    _ => continue,
+                };
+
+                // For modifications, try to extract old -> new values
+                let (expected, actual) = if change_type == ChangeType::Modified {
+                    if let Some(arrow_caps) = arrow_pattern.captures(value_part) {
+                        let old = arrow_caps.get(1).map(|m| m.as_str()).unwrap_or("").to_string();
+                        let new = arrow_caps.get(2).map(|m| m.as_str()).unwrap_or("").to_string();
+                        (old, new)
+                    } else {
+                        // Fallback if pattern doesn't match
+                        ("(unknown)".to_string(), value_part.to_string())
+                    }
+                } else if change_type == ChangeType::Added {
+                    ("(not set)".to_string(), value_part.to_string())
+                } else {
+                    (value_part.to_string(), "(removed)".to_string())
+                };
+
+                if !current_resource.is_empty() {
+                    changes.push(DriftChange {
+                        resource_address: current_resource.clone(),
+                        change_type,
+                        attribute: attribute.to_string(),
+                        expected,
+                        actual,
+                    });
+                }
+            }
+        }
+
+        // If no detailed changes were found but exit code was 2, add a summary
+        if changes.is_empty() && output.status.code() == Some(2) {
+            changes.push(DriftChange {
+                resource_address: "(multiple resources)".to_string(),
+                change_type: ChangeType::Modified,
+                attribute: "configuration".to_string(),
+                expected: "declared state".to_string(),
+                actual: "actual state differs".to_string(),
+            });
+        }
+
+        Ok(changes)
     }
 
     /// Display drift changes

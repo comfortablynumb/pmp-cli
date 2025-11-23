@@ -29,28 +29,25 @@ impl ExecutionHelper {
         }
 
         // Check if helm_provider.auto_repo_update is enabled
-        if let Some(executor_config) = &infrastructure.spec.executor {
-            if let Some(helm_provider_config) = executor_config.config.get("helm_provider") {
-                if let Some(auto_update) = helm_provider_config.get("auto_repo_update") {
-                    if auto_update.as_bool().unwrap_or(false) {
-                        ctx.output.dimmed("Running helm repo update (auto_repo_update enabled)...");
+        if let Some(executor_config) = &infrastructure.spec.executor
+            && let Some(helm_provider_config) = executor_config.config.get("helm_provider")
+            && let Some(auto_update) = helm_provider_config.get("auto_repo_update")
+            && auto_update.as_bool().unwrap_or(false) {
+                ctx.output.dimmed("Running helm repo update (auto_repo_update enabled)...");
 
-                        let output = Command::new("helm")
-                            .arg("repo")
-                            .arg("update")
-                            .output()
-                            .context("Failed to execute helm repo update. Is helm installed?")?;
+                let output = Command::new("helm")
+                    .arg("repo")
+                    .arg("update")
+                    .output()
+                    .context("Failed to execute helm repo update. Is helm installed?")?;
 
-                        if !output.status.success() {
-                            let stderr = String::from_utf8_lossy(&output.stderr);
-                            anyhow::bail!("helm repo update failed: {}", stderr);
-                        }
-
-                        ctx.output.success("Helm repositories updated");
-                    }
+                if !output.status.success() {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    anyhow::bail!("helm repo update failed: {}", stderr);
                 }
+
+                ctx.output.success("Helm repositories updated");
             }
-        }
 
         Ok(())
     }

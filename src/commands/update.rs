@@ -36,6 +36,17 @@ struct CompatibleProject {
     allowed_plugin_config: AllowedPluginConfig,
 }
 
+/// Information about a collected plugin (for installed plugins during update)
+#[derive(Debug, Clone)]
+struct CollectedPluginInfo {
+    template_pack_name: String,
+    plugin_name: String,
+    plugin_path: PathBuf,
+    inputs: HashMap<String, Value>,
+    reference_project: Option<crate::template::metadata::ProjectReference>,
+    reference_env: Option<DynamicProjectEnvironmentResource>,
+}
+
 impl UpdateCommand {
     /// Execute the update command
     pub fn execute(
@@ -248,6 +259,7 @@ impl UpdateCommand {
             &merged_inputs,
             current_inputs,
             &project_name,
+            &env_name,
         )
         .context("Failed to collect inputs")?;
 
@@ -265,11 +277,86 @@ impl UpdateCommand {
             serde_json::Value::String(matching_template.resource.spec.kind.clone()),
         );
 
-        // Add plugins data for template rendering (if any plugins are added)
-        if let Some(plugins) = &current_env_resource.spec.plugins {
+        // Process installed plugins from template spec
+        let mut newly_collected_plugins = Vec::new();
+        if let Some(plugins_config) = &matching_template.resource.spec.plugins
+            && !plugins_config.installed.is_empty() {
+                output::blank();
+                output::subsection("Processing Installed Plugins");
+                output::dimmed("Checking for new plugins defined in template...");
+
+                // Get currently added plugins from environment
+                let current_plugins = current_env_resource
+                    .spec
+                    .plugins
+                    .as_ref()
+                    .map(|p| &p.added)
+                    .map(|p| p.as_slice())
+                    .unwrap_or(&[]);
+
+                // Discover projects (needed for plugins that require reference projects)
+                let discovered_projects = CollectionDiscovery::discover_projects(
+                    &*ctx.fs,
+                    &*ctx.output,
+                    &collection_root,
+                )?;
+
+                // Check each installed plugin
+                for installed_config in &plugins_config.installed {
+                    // Check if this plugin is already added to the environment
+                    let already_added = current_plugins.iter().any(|added_plugin| {
+                        added_plugin.template_pack_name == installed_config.template_pack_name
+                            && added_plugin.name == installed_config.plugin_name
+                    });
+
+                    if already_added {
+                        output::dimmed(&format!(
+                            "  Plugin {}/{} is already added, skipping",
+                            installed_config.template_pack_name, installed_config.plugin_name
+                        ));
+                        continue;
+                    }
+
+                    // Plugin not added yet, collect inputs for it
+                    output::blank();
+                    output::dimmed(&format!(
+                        "  Installing new plugin: {}/{}",
+                        installed_config.template_pack_name, installed_config.plugin_name
+                    ));
+
+                    // Reuse collect_plugin_info from create command
+                    if let Some(plugin_info) = Self::collect_plugin_info_for_update(
+                        ctx,
+                        installed_config,
+                        &_all_template_packs,
+                        &discovered_projects,
+                        &collection_root,
+                        &project_name,
+                        &env_name,
+                    )? {
+                        newly_collected_plugins.push(plugin_info);
+                    }
+                }
+            }
+
+        // Add plugins data for template rendering (including existing and newly collected)
+        let mut all_plugins_for_rendering = if let Some(plugins) = &current_env_resource.spec.plugins {
+            plugins.clone()
+        } else {
+            ProjectPlugins { added: Vec::new() }
+        };
+
+        // Render the newly collected plugins to get AddedPlugin structs
+        if !newly_collected_plugins.is_empty() {
+            // We'll render these plugins after user confirmation, but we need to prepare the data
             new_inputs.insert(
                 "_plugins".to_string(),
-                serde_json::to_value(plugins).context("Failed to serialize plugins")?,
+                serde_json::to_value(&all_plugins_for_rendering).context("Failed to serialize plugins")?,
+            );
+        } else if current_env_resource.spec.plugins.is_some() {
+            new_inputs.insert(
+                "_plugins".to_string(),
+                serde_json::to_value(&all_plugins_for_rendering).context("Failed to serialize plugins")?,
             );
         }
 
@@ -282,6 +369,72 @@ impl UpdateCommand {
         if !confirm {
             output::dimmed("Update cancelled");
             return Ok(());
+        }
+
+        // Render newly collected plugins first (if any)
+        let mut newly_added_plugins = Vec::new();
+        if !newly_collected_plugins.is_empty() {
+            output::subsection("Rendering New Plugins");
+            output::dimmed("Rendering newly installed plugins...");
+
+            for plugin_info in newly_collected_plugins {
+                // Render plugin files
+                let mut module_path = env_path
+                    .join("modules")
+                    .join(&plugin_info.template_pack_name)
+                    .join(&plugin_info.plugin_name);
+
+                // Add reference project name to path if this plugin requires a reference project
+                if let Some(ref_project) = &plugin_info.reference_project {
+                    module_path = module_path.join(&ref_project.name);
+                }
+
+                let plugin_renderer = TemplateRenderer::new();
+                let plugin_context = Some((
+                    plugin_info.template_pack_name.as_str(),
+                    plugin_info.plugin_name.as_str(),
+                ));
+
+                let _generated_files = plugin_renderer
+                    .render_template(
+                        ctx,
+                        &plugin_info.plugin_path,
+                        &module_path,
+                        &plugin_info.inputs,
+                        plugin_context,
+                    )
+                    .context("Failed to render plugin files")?;
+
+                // Build AddedPlugin struct
+                let plugin_project_ref = PluginProjectReference {
+                    api_version: matching_template.resource.spec.api_version.clone(),
+                    kind: matching_template.resource.spec.kind.clone(),
+                    name: project_name.clone(),
+                    environment: env_name.clone(),
+                };
+
+                let reference_project = plugin_info.reference_env.as_ref().map(|ref_env| {
+                    PluginProjectReference {
+                        api_version: ref_env.api_version.clone(),
+                        kind: ref_env.kind.clone(),
+                        name: ref_env.metadata.name.clone(),
+                        environment: ref_env.metadata.environment_name.clone(),
+                    }
+                });
+
+                newly_added_plugins.push(AddedPlugin {
+                    template_pack_name: plugin_info.template_pack_name.clone(),
+                    name: plugin_info.plugin_name.clone(),
+                    project: plugin_project_ref,
+                    reference_project,
+                    inputs: plugin_info.inputs,
+                    files: Vec::new(), // Will be populated when files are generated
+                    plugin_spec: None, // Not needed for update command
+                });
+            }
+
+            // Merge newly added plugins with existing plugins
+            all_plugins_for_rendering.added.extend(newly_added_plugins.clone());
         }
 
         // Render template into environment directory
@@ -310,12 +463,12 @@ impl UpdateCommand {
 
             if executor.supports_backend() {
                 output::dimmed("  Updating common file with backend configuration...");
-                // Get plugins from current environment resource to include in common file
-                let plugins = current_env_resource
-                    .spec
-                    .plugins
-                    .as_ref()
-                    .map(|p| p.added.as_slice());
+                // Use merged plugins list (existing + newly added)
+                let plugins = if !all_plugins_for_rendering.added.is_empty() {
+                    Some(all_plugins_for_rendering.added.as_slice())
+                } else {
+                    None
+                };
                 let template_reference_projects =
                     &current_env_resource.spec.template_reference_projects;
                 let metadata = crate::executor::ProjectMetadata {
@@ -347,6 +500,13 @@ impl UpdateCommand {
             .map(|t| t.template_pack_name.as_str())
             .unwrap_or(&matching_template.resource.metadata.name);
 
+        // Pass merged plugins to environment file generation
+        let plugins_for_yaml = if !all_plugins_for_rendering.added.is_empty() {
+            Some(&all_plugins_for_rendering)
+        } else {
+            None
+        };
+
         Self::generate_project_environment_yaml(
             ctx,
             &env_path,
@@ -356,6 +516,8 @@ impl UpdateCommand {
             &new_inputs,
             template_pack_name,
             &matching_template.resource.metadata.name,
+            plugins_for_yaml,
+            &current_env_resource,
         )
         .context("Failed to update .pmp.environment.yaml file")?;
 
@@ -900,7 +1062,7 @@ impl UpdateCommand {
         output::dimmed("Please provide the following information:");
 
         let mut plugin_inputs =
-            Self::collect_plugin_inputs(ctx, &merged_inputs, target_project_name)?;
+            Self::collect_plugin_inputs(ctx, &merged_inputs, target_project_name, target_env_name)?;
 
         // 6. Add internal fields (inherit from target project/environment)
         plugin_inputs.insert(
@@ -1414,6 +1576,7 @@ impl UpdateCommand {
             &plugin_info.resource.spec.inputs,
             &current_inputs,
             project_name,
+            env_name,
         )?;
 
         // Confirm update
@@ -1652,6 +1815,7 @@ impl UpdateCommand {
         inputs_spec: &[crate::template::metadata::InputDefinition],
         current_inputs: &std::collections::HashMap<String, serde_json::Value>,
         project_name: &str,
+        environment_name: &str,
     ) -> Result<std::collections::HashMap<String, serde_json::Value>> {
         use crate::template::utils::{interpolate_all, interpolate_value_all};
 
@@ -1685,6 +1849,12 @@ impl UpdateCommand {
             vars.insert(
                 "_project_name_hyphens".to_string(),
                 serde_json::Value::String(project_name_hyphens),
+            );
+
+            // Add environment name
+            vars.insert(
+                "_environment_name".to_string(),
+                serde_json::Value::String(environment_name.to_string()),
             );
 
             for (key, value) in &inputs {
@@ -1846,6 +2016,217 @@ impl UpdateCommand {
         )
     }
 
+    /// Collect inputs for a single installed plugin (for update command)
+    #[allow(clippy::too_many_arguments)]
+    fn collect_plugin_info_for_update(
+        ctx: &crate::context::Context,
+        installed_config: &crate::template::metadata::AllowedPluginConfig,
+        template_packs: &[crate::template::TemplatePackInfo],
+        projects: &[crate::template::metadata::ProjectReference],
+        collection_root: &Path,
+        project_name: &str,
+        environment_name: &str,
+    ) -> Result<Option<CollectedPluginInfo>> {
+        // Find the template pack containing this plugin
+        let template_pack = template_packs
+            .iter()
+            .find(|pack| pack.resource.metadata.name == installed_config.template_pack_name);
+
+        let template_pack = match template_pack {
+            Some(pack) => pack,
+            None => {
+                ctx.output.warning(&format!(
+                    "  Template pack '{}' not found. Skipping plugin '{}'.",
+                    installed_config.template_pack_name, installed_config.plugin_name
+                ));
+                return Ok(None);
+            }
+        };
+
+        // Discover plugins in this template pack
+        let plugins = TemplateDiscovery::discover_plugins_in_pack(
+            &*ctx.fs,
+            &*ctx.output,
+            &template_pack.path,
+            &template_pack.resource.metadata.name,
+        )?;
+
+        // Find the specific plugin
+        let plugin_info = plugins
+            .iter()
+            .find(|p| p.resource.metadata.name == installed_config.plugin_name);
+
+        let plugin_info = match plugin_info {
+            Some(info) => info,
+            None => {
+                ctx.output.warning(&format!(
+                    "  Plugin '{}' not found in template pack '{}'. Skipping.",
+                    installed_config.plugin_name, installed_config.template_pack_name
+                ));
+                return Ok(None);
+            }
+        };
+
+        // Check if plugin requires a reference project
+        let (reference_project, reference_env) = if let Some(required_template) =
+            &plugin_info.resource.spec.requires_project_with_template
+        {
+            // Find compatible projects (same logic as create command)
+            let compatible_projects: Vec<_> = projects.iter()
+                .filter_map(|project| {
+                    let project_path = collection_root.join(&project.path);
+                    let environments_dir = project_path.join("environments");
+
+                    if let Ok(env_entries) = ctx.fs.read_dir(&environments_dir) {
+                        for env_path in env_entries {
+                            let env_file = env_path.join(".pmp.environment.yaml");
+                            if ctx.fs.exists(&env_file)
+                                && let Ok(env_resource) = crate::template::metadata::DynamicProjectEnvironmentResource::from_file(&*ctx.fs, &env_file)
+                                    && env_resource.api_version == required_template.api_version
+                                        && env_resource.kind == required_template.kind
+                                    {
+                                        // Check label selectors if provided
+                                        if let Some(label_selector) = &required_template.label_selector {
+                                            if !project.labels.is_empty() {
+                                                // All required labels must match
+                                                let matches = label_selector.iter().all(|(key, value)| {
+                                                    project.labels.get(key).map(|v| v == value).unwrap_or(false)
+                                                });
+                                                if !matches {
+                                                    continue;
+                                                }
+                                            } else {
+                                                // Project has no labels, can't match selector
+                                                continue;
+                                            }
+                                        }
+
+                                        return Some((project.clone(), env_resource));
+                                    }
+                        }
+                    }
+                    None
+                })
+                .collect();
+
+            if compatible_projects.is_empty() {
+                ctx.output.warning(&format!(
+                    "  Plugin '{}' requires a {} project, but none found. Skipping.",
+                    installed_config.plugin_name, required_template.kind
+                ));
+                return Ok(None);
+            }
+
+            // Let user select a compatible project
+            let project_names: Vec<String> = compatible_projects
+                .iter()
+                .map(|(p, env)| {
+                    // Show project name with environment and labels if available
+                    let mut parts = vec![format!("{} ({})", p.name, env.metadata.environment_name)];
+                    if !p.labels.is_empty() {
+                        let labels_str = p.labels
+                            .iter()
+                            .map(|(k, v)| format!("{}={}", k, v))
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        parts.push(format!("[{}]", labels_str));
+                    }
+                    parts.join(" ")
+                })
+                .collect();
+
+            let selected_display = ctx
+                .input
+                .select("  Select reference project:", project_names.clone())?;
+
+            // Find the matching project by display name
+            let selected_idx = project_names
+                .iter()
+                .position(|name| name == &selected_display)
+                .context("Selected project not found in list")?;
+
+            let (selected_project, selected_env) = &compatible_projects[selected_idx];
+            (Some(selected_project.clone()), Some(selected_env.clone()))
+        } else {
+            (None, None)
+        };
+
+        // Merge plugin inputs with installed config inputs
+        let mut merged_inputs = plugin_info.resource.spec.inputs.clone();
+        // Append installed config inputs, overriding any existing inputs with the same name
+        for installed_input in &installed_config.inputs {
+            // Remove any existing input with the same name
+            merged_inputs.retain(|input_def| input_def.name != installed_input.name);
+            // Add the installed config input
+            merged_inputs.push(installed_input.clone());
+        }
+
+        // Ask user if they want to customize inputs
+        let customize = ctx
+            .input
+            .confirm("  Do you want to customize inputs for this plugin?", false)?;
+
+        let plugin_inputs = if customize {
+            ctx.output.dimmed("  Collecting plugin inputs...");
+            Self::collect_plugin_inputs(ctx, &merged_inputs, project_name, environment_name)?
+        } else {
+            // Use defaults
+            ctx.output.dimmed("  Using default values...");
+            Self::build_default_plugin_inputs(&merged_inputs, project_name, environment_name)?
+        };
+
+        Ok(Some(CollectedPluginInfo {
+            template_pack_name: installed_config.template_pack_name.clone(),
+            plugin_name: installed_config.plugin_name.clone(),
+            plugin_path: plugin_info.path.clone(),
+            inputs: plugin_inputs,
+            reference_project,
+            reference_env,
+        }))
+    }
+
+    /// Build default inputs for plugins without prompting user
+    fn build_default_plugin_inputs(
+        inputs_spec: &[crate::template::metadata::InputDefinition],
+        project_name: &str,
+        environment_name: &str,
+    ) -> Result<HashMap<String, Value>> {
+        let mut inputs = HashMap::new();
+
+        // Always add name (automatic variables)
+        inputs.insert("_name".to_string(), Value::String(project_name.to_string()));
+        inputs.insert("name".to_string(), Value::String(project_name.to_string()));
+
+        for input_def in inputs_spec {
+            if input_def.name == "_name" || input_def.name == "name" {
+                continue;
+            }
+
+            if let Some(default) = &input_def.default {
+                // Build variables map for interpolation
+                let mut vars = HashMap::new();
+                vars.insert("_name".to_string(), Value::String(project_name.to_string()));
+
+                let project_name_hyphens = project_name.replace('_', "-");
+                vars.insert("_project_name_hyphens".to_string(), Value::String(project_name_hyphens));
+
+                vars.insert("_environment_name".to_string(), Value::String(environment_name.to_string()));
+
+                for (key, value) in &inputs {
+                    vars.insert(key.clone(), value.clone());
+                }
+
+                // Interpolate both ${env:...} and ${var:...} patterns in the default value
+                let interpolated_value =
+                    crate::template::utils::interpolate_value_all(default, &vars)?;
+
+                inputs.insert(input_def.name.clone(), interpolated_value);
+            }
+        }
+
+        Ok(inputs)
+    }
+
     /// Generate the .pmp.environment.yaml file for the project environment (with spec)
     #[allow(clippy::too_many_arguments)]
     fn generate_project_environment_yaml(
@@ -1857,6 +2238,8 @@ impl UpdateCommand {
         inputs: &std::collections::HashMap<String, serde_json::Value>,
         template_pack_name: &str,
         template_name: &str,
+        merged_plugins: Option<&crate::template::metadata::ProjectPlugins>,
+        current_env: &DynamicProjectEnvironmentResource,
     ) -> Result<()> {
         use crate::template::metadata::{
             DynamicProjectEnvironmentMetadata, DynamicProjectEnvironmentResource,
@@ -1885,7 +2268,7 @@ impl UpdateCommand {
                 },
                 inputs: inputs.clone(),
                 custom: None,  // Templates no longer have custom field
-                plugins: None, // No plugins added yet
+                plugins: merged_plugins.cloned(), // Use merged plugins (existing + newly added)
                 template: Some(TemplateReference {
                     template_pack_name: template_pack_name.to_string(),
                     name: template_name.to_string(),
@@ -1893,8 +2276,8 @@ impl UpdateCommand {
                 environment: Some(EnvironmentReference {
                     name: environment_name.to_string(),
                 }),
-                template_reference_projects: Vec::new(), // No template references in tests
-                dependencies: Vec::new(),                // No dependencies by default
+                template_reference_projects: current_env.spec.template_reference_projects.clone(), // Preserve from current env
+                dependencies: current_env.spec.dependencies.clone(), // Preserve from current env
             },
         };
 
@@ -1923,6 +2306,7 @@ impl UpdateCommand {
         ctx: &crate::context::Context,
         inputs_spec: &[crate::template::metadata::InputDefinition],
         project_name: &str,
+        environment_name: &str,
     ) -> Result<HashMap<String, Value>> {
         use crate::template::utils::{interpolate_all, interpolate_value_all};
 
@@ -1946,6 +2330,9 @@ impl UpdateCommand {
             // Add hyphenated version of project name (replacing underscores with hyphens)
             let project_name_hyphens = project_name.replace('_', "-");
             vars.insert("_project_name_hyphens".to_string(), Value::String(project_name_hyphens));
+
+            // Add environment name
+            vars.insert("_environment_name".to_string(), Value::String(environment_name.to_string()));
 
             for (key, value) in &inputs {
                 vars.insert(key.clone(), value.clone());
@@ -2079,6 +2466,7 @@ impl UpdateCommand {
         inputs_spec: &[crate::template::metadata::InputDefinition],
         current_inputs: &HashMap<String, Value>,
         project_name: &str,
+        environment_name: &str,
     ) -> Result<HashMap<String, Value>> {
         use crate::template::utils::{interpolate_all, interpolate_value_all};
 
@@ -2102,6 +2490,9 @@ impl UpdateCommand {
             // Add hyphenated version of project name (replacing underscores with hyphens)
             let project_name_hyphens = project_name.replace('_', "-");
             vars.insert("_project_name_hyphens".to_string(), Value::String(project_name_hyphens));
+
+            // Add environment name
+            vars.insert("_environment_name".to_string(), Value::String(environment_name.to_string()));
 
             for (key, value) in &inputs {
                 vars.insert(key.clone(), value.clone());
