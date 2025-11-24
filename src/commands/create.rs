@@ -89,6 +89,7 @@ impl CreateCommand {
         projects: &[crate::template::metadata::ProjectReference],
         collection_root: &Path,
         project_name: &str,
+        environment_name: &str,
     ) -> Result<Option<CollectedPluginInfo>> {
         // Find the template pack containing this plugin
         let template_pack = template_packs
@@ -247,11 +248,11 @@ impl CreateCommand {
 
         let plugin_inputs = if customize {
             ctx.output.dimmed("  Collecting plugin inputs...");
-            Self::collect_plugin_inputs(ctx, &merged_inputs, project_name, None)?
+            Self::collect_plugin_inputs(ctx, &merged_inputs, project_name, Some(environment_name))?
         } else {
             // Use defaults
             ctx.output.dimmed("  Using default values...");
-            Self::build_default_inputs(&merged_inputs, project_name, None)?
+            Self::build_default_inputs(&merged_inputs, project_name, Some(environment_name))?
         };
 
         Ok(Some(CollectedPluginInfo {
@@ -1325,6 +1326,7 @@ impl CreateCommand {
                         &discovered_projects,
                         &infrastructure_root,
                         &project_name,
+                        &selected_environment,
                     )? {
                         collected_plugins.push(plugin_info);
                     }
