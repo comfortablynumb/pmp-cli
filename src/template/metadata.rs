@@ -192,6 +192,11 @@ pub struct AllowedPluginConfig {
     /// Lower values are collected first. When equal, maintains YAML order.
     #[serde(default)]
     pub order: i32,
+
+    /// Raw module inputs that will be passed as-is (unquoted) to the module in _common.tf
+    /// Key: parameter name, Value: raw HCL expression (e.g., "var.some_value", "local.computed")
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raw_module_inputs: Option<HashMap<String, String>>,
 }
 
 /// Reference to a template that provides the plugin (used for requires_project_with_template)
@@ -813,6 +818,11 @@ pub struct AddedPlugin {
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub plugin_spec: Option<PluginSpec>,
+
+    /// Raw module inputs that will be passed as-is (unquoted) to the module in _common.tf
+    /// Key: parameter name, Value: raw HCL expression (e.g., "var.some_value", "local.computed")
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raw_module_inputs: Option<HashMap<String, String>>,
 }
 
 /// Plugins configuration for a project environment

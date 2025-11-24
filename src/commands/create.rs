@@ -45,6 +45,7 @@ struct CollectedPluginInfo {
     inputs: HashMap<String, Value>,
     reference_project: Option<crate::template::metadata::ProjectReference>,
     reference_env: Option<crate::template::metadata::DynamicProjectEnvironmentResource>,
+    raw_module_inputs: Option<HashMap<String, String>>,
 }
 
 impl CreateCommand {
@@ -262,6 +263,7 @@ impl CreateCommand {
             inputs: plugin_inputs,
             reference_project,
             reference_env,
+            raw_module_inputs: installed_config.raw_module_inputs.clone(),
         }))
     }
 
@@ -331,6 +333,7 @@ impl CreateCommand {
                 inputs: plugin_info.inputs.clone(),
                 files: Vec::new(), // Files will be populated during rendering
                 plugin_spec: None, // Plugin spec can be added later if needed
+                raw_module_inputs: plugin_info.raw_module_inputs.clone(),
             });
         }
 

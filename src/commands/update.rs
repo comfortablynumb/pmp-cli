@@ -45,6 +45,7 @@ struct CollectedPluginInfo {
     inputs: HashMap<String, Value>,
     reference_project: Option<crate::template::metadata::ProjectReference>,
     reference_env: Option<DynamicProjectEnvironmentResource>,
+    raw_module_inputs: Option<HashMap<String, String>>,
 }
 
 impl UpdateCommand {
@@ -430,6 +431,7 @@ impl UpdateCommand {
                     inputs: plugin_info.inputs,
                     files: Vec::new(), // Will be populated when files are generated
                     plugin_spec: None, // Not needed for update command
+                    raw_module_inputs: plugin_info.raw_module_inputs.clone(),
                 });
             }
 
@@ -692,6 +694,7 @@ impl UpdateCommand {
                                                         .clone(),
                                                     inputs: Vec::new(),
                                                     order: 0,
+                                                    raw_module_inputs: None,
                                                 });
 
                                             compatible_projects.push(CompatibleProject {
@@ -738,6 +741,7 @@ impl UpdateCommand {
                             plugin_name: plugin_info.resource.metadata.name.clone(),
                             inputs: Vec::new(),
                             order: 0,
+                            raw_module_inputs: None,
                         });
 
                     // Add plugin with empty compatible projects list (no reference project needed)
@@ -966,6 +970,7 @@ impl UpdateCommand {
                     .clone(),
                 inputs: Vec::new(),
                 order: 0,
+                raw_module_inputs: None,
             };
         }
 
@@ -1212,6 +1217,7 @@ impl UpdateCommand {
                         .spec
                         .clone(),
                 ),
+                raw_module_inputs: allowed_plugin_config.raw_module_inputs.clone(),
             });
         }
 
@@ -2182,6 +2188,7 @@ impl UpdateCommand {
             inputs: plugin_inputs,
             reference_project,
             reference_env,
+            raw_module_inputs: installed_config.raw_module_inputs.clone(),
         }))
     }
 

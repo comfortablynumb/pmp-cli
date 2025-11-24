@@ -358,6 +358,16 @@ pub fn generate_module_blocks(plugins: &[AddedPlugin]) -> String {
             }
         }
 
+        // Add raw module inputs if provided
+        if let Some(raw_inputs) = &plugin.raw_module_inputs {
+            if !raw_inputs.is_empty() {
+                hcl.push_str("\n  # Raw module inputs (HCL expressions)\n");
+                for (key, expression) in raw_inputs {
+                    hcl.push_str(&format!("  {} = {}\n", key, expression));
+                }
+            }
+        }
+
         hcl.push_str("}\n\n");
     }
 
