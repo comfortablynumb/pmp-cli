@@ -231,13 +231,13 @@ Enter input values:
   enable_autoscaling [true]: true
 
 ✓ Created project: user-api
-  Location: ./projects/kubernetes_workload/user-api
+  Location: ./projects/user-api
   Environment: dev
 ```
 
 **Project Structure Created:**
 ```
-projects/kubernetes_workload/user-api/
+projects/user-api/
 ├── .pmp.project.yaml          # Project identifier
 └── environments/
     └── dev/
@@ -255,7 +255,7 @@ Create multiple environments:
 pmp project create
 
 # Later, add staging (using update command)
-cd projects/kubernetes_workload/user-api
+cd projects/user-api
 pmp project update  # Can add new environments
 ```
 
@@ -289,17 +289,17 @@ Found 3 project(s):
 1. user-api (KubernetesWorkload)
    Description: User management API service
    Environments: dev, staging, production
-   Location: projects/kubernetes_workload/user-api
+   Location: projects/user-api
 
 2. payment-api (KubernetesWorkload)
    Description: Payment processing service
    Environments: dev, production
-   Location: projects/kubernetes_workload/payment-api
+   Location: projects/payment-api
 
 3. api-gateway (KubernetesWorkload)
    Description: Main API gateway
    Environments: dev, staging, production
-   Location: projects/kubernetes_workload/api-gateway
+   Location: projects/api-gateway
 
 Select a project: 1
 Select environment: dev
@@ -335,17 +335,17 @@ Update an existing project's configuration by regenerating from template.
 pmp project update
 
 # Update specific project
-pmp project update --path ./projects/kubernetes_workload/user-api
+pmp project update --path ./projects/user-api
 
 # Update with custom template packs
 pmp project update \
-  --path ./projects/kubernetes_workload/user-api \
+  --path ./projects/user-api \
   --template-packs-paths "/updated/templates"
 ```
 
 **Interactive Workflow:**
 ```bash
-$ cd projects/kubernetes_workload/user-api/environments/dev
+$ cd projects/user-api/environments/dev
 $ pmp project update
 
 Current project: user-api
@@ -430,11 +430,11 @@ Clone these environments? (Y/n): y
 ✓ Cloned staging environment
 
 Created project: payment-api
-  Location: projects/kubernetes_workload/payment-api
+  Location: projects/payment-api
   Environments: dev, staging
 
 Next steps:
-  1. cd projects/kubernetes_workload/payment-api/environments/dev
+  1. cd projects/payment-api/environments/dev
   2. Update configuration in .pmp.environment.yaml
   3. Run 'pmp project update' to customize inputs
   4. Run 'pmp project preview' to see changes
@@ -458,7 +458,7 @@ Preview infrastructure changes without applying them (runs OpenTofu/Terraform pl
 pmp project preview
 
 # Preview specific project
-pmp project preview --path ./projects/kubernetes_workload/user-api/environments/dev
+pmp project preview --path ./projects/user-api/environments/dev
 
 # Pass additional executor arguments
 pmp project preview -- -no-color
@@ -469,7 +469,7 @@ pmp project preview -- -var=environment=prod -no-color
 
 **Example Output:**
 ```bash
-$ cd projects/kubernetes_workload/user-api/environments/dev
+$ cd projects/user-api/environments/dev
 $ pmp project preview
 
 Running: tofu plan
@@ -511,11 +511,11 @@ Plan: 1 to add, 1 to change, 0 to destroy.
 **Smart Context Detection:**
 ```bash
 # In environment directory - executes directly
-cd projects/kubernetes_workload/user-api/environments/dev
+cd projects/user-api/environments/dev
 pmp project preview
 
 # In project directory - prompts for environment
-cd projects/kubernetes_workload/user-api
+cd projects/user-api
 pmp project preview
 # → Shows: "Select environment: dev, staging, production"
 
@@ -571,7 +571,7 @@ Apply infrastructure changes (runs OpenTofu/Terraform apply).
 pmp project apply
 
 # Apply specific project
-pmp project apply --path ./projects/kubernetes_workload/user-api/environments/dev
+pmp project apply --path ./projects/user-api/environments/dev
 
 # Pass executor arguments
 pmp project apply -- -auto-approve
@@ -582,7 +582,7 @@ pmp project apply -- -var=environment=prod -auto-approve
 
 **Example Workflow:**
 ```bash
-$ cd projects/kubernetes_workload/user-api/environments/dev
+$ cd projects/user-api/environments/dev
 
 # 1. Preview changes first
 $ pmp project preview
@@ -659,7 +659,7 @@ Destroy infrastructure managed by a project.
 pmp project destroy
 
 # Destroy specific project
-pmp project destroy --path ./projects/kubernetes_workload/user-api/environments/dev
+pmp project destroy --path ./projects/user-api/environments/dev
 
 # Skip confirmation (dangerous!)
 pmp project destroy --yes
@@ -673,7 +673,7 @@ pmp project destroy --yes -- -parallelism=10
 
 **Example with Safety Confirmation:**
 ```bash
-$ cd projects/kubernetes_workload/user-api/environments/dev
+$ cd projects/user-api/environments/dev
 $ pmp project destroy
 
 ⚠️  WARNING: This will destroy all resources managed by this project!
@@ -731,7 +731,7 @@ Refresh infrastructure state without modifying resources.
 pmp project refresh
 
 # Refresh specific project
-pmp project refresh --path ./projects/kubernetes_workload/user-api/environments/dev
+pmp project refresh --path ./projects/user-api/environments/dev
 
 # Refresh with executor arguments
 pmp project refresh -- -var=environment=prod
@@ -784,7 +784,7 @@ pmp project graph --format mermaid --output graph.mmd
 pmp project graph --format dot --output graph.dot
 
 # Export from specific project
-pmp project graph --path ./projects/kubernetes_workload/user-api --format mermaid
+pmp project graph --path ./projects/user-api --format mermaid
 ```
 
 **ASCII Output Example:**
@@ -1027,7 +1027,7 @@ Detect configuration drift.
 pmp project drift detect
 
 # Detect drift for specific project
-pmp project drift detect --path ./projects/kubernetes_workload/user-api/environments/dev
+pmp project drift detect --path ./projects/user-api/environments/dev
 
 # Output in JSON format
 pmp project drift detect --format json
@@ -1170,7 +1170,7 @@ Reconcile drift with desired state.
 pmp project drift reconcile
 
 # Reconcile specific project
-pmp project drift reconcile --path ./projects/kubernetes_workload/user-api/environments/dev
+pmp project drift reconcile --path ./projects/user-api/environments/dev
 
 # Auto-approve reconciliation (dangerous!)
 pmp project drift reconcile --auto-approve
@@ -1245,7 +1245,7 @@ Validate against specific policy.
 pmp project policy validate
 
 # Validate specific project
-pmp project policy validate --path ./projects/kubernetes_workload/user-api/environments/dev
+pmp project policy validate --path ./projects/user-api/environments/dev
 
 # Validate with specific policy
 pmp project policy validate --policy security-baseline
@@ -1301,7 +1301,7 @@ Scan for all policy violations.
 pmp project policy scan
 
 # Scan specific project
-pmp project policy scan --path ./projects/kubernetes_workload/user-api/environments/dev
+pmp project policy scan --path ./projects/user-api/environments/dev
 
 # Filter by severity
 pmp project policy scan --severity high
@@ -1672,7 +1672,7 @@ Migrate state backend.
 pmp project state migrate --backend-type s3
 
 # Migrate specific project
-pmp project state migrate --backend-type s3 --path ./projects/kubernetes_workload/user-api/environments/dev
+pmp project state migrate --backend-type s3 --path ./projects/user-api/environments/dev
 ```
 
 **Example:**
@@ -2301,10 +2301,10 @@ jobs:
         project:
           - name: user-api
             env: production
-            path: projects/kubernetes_workload/user-api/environments/production
+            path: projects/user-api/environments/production
           - name: order-service
             env: production
-            path: projects/kubernetes_workload/order-service/environments/production
+            path: projects/order-service/environments/production
 
     steps:
       - name: Checkout
@@ -2338,7 +2338,7 @@ jobs:
         project:
           - name: api-gateway
             env: production
-            path: projects/kubernetes_workload/api-gateway/environments/production
+            path: projects/api-gateway/environments/production
 
     steps:
       - name: Checkout
@@ -2426,7 +2426,7 @@ user_api_production:
   stage: stage_1
   needs: [postgres_db_production, redis_cache_production]
   script:
-    - cd projects/kubernetes_workload/user-api/environments/production
+    - cd projects/user-api/environments/production
     - tofu init
     - tofu validate
     - tofu plan -no-color
@@ -2497,7 +2497,7 @@ pipeline {
             parallel {
                 stage('user-api:production') {
                     steps {
-                        dir('projects/kubernetes_workload/user-api/environments/production') {
+                        dir('projects/user-api/environments/production') {
                             sh 'tofu init'
                             sh 'tofu validate'
                             sh 'tofu plan -no-color'
@@ -2698,7 +2698,7 @@ Run tests on infrastructure code.
 pmp test test
 
 # Run tests for specific project
-pmp test test --path ./projects/kubernetes_workload/user-api/environments/dev
+pmp test test --path ./projects/user-api/environments/dev
 
 # Run specific test pattern
 pmp test test --test-pattern "test_*"
@@ -2756,7 +2756,7 @@ Validate Terraform/OpenTofu plan.
 pmp test validate-plan
 
 # Validate specific project
-pmp test validate-plan --path ./projects/kubernetes_workload/user-api/environments/dev
+pmp test validate-plan --path ./projects/user-api/environments/dev
 ```
 
 **Example:**
@@ -2801,7 +2801,7 @@ Perform dry run without actual changes.
 pmp test dry-run
 
 # Dry run for specific project
-pmp test dry-run --path ./projects/kubernetes_workload/user-api/environments/dev
+pmp test dry-run --path ./projects/user-api/environments/dev
 ```
 
 **Example:**
@@ -2858,7 +2858,7 @@ Estimate infrastructure costs.
 pmp test cost-estimate
 
 # Estimate for specific project
-pmp test cost-estimate --path ./projects/kubernetes_workload/user-api/environments/production
+pmp test cost-estimate --path ./projects/user-api/environments/production
 
 # Estimate with JSON format
 pmp test cost-estimate --format json
@@ -2922,7 +2922,7 @@ pmp test compliance-report --framework CIS
 pmp test compliance-report --framework SOC2 --output compliance.html
 
 # Report for specific project
-pmp test compliance-report --path ./projects/kubernetes_workload/user-api/environments/production
+pmp test compliance-report --path ./projects/user-api/environments/production
 ```
 
 **Example Output:**
@@ -3005,7 +3005,7 @@ Generate documentation from infrastructure.
 pmp devex docs
 
 # Generate docs for specific project
-pmp devex docs --path ./projects/kubernetes_workload/user-api
+pmp devex docs --path ./projects/user-api
 ```
 
 **Example:**
@@ -3064,7 +3064,7 @@ pmp devex export --format json --output config.json
 pmp devex export --format yaml --output config.yaml
 
 # Export specific project
-pmp devex export --path ./projects/kubernetes_workload/user-api --format json
+pmp devex export --path ./projects/user-api --format json
 ```
 
 ---
@@ -3079,7 +3079,7 @@ Import infrastructure configuration.
 pmp devex import --source config.json
 
 # Import specific project
-pmp devex import --path ./projects/kubernetes_workload/user-api --source config.json
+pmp devex import --path ./projects/user-api --source config.json
 ```
 
 ---

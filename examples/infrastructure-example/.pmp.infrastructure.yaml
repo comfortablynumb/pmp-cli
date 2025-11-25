@@ -34,6 +34,17 @@ spec:
                   template: argo-cd
                 - template_pack: argo-cd
                   template: argo-cd-core-configuration
+        - id: platform-ingresses
+          name: Kubernetes Ingresses
+          description: Ingresses for Kubernetes
+          subcategories:
+            - id: platform-ingresses
+              name: Istio
+              description: Istio Ingress
+              subcategories: [ ]
+              templates:
+                - template_pack: kubernetes
+                  template: istio-ingress
         - id: platform-secrets-managers
           name: Secrets Managers
           description: Tools that allow to manage secrets

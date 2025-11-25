@@ -350,20 +350,24 @@ impl GenerateCommand {
     ) -> Result<std::collections::HashMap<String, serde_json::Value>> {
         let mut inputs = std::collections::HashMap::new();
 
-        // Always add automatic variables
+        // Add project name variables (underscore and hyphen versions)
+        let project_name_underscores = name.replace('-', "_");
+        let project_name_hyphens = name.replace('_', "-");
         inputs.insert(
-            "_name".to_string(),
-            serde_json::Value::String(name.to_string()),
+            "_project_name_underscores".to_string(),
+            serde_json::Value::String(project_name_underscores),
         );
         inputs.insert(
-            "name".to_string(),
-            serde_json::Value::String(name.to_string()),
+            "_project_name_hyphens".to_string(),
+            serde_json::Value::String(project_name_hyphens),
         );
 
         // Collect each input defined in the template
         for input_def in inputs_spec {
-            // Skip automatic variables
-            if input_def.name == "_name" || input_def.name == "name" {
+            // Skip project name variables
+            if input_def.name == "_project_name_underscores"
+                || input_def.name == "_project_name_hyphens"
+            {
                 continue;
             }
 
@@ -566,7 +570,7 @@ spec:
 
         // Set up mock user input
         let input = MockUserInput::new();
-        input.add_response(MockResponse::Text("test_generation".to_string())); // name
+        input.add_response(MockResponse::Text("test-generation".to_string())); // name
         input.add_response(MockResponse::Text("custom".to_string())); // setting
 
         let ctx = create_test_context(Arc::clone(&fs), input);
@@ -643,7 +647,7 @@ spec:
         // Set up mock user input
         let input = MockUserInput::new();
         input.add_response(MockResponse::Select("prod".to_string())); // environment
-        input.add_response(MockResponse::Text("test_generation".to_string())); // name
+        input.add_response(MockResponse::Text("test-generation".to_string())); // name
         input.add_response(MockResponse::Text("10".to_string())); // replicas (override prod default)
 
         let ctx = create_test_context(Arc::clone(&fs), input);
@@ -678,7 +682,7 @@ spec:
 
         // Set up mock user input
         let input = MockUserInput::new();
-        input.add_response(MockResponse::Text("test_generation".to_string())); // name
+        input.add_response(MockResponse::Text("test-generation".to_string())); // name
         input.add_response(MockResponse::Text("custom".to_string())); // setting
 
         let ctx = create_test_context(Arc::clone(&fs), input);

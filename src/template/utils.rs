@@ -66,8 +66,8 @@ pub fn interpolate_env_variables(input: &str) -> Result<String> {
 ///
 /// # Examples
 /// ```
-/// let vars = HashMap::from([("_name".to_string(), Value::String("myapp".to_string()))]);
-/// let result = interpolate_variables("project-${var:_name}", &vars)?;
+/// let vars = HashMap::from([("_project_name_underscores".to_string(), Value::String("myapp".to_string()))]);
+/// let result = interpolate_variables("project-${var:_project_name_underscores}", &vars)?;
 /// assert_eq!(result, "project-myapp");
 /// ```
 pub fn interpolate_variables(input: &str, variables: &HashMap<String, Value>) -> Result<String> {
@@ -117,8 +117,8 @@ pub fn interpolate_variables(input: &str, variables: &HashMap<String, Value>) ->
 /// # Examples
 /// ```
 /// std::env::set_var("DOCKER_USERNAME", "myuser");
-/// let vars = HashMap::from([("_name".to_string(), Value::String("myapp".to_string()))]);
-/// let result = interpolate_all("${env:DOCKER_USERNAME}/${var:_name}", &vars)?;
+/// let vars = HashMap::from([("_project_name_underscores".to_string(), Value::String("myapp".to_string()))]);
+/// let result = interpolate_all("${env:DOCKER_USERNAME}/${var:_project_name_underscores}", &vars)?;
 /// assert_eq!(result, "myuser/myapp");
 /// ```
 pub fn interpolate_all(input: &str, variables: &HashMap<String, Value>) -> Result<String> {
@@ -187,19 +187,19 @@ mod tests {
     #[test]
     fn test_interpolate_simple_variable() {
         let mut vars = HashMap::new();
-        vars.insert("_name".to_string(), Value::String("myapp".to_string()));
+        vars.insert("_project_name_underscores".to_string(), Value::String("myapp".to_string()));
 
-        let result = interpolate_variables("project-${var:_name}", &vars).unwrap();
+        let result = interpolate_variables("project-${var:_project_name_underscores}", &vars).unwrap();
         assert_eq!(result, "project-myapp");
     }
 
     #[test]
     fn test_interpolate_multiple_variables() {
         let mut vars = HashMap::new();
-        vars.insert("_name".to_string(), Value::String("myapp".to_string()));
+        vars.insert("_project_name_underscores".to_string(), Value::String("myapp".to_string()));
         vars.insert("_environment".to_string(), Value::String("dev".to_string()));
 
-        let result = interpolate_variables("${var:_name}-${var:_environment}", &vars).unwrap();
+        let result = interpolate_variables("${var:_project_name_underscores}-${var:_environment}", &vars).unwrap();
         assert_eq!(result, "myapp-dev");
     }
 
@@ -216,13 +216,13 @@ mod tests {
     fn test_interpolate_missing_variable() {
         let vars = HashMap::new();
 
-        let result = interpolate_variables("project-${var:_name}", &vars);
+        let result = interpolate_variables("project-${var:_project_name_underscores}", &vars);
         assert!(result.is_err());
         assert!(
             result
                 .unwrap_err()
                 .to_string()
-                .contains("Variable '_name' not found")
+                .contains("Variable '_project_name_underscores' not found")
         );
     }
 
@@ -237,17 +237,17 @@ mod tests {
     #[test]
     fn test_interpolate_value_object() {
         let mut vars = HashMap::new();
-        vars.insert("_name".to_string(), Value::String("myapp".to_string()));
+        vars.insert("_project_name_underscores".to_string(), Value::String("myapp".to_string()));
 
         let input = serde_json::json!({
-            "name": "${var:_name}",
+            "project_name": "${var:_project_name_underscores}",
             "nested": {
-                "field": "value-${var:_name}"
+                "field": "value-${var:_project_name_underscores}"
             }
         });
 
         let result = interpolate_value(&input, &vars).unwrap();
-        assert_eq!(result["name"], "myapp");
+        assert_eq!(result["project_name"], "myapp");
         assert_eq!(result["nested"]["field"], "value-myapp");
     }
 
@@ -331,9 +331,9 @@ mod tests {
             std::env::set_var("TEST_DOCKER_USERNAME", "dockeruser");
         }
         let mut vars = HashMap::new();
-        vars.insert("_name".to_string(), Value::String("myapp".to_string()));
+        vars.insert("_project_name_underscores".to_string(), Value::String("myapp".to_string()));
 
-        let result = interpolate_all("${env:TEST_DOCKER_USERNAME}/${var:_name}", &vars).unwrap();
+        let result = interpolate_all("${env:TEST_DOCKER_USERNAME}/${var:_project_name_underscores}", &vars).unwrap();
         assert_eq!(result, "dockeruser/myapp");
 
         unsafe {
@@ -359,9 +359,9 @@ mod tests {
     #[test]
     fn test_interpolate_all_var_only() {
         let mut vars = HashMap::new();
-        vars.insert("_name".to_string(), Value::String("myapp".to_string()));
+        vars.insert("_project_name_underscores".to_string(), Value::String("myapp".to_string()));
 
-        let result = interpolate_all("project-${var:_name}", &vars).unwrap();
+        let result = interpolate_all("project-${var:_project_name_underscores}", &vars).unwrap();
         assert_eq!(result, "project-myapp");
     }
 
@@ -371,17 +371,17 @@ mod tests {
             std::env::set_var("TEST_ENV_VAR", "envvalue");
         }
         let mut vars = HashMap::new();
-        vars.insert("_name".to_string(), Value::String("myapp".to_string()));
+        vars.insert("_project_name_underscores".to_string(), Value::String("myapp".to_string()));
 
         let input = serde_json::json!({
             "namespace": "${env:TEST_ENV_VAR}",
-            "name": "${var:_name}",
-            "full": "${env:TEST_ENV_VAR}/${var:_name}"
+            "project_name": "${var:_project_name_underscores}",
+            "full": "${env:TEST_ENV_VAR}/${var:_project_name_underscores}"
         });
 
         let result = interpolate_value_all(&input, &vars).unwrap();
         assert_eq!(result["namespace"], "envvalue");
-        assert_eq!(result["name"], "myapp");
+        assert_eq!(result["project_name"], "myapp");
         assert_eq!(result["full"], "envvalue/myapp");
 
         unsafe {

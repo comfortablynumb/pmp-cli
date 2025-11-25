@@ -349,12 +349,23 @@ impl CreateCommand {
     ) -> Result<HashMap<String, Value>> {
         let mut inputs = HashMap::new();
 
-        // Always add name (automatic variables)
-        inputs.insert("_name".to_string(), Value::String(project_name.to_string()));
-        inputs.insert("name".to_string(), Value::String(project_name.to_string()));
+        // Add project name variables (underscore and hyphen versions)
+        let project_name_underscores = project_name.replace('-', "_");
+        let project_name_hyphens = project_name.replace('_', "-");
+        inputs.insert(
+            "_project_name_underscores".to_string(),
+            Value::String(project_name_underscores),
+        );
+        inputs.insert(
+            "_project_name_hyphens".to_string(),
+            Value::String(project_name_hyphens),
+        );
 
         for input_def in inputs_spec {
-            if input_def.name == "_name" || input_def.name == "name" {
+            // Skip project name variables (already added)
+            if input_def.name == "_project_name_underscores"
+                || input_def.name == "_project_name_hyphens"
+            {
                 continue;
             }
 
@@ -391,13 +402,6 @@ impl CreateCommand {
             );
         }
 
-        // Add hyphenated version of project name for template rendering
-        let project_name_hyphens = project_name.replace('_', "-");
-        inputs.insert(
-            "_project_name_hyphens".to_string(),
-            Value::String(project_name_hyphens),
-        );
-
         Ok(inputs)
     }
 
@@ -410,14 +414,24 @@ impl CreateCommand {
     ) -> Result<HashMap<String, Value>> {
         let mut inputs = HashMap::new();
 
-        // Always add name (automatic variables)
-        inputs.insert("_name".to_string(), Value::String(project_name.to_string()));
-        inputs.insert("name".to_string(), Value::String(project_name.to_string()));
+        // Add project name variables (underscore and hyphen versions)
+        let project_name_underscores = project_name.replace('-', "_");
+        let project_name_hyphens = project_name.replace('_', "-");
+        inputs.insert(
+            "_project_name_underscores".to_string(),
+            Value::String(project_name_underscores),
+        );
+        inputs.insert(
+            "_project_name_hyphens".to_string(),
+            Value::String(project_name_hyphens),
+        );
 
         // Collect each input defined in the plugin
         for input_def in inputs_spec {
-            // Skip if it's the '_name' or 'name' field (already added)
-            if input_def.name == "_name" || input_def.name == "name" {
+            // Skip project name variables (already added)
+            if input_def.name == "_project_name_underscores"
+                || input_def.name == "_project_name_hyphens"
+            {
                 continue;
             }
 
@@ -433,9 +447,7 @@ impl CreateCommand {
 
             // Interpolate variables in the default value (supports both ${env:...} and ${var:...})
             let interpolated_default = if let Some(default) = &input_def.default {
-                Some(crate::template::utils::interpolate_value_all(
-                    default, &vars,
-                )?)
+                Some(crate::template::utils::interpolate_value_all(default, &vars)?)
             } else {
                 None
             };
@@ -529,13 +541,6 @@ impl CreateCommand {
                 Value::String(String::new()),
             );
         }
-
-        // Add hyphenated version of project name for template rendering
-        let project_name_hyphens = project_name.replace('_', "-");
-        inputs.insert(
-            "_project_name_hyphens".to_string(),
-            Value::String(project_name_hyphens),
-        );
 
         Ok(inputs)
     }
@@ -1351,30 +1356,26 @@ impl CreateCommand {
             serde_json::Value::String(selected_template.resource.spec.kind.clone()),
         );
 
-        // Add hyphenated version of project name for template rendering
+        // Add hyphenated version of project name for template rendering (legacy - kept for compatibility)
         let project_name_hyphens = project_name.replace('_', "-");
         inputs.insert(
             "_project_name_hyphens".to_string(),
             serde_json::Value::String(project_name_hyphens),
         );
 
-        // Step 12: Determine project root path
-        // Convert resource kind to snake_case for directory name
-        let resource_kind_snake = resource_kind.chars().fold(String::new(), |mut acc, c| {
-            if c.is_uppercase() && !acc.is_empty() {
-                acc.push('_');
-            }
-            acc.push(c.to_ascii_lowercase());
-            acc
-        });
+        // Add underscore version of project name for interpolation (hyphens to underscores)
+        let project_name_underscores = project_name.replace('-', "_");
+        inputs.insert(
+            "_project_name_underscores".to_string(),
+            serde_json::Value::String(project_name_underscores),
+        );
 
+        // Step 12: Determine project root path
+        // Project path format: projects/{project_name}
         let project_root = if let Some(path) = output_path {
             std::path::PathBuf::from(path)
         } else {
-            infrastructure_root
-                .join("projects")
-                .join(&resource_kind_snake)
-                .join(&project_name)
+            infrastructure_root.join("projects").join(&project_name)
         };
 
         // Step 13: Determine environment path
@@ -1546,14 +1547,16 @@ impl CreateCommand {
     ) -> Result<std::collections::HashMap<String, serde_json::Value>> {
         let mut inputs = std::collections::HashMap::new();
 
-        // Always add name (automatic variables)
+        // Add project name variables (underscore and hyphen versions)
+        let project_name_underscores = project_name.replace('-', "_");
+        let project_name_hyphens = project_name.replace('_', "-");
         inputs.insert(
-            "_name".to_string(),
-            serde_json::Value::String(project_name.to_string()),
+            "_project_name_underscores".to_string(),
+            serde_json::Value::String(project_name_underscores),
         );
         inputs.insert(
-            "name".to_string(),
-            serde_json::Value::String(project_name.to_string()),
+            "_project_name_hyphens".to_string(),
+            serde_json::Value::String(project_name_hyphens),
         );
 
         // Collect each input defined in the template
@@ -1606,15 +1609,25 @@ impl CreateCommand {
         environment_name: Option<&str>,
     ) -> HashMap<String, Value> {
         let mut vars = HashMap::new();
-        vars.insert("_name".to_string(), Value::String(project_name.to_string()));
 
-        // Add hyphenated version of project name (replacing underscores with hyphens)
+        // Add project name variables (underscore and hyphen versions)
+        let project_name_underscores = project_name.replace('-', "_");
         let project_name_hyphens = project_name.replace('_', "-");
-        vars.insert("_project_name_hyphens".to_string(), Value::String(project_name_hyphens));
+        vars.insert(
+            "_project_name_underscores".to_string(),
+            Value::String(project_name_underscores),
+        );
+        vars.insert(
+            "_project_name_hyphens".to_string(),
+            Value::String(project_name_hyphens),
+        );
 
         // Add environment name if provided
         if let Some(env_name) = environment_name {
-            vars.insert("_environment_name".to_string(), Value::String(env_name.to_string()));
+            vars.insert(
+                "_environment_name".to_string(),
+                Value::String(env_name.to_string()),
+            );
         }
 
         // Add all collected inputs so far (for progressive interpolation)
@@ -3436,7 +3449,7 @@ spec:
         input.add_response(MockResponse::Select(
             "📄 allowed-template - Test template".to_string(),
         )); // template selection
-        input.add_response(MockResponse::Text("test_project".to_string())); // project name
+        input.add_response(MockResponse::Text("test-project".to_string())); // project name
         input.add_response(MockResponse::Text("1".to_string())); // replica_count
         input.add_response(MockResponse::Confirm(false)); // apply after create
 
@@ -3544,7 +3557,7 @@ spec:
         input.add_response(MockResponse::Select(
             "📄 test-template - Test template".to_string(),
         )); // template selection
-        input.add_response(MockResponse::Text("test_project".to_string())); // project name
+        input.add_response(MockResponse::Text("test-project".to_string())); // project name
         // User should be prompted for replica_count with default of 5
         input.add_response(MockResponse::Text("3".to_string())); // Override the default to 3
         input.add_response(MockResponse::Confirm(false)); // apply after create
@@ -3563,7 +3576,7 @@ spec:
         // Verify the environment file was created with user's input (3, not the collection default 5)
         let current_dir = std::env::current_dir().unwrap();
         let env_file_path = current_dir
-            .join("projects/test_resource/test_project/environments/dev/.pmp.environment.yaml");
+            .join("projects/test-project/environments/dev/.pmp.environment.yaml");
         assert!(
             fs.has_file(&env_file_path),
             "Environment file should be created"
@@ -3619,7 +3632,7 @@ spec:
         input.add_response(MockResponse::Select(
             "📄 test-template - Test template".to_string(),
         )); // template selection
-        input.add_response(MockResponse::Text("test_project".to_string())); // project name
+        input.add_response(MockResponse::Text("test-project".to_string())); // project name
         // User should NOT be prompted for replica_count (it's fixed at 5)
         input.add_response(MockResponse::Text("prod".to_string())); // environment_name (still asked)
         input.add_response(MockResponse::Confirm(false)); // apply after create
@@ -3638,7 +3651,7 @@ spec:
         // Verify the environment file was created with collection's fixed value
         let current_dir = std::env::current_dir().unwrap();
         let env_file_path = current_dir
-            .join("projects/test_resource/test_project/environments/dev/.pmp.environment.yaml");
+            .join("projects/test-project/environments/dev/.pmp.environment.yaml");
         assert!(
             fs.has_file(&env_file_path),
             "Environment file should be created"
@@ -3686,7 +3699,7 @@ spec:
         input.add_response(MockResponse::Select(
             "📄 test-template - Test template".to_string(),
         )); // template selection
-        input.add_response(MockResponse::Text("test_project".to_string())); // project name
+        input.add_response(MockResponse::Text("test-project".to_string())); // project name
         input.add_response(MockResponse::Text("2".to_string())); // replica_count
         input.add_response(MockResponse::Confirm(false)); // apply after create
 
@@ -3704,7 +3717,7 @@ spec:
         // Verify project was created
         let current_dir = std::env::current_dir().unwrap();
         let env_file_path = current_dir
-            .join("projects/test_resource/test_project/environments/dev/.pmp.environment.yaml");
+            .join("projects/test-project/environments/dev/.pmp.environment.yaml");
         assert!(
             fs.has_file(&env_file_path),
             "Environment file should be created"
@@ -3776,7 +3789,7 @@ spec:
         input.add_response(MockResponse::Select(
             "📄 template-a - Test template".to_string(),
         )); // template selection
-        input.add_response(MockResponse::Text("test_project".to_string())); // project name
+        input.add_response(MockResponse::Text("test-project".to_string())); // project name
         // setting_a should not be prompted (show_as_default: false)
         input.add_response(MockResponse::Confirm(false)); // apply after create
 
@@ -3794,7 +3807,7 @@ spec:
         // Verify the environment file was created with template-a's configuration
         let current_dir = std::env::current_dir().unwrap();
         let env_file_path = current_dir
-            .join("projects/test_resource/test_project/environments/dev/.pmp.environment.yaml");
+            .join("projects/test-project/environments/dev/.pmp.environment.yaml");
         assert!(
             fs.has_file(&env_file_path),
             "Environment file should be created"
@@ -3824,7 +3837,7 @@ spec:
             "TestResource",
             r#"    project_id:
       default: "default-id"
-      description: "Project ID for ${var:_name}""#,
+      description: "Project ID for ${var:_project_name_underscores}""#,
         );
 
         setup_infrastructure(
@@ -3841,7 +3854,7 @@ spec:
         input.add_response(MockResponse::Select(
             "📄 test-template - Test template".to_string(),
         )); // template selection
-        input.add_response(MockResponse::Text("my_project".to_string())); // project name
+        input.add_response(MockResponse::Text("my-project".to_string())); // project name
         input.add_response(MockResponse::Text("custom-id".to_string())); // project_id (should see interpolated description)
         input.add_response(MockResponse::Confirm(false)); // apply after create
 
@@ -3859,7 +3872,7 @@ spec:
         // Verify the environment file was created
         let current_dir = std::env::current_dir().unwrap();
         let env_file_path = current_dir
-            .join("projects/test_resource/my_project/environments/dev/.pmp.environment.yaml");
+            .join("projects/my-project/environments/dev/.pmp.environment.yaml");
         assert!(
             fs.has_file(&env_file_path),
             "Environment file should be created"
@@ -3884,7 +3897,7 @@ spec:
             "test-template",
             "TestResource",
             r#"    project_id:
-      default: "proj-${var:_name}"
+      default: "proj-${var:_project_name_underscores}"
       description: "Project ID""#,
         );
 
@@ -3902,8 +3915,8 @@ spec:
         input.add_response(MockResponse::Select(
             "📄 test-template - Test template".to_string(),
         )); // template selection
-        input.add_response(MockResponse::Text("my_app".to_string())); // project name
-        input.add_response(MockResponse::Text("proj-my_app".to_string())); // Accept the interpolated default
+        input.add_response(MockResponse::Text("my-app".to_string())); // project name
+        input.add_response(MockResponse::Text("proj-my_app".to_string())); // Accept the interpolated default (underscores)
         input.add_response(MockResponse::Confirm(false)); // apply after create
 
         let ctx = create_test_context(Arc::clone(&fs), input);
@@ -3919,8 +3932,8 @@ spec:
 
         // Verify the interpolated default was used
         let current_dir = std::env::current_dir().unwrap();
-        let env_file_path = current_dir
-            .join("projects/test_resource/my_app/environments/dev/.pmp.environment.yaml");
+        let env_file_path =
+            current_dir.join("projects/my-app/environments/dev/.pmp.environment.yaml");
         assert!(
             fs.has_file(&env_file_path),
             "Environment file should be created"
@@ -3929,7 +3942,7 @@ spec:
         let env_content = fs.get_file_contents(&env_file_path).unwrap();
         assert!(
             env_content.contains("project_id: proj-my_app"),
-            "Default value should be interpolated with project name"
+            "Default value should be interpolated with project name (underscores)"
         );
     }
 
@@ -3964,7 +3977,7 @@ spec:
           defaults:
             inputs:
               docker_image:
-                value: "registry/${var:_name}:latest"
+                value: "registry/${var:_project_name_underscores}:latest"
                 show_as_default: false"#,
         );
 
@@ -3976,7 +3989,7 @@ spec:
         input.add_response(MockResponse::Select(
             "📄 test-template - Test template".to_string(),
         )); // template selection
-        input.add_response(MockResponse::Text("my_service".to_string())); // project name
+        input.add_response(MockResponse::Text("my-service".to_string())); // project name
         // docker_image should not be prompted (show_as_default: false)
         input.add_response(MockResponse::Confirm(false)); // apply after create
 
@@ -3994,7 +4007,7 @@ spec:
         // Verify infrastructure override interpolation
         let current_dir = std::env::current_dir().unwrap();
         let env_file_path = current_dir
-            .join("projects/test_resource/my_service/environments/dev/.pmp.environment.yaml");
+            .join("projects/my-service/environments/dev/.pmp.environment.yaml");
         assert!(
             fs.has_file(&env_file_path),
             "Environment file should be created"
@@ -4003,7 +4016,7 @@ spec:
         let env_content = fs.get_file_contents(&env_file_path).unwrap();
         assert!(
             env_content.contains("docker_image: registry/my_service:latest"),
-            "Infrastructure override should be interpolated"
+            "Infrastructure override should be interpolated with underscores"
         );
     }
 
@@ -4019,7 +4032,7 @@ spec:
             "test-template",
             "TestResource",
             r#"    bucket_name:
-      default: "${var:_name}-${var:_environment_name}"
+      default: "${var:_project_name_underscores}-${var:_environment_name}"
       description: "Bucket name with environment""#,
         );
 
@@ -4055,7 +4068,7 @@ spec:
         // Verify the interpolated default was used with environment name
         let current_dir = std::env::current_dir().unwrap();
         let env_file_path = current_dir
-            .join("projects/test_resource/myapp/environments/dev/.pmp.environment.yaml");
+            .join("projects/myapp/environments/dev/.pmp.environment.yaml");
         assert!(
             fs.has_file(&env_file_path),
             "Environment file should be created"
@@ -4105,7 +4118,7 @@ spec:
         input.add_response(MockResponse::Select(
             "📄 test-template - Test template".to_string(),
         )); // template selection
-        input.add_response(MockResponse::Text("test_project".to_string())); // project name
+        input.add_response(MockResponse::Text("test-project".to_string())); // project name
         input.add_response(MockResponse::Select("Production".to_string())); // environment selection (by label)
         input.add_response(MockResponse::Confirm(false)); // apply after create
 
@@ -4123,7 +4136,7 @@ spec:
         // Verify select input was processed
         let current_dir = std::env::current_dir().unwrap();
         let env_file_path = current_dir
-            .join("projects/test_resource/test_project/environments/dev/.pmp.environment.yaml");
+            .join("projects/test-project/environments/dev/.pmp.environment.yaml");
         assert!(
             fs.has_file(&env_file_path),
             "Environment file should be created"
@@ -4169,7 +4182,7 @@ spec:
         input.add_response(MockResponse::Select(
             "📄 test-template - Test template".to_string(),
         )); // template selection
-        input.add_response(MockResponse::Text("test_project".to_string())); // project name
+        input.add_response(MockResponse::Text("test-project".to_string())); // project name
         input.add_response(MockResponse::Text("5".to_string())); // replica_count
         input.add_response(MockResponse::Confirm(false)); // apply after create
 
@@ -4187,7 +4200,7 @@ spec:
         // Verify number input was processed
         let current_dir = std::env::current_dir().unwrap();
         let env_file_path = current_dir
-            .join("projects/test_resource/test_project/environments/dev/.pmp.environment.yaml");
+            .join("projects/test-project/environments/dev/.pmp.environment.yaml");
         assert!(
             fs.has_file(&env_file_path),
             "Environment file should be created"
@@ -4231,7 +4244,7 @@ spec:
         input.add_response(MockResponse::Select(
             "📄 test-template - Test template".to_string(),
         )); // template selection
-        input.add_response(MockResponse::Text("test_project".to_string())); // project name
+        input.add_response(MockResponse::Text("test-project".to_string())); // project name
         input.add_response(MockResponse::Select("Yes".to_string())); // enable_monitoring (boolean as select)
         input.add_response(MockResponse::Confirm(false)); // apply after create
 
@@ -4249,7 +4262,7 @@ spec:
         // Verify boolean input was processed
         let current_dir = std::env::current_dir().unwrap();
         let env_file_path = current_dir
-            .join("projects/test_resource/test_project/environments/dev/.pmp.environment.yaml");
+            .join("projects/test-project/environments/dev/.pmp.environment.yaml");
         assert!(
             fs.has_file(&env_file_path),
             "Environment file should be created"
@@ -4351,7 +4364,7 @@ spec:
         input.add_response(MockResponse::Select(
             "Production - Production environment".to_string(),
         )); // Select production environment
-        input.add_response(MockResponse::Text("test_project".to_string())); // project name
+        input.add_response(MockResponse::Text("test-project".to_string())); // project name
         input.add_response(MockResponse::Text("3".to_string())); // replica_count (should default to 3 for production)
         input.add_response(MockResponse::Confirm(false)); // apply after create
 
@@ -4368,7 +4381,7 @@ spec:
 
         // Verify environment-specific default was used
         let env_file_path = current_dir.join(
-            "projects/test_resource/test_project/environments/production/.pmp.environment.yaml",
+            "projects/test-project/environments/production/.pmp.environment.yaml",
         );
         assert!(
             fs.has_file(&env_file_path),
@@ -4412,7 +4425,7 @@ spec:
         input.add_response(MockResponse::Select(
             "📄 test-template - Test template".to_string(),
         )); // template selection
-        input.add_response(MockResponse::Text("test_project".to_string())); // project name
+        input.add_response(MockResponse::Text("test-project".to_string())); // project name
         input.add_response(MockResponse::Text("myapp".to_string())); // app_name
         input.add_response(MockResponse::Confirm(false)); // apply after create
 
@@ -4430,9 +4443,9 @@ spec:
         // Verify project files were created
         let current_dir = std::env::current_dir().unwrap();
         let project_yaml_path =
-            current_dir.join("projects/test_resource/test_project/.pmp.project.yaml");
+            current_dir.join("projects/test-project/.pmp.project.yaml");
         let env_yaml_path = current_dir
-            .join("projects/test_resource/test_project/environments/dev/.pmp.environment.yaml");
+            .join("projects/test-project/environments/dev/.pmp.environment.yaml");
 
         assert!(
             fs.has_file(&project_yaml_path),

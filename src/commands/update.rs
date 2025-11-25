@@ -1070,9 +1070,15 @@ impl UpdateCommand {
             Self::collect_plugin_inputs(ctx, &merged_inputs, target_project_name, target_env_name)?;
 
         // 6. Add internal fields (inherit from target project/environment)
+        let project_name_underscores = target_project_name.replace('-', "_");
+        let project_name_hyphens = target_project_name.replace('_', "-");
         plugin_inputs.insert(
-            "_name".to_string(),
-            Value::String(target_project_name.to_string()),
+            "_project_name_underscores".to_string(),
+            Value::String(project_name_underscores),
+        );
+        plugin_inputs.insert(
+            "_project_name_hyphens".to_string(),
+            Value::String(project_name_hyphens),
         );
         plugin_inputs.insert(
             "_environment".to_string(),
@@ -1827,34 +1833,35 @@ impl UpdateCommand {
 
         let mut inputs = std::collections::HashMap::new();
 
-        // Always add automatic variables
+        // Add project name variables (underscore and hyphen versions)
+        let project_name_underscores = project_name.replace('-', "_");
+        let project_name_hyphens = project_name.replace('_', "-");
         inputs.insert(
-            "_name".to_string(),
-            serde_json::Value::String(project_name.to_string()),
+            "_project_name_underscores".to_string(),
+            serde_json::Value::String(project_name_underscores.clone()),
         );
         inputs.insert(
-            "name".to_string(),
-            serde_json::Value::String(project_name.to_string()),
+            "_project_name_hyphens".to_string(),
+            serde_json::Value::String(project_name_hyphens.clone()),
         );
 
         // Collect each input defined in the template
         for input_def in inputs_spec {
-            // Skip automatic variables
-            if input_def.name == "_name" || input_def.name == "name" {
+            // Skip project name variables
+            if input_def.name == "_project_name_underscores"
+                || input_def.name == "_project_name_hyphens"
+            {
                 continue;
             }
             // Get variables for interpolation
             let mut vars = std::collections::HashMap::new();
             vars.insert(
-                "_name".to_string(),
-                serde_json::Value::String(project_name.to_string()),
+                "_project_name_underscores".to_string(),
+                serde_json::Value::String(project_name_underscores.clone()),
             );
-
-            // Add hyphenated version of project name (replacing underscores with hyphens)
-            let project_name_hyphens = project_name.replace('_', "-");
             vars.insert(
                 "_project_name_hyphens".to_string(),
-                serde_json::Value::String(project_name_hyphens),
+                serde_json::Value::String(project_name_hyphens.clone()),
             );
 
             // Add environment name
@@ -2200,24 +2207,40 @@ impl UpdateCommand {
     ) -> Result<HashMap<String, Value>> {
         let mut inputs = HashMap::new();
 
-        // Always add name (automatic variables)
-        inputs.insert("_name".to_string(), Value::String(project_name.to_string()));
-        inputs.insert("name".to_string(), Value::String(project_name.to_string()));
+        // Add project name variables (underscore and hyphen versions)
+        let project_name_underscores = project_name.replace('-', "_");
+        let project_name_hyphens = project_name.replace('_', "-");
+        inputs.insert(
+            "_project_name_underscores".to_string(),
+            Value::String(project_name_underscores.clone()),
+        );
+        inputs.insert(
+            "_project_name_hyphens".to_string(),
+            Value::String(project_name_hyphens.clone()),
+        );
 
         for input_def in inputs_spec {
-            if input_def.name == "_name" || input_def.name == "name" {
+            if input_def.name == "_project_name_underscores"
+                || input_def.name == "_project_name_hyphens"
+            {
                 continue;
             }
 
             if let Some(default) = &input_def.default {
                 // Build variables map for interpolation
                 let mut vars = HashMap::new();
-                vars.insert("_name".to_string(), Value::String(project_name.to_string()));
-
-                let project_name_hyphens = project_name.replace('_', "-");
-                vars.insert("_project_name_hyphens".to_string(), Value::String(project_name_hyphens));
-
-                vars.insert("_environment_name".to_string(), Value::String(environment_name.to_string()));
+                vars.insert(
+                    "_project_name_underscores".to_string(),
+                    Value::String(project_name_underscores.clone()),
+                );
+                vars.insert(
+                    "_project_name_hyphens".to_string(),
+                    Value::String(project_name_hyphens.clone()),
+                );
+                vars.insert(
+                    "_environment_name".to_string(),
+                    Value::String(environment_name.to_string()),
+                );
 
                 for (key, value) in &inputs {
                     vars.insert(key.clone(), value.clone());
@@ -2319,27 +2342,43 @@ impl UpdateCommand {
 
         let mut inputs = HashMap::new();
 
-        // Always add automatic variables
-        inputs.insert("_name".to_string(), Value::String(project_name.to_string()));
-        inputs.insert("name".to_string(), Value::String(project_name.to_string()));
+        // Add project name variables (underscore and hyphen versions)
+        let project_name_underscores = project_name.replace('-', "_");
+        let project_name_hyphens = project_name.replace('_', "-");
+        inputs.insert(
+            "_project_name_underscores".to_string(),
+            Value::String(project_name_underscores.clone()),
+        );
+        inputs.insert(
+            "_project_name_hyphens".to_string(),
+            Value::String(project_name_hyphens.clone()),
+        );
 
         // Collect each input defined in the plugin
         for input_def in inputs_spec {
-            // Skip automatic variables
-            if input_def.name == "_name" || input_def.name == "name" {
+            // Skip project name variables
+            if input_def.name == "_project_name_underscores"
+                || input_def.name == "_project_name_hyphens"
+            {
                 continue;
             }
 
             // Get variables for interpolation
             let mut vars = HashMap::new();
-            vars.insert("_name".to_string(), Value::String(project_name.to_string()));
-
-            // Add hyphenated version of project name (replacing underscores with hyphens)
-            let project_name_hyphens = project_name.replace('_', "-");
-            vars.insert("_project_name_hyphens".to_string(), Value::String(project_name_hyphens));
+            vars.insert(
+                "_project_name_underscores".to_string(),
+                Value::String(project_name_underscores.clone()),
+            );
+            vars.insert(
+                "_project_name_hyphens".to_string(),
+                Value::String(project_name_hyphens.clone()),
+            );
 
             // Add environment name
-            vars.insert("_environment_name".to_string(), Value::String(environment_name.to_string()));
+            vars.insert(
+                "_environment_name".to_string(),
+                Value::String(environment_name.to_string()),
+            );
 
             for (key, value) in &inputs {
                 vars.insert(key.clone(), value.clone());
@@ -2479,27 +2518,43 @@ impl UpdateCommand {
 
         let mut inputs = HashMap::new();
 
-        // Always add automatic variables
-        inputs.insert("_name".to_string(), Value::String(project_name.to_string()));
-        inputs.insert("name".to_string(), Value::String(project_name.to_string()));
+        // Add project name variables (underscore and hyphen versions)
+        let project_name_underscores = project_name.replace('-', "_");
+        let project_name_hyphens = project_name.replace('_', "-");
+        inputs.insert(
+            "_project_name_underscores".to_string(),
+            Value::String(project_name_underscores.clone()),
+        );
+        inputs.insert(
+            "_project_name_hyphens".to_string(),
+            Value::String(project_name_hyphens.clone()),
+        );
 
         // Collect each input defined in the plugin
         for input_def in inputs_spec {
-            // Skip automatic variables
-            if input_def.name == "_name" || input_def.name == "name" {
+            // Skip project name variables
+            if input_def.name == "_project_name_underscores"
+                || input_def.name == "_project_name_hyphens"
+            {
                 continue;
             }
 
             // Get variables for interpolation
             let mut vars = HashMap::new();
-            vars.insert("_name".to_string(), Value::String(project_name.to_string()));
-
-            // Add hyphenated version of project name (replacing underscores with hyphens)
-            let project_name_hyphens = project_name.replace('_', "-");
-            vars.insert("_project_name_hyphens".to_string(), Value::String(project_name_hyphens));
+            vars.insert(
+                "_project_name_underscores".to_string(),
+                Value::String(project_name_underscores.clone()),
+            );
+            vars.insert(
+                "_project_name_hyphens".to_string(),
+                Value::String(project_name_hyphens.clone()),
+            );
 
             // Add environment name
-            vars.insert("_environment_name".to_string(), Value::String(environment_name.to_string()));
+            vars.insert(
+                "_environment_name".to_string(),
+                Value::String(environment_name.to_string()),
+            );
 
             for (key, value) in &inputs {
                 vars.insert(key.clone(), value.clone());

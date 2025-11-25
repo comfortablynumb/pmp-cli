@@ -138,7 +138,7 @@ impl CiDetectChangesCommand {
     }
 
     /// Extract project name and environment from file paths
-    /// Expected path format: projects/{resource_kind}/{project_name}/environments/{environment}/...
+    /// Expected path format: projects/{project_name}/environments/{environment}/...
     fn extract_projects_from_paths(
         paths: &[String],
         environment_filter: Option<&str>,
@@ -146,19 +146,20 @@ impl CiDetectChangesCommand {
         let mut projects = HashSet::new();
 
         for path in paths {
-            // Parse path: projects/{kind}/{name}/environments/{env}/*
+            // Parse path: projects/{name}/environments/{env}/*
             let parts: Vec<&str> = path.split('/').collect();
 
             // Check if this is a project environment file
-            if parts.len() >= 5 && parts[0] == "projects" && parts[3] == "environments" {
-                let project_name = parts[2].to_string();
-                let environment = parts[4].to_string();
+            if parts.len() >= 4 && parts[0] == "projects" && parts[2] == "environments" {
+                let project_name = parts[1].to_string();
+                let environment = parts[3].to_string();
 
                 // Apply environment filter if specified
                 if let Some(filter_env) = environment_filter
-                    && environment != filter_env {
-                        continue;
-                    }
+                    && environment != filter_env
+                {
+                    continue;
+                }
 
                 projects.insert((project_name, environment));
             }
@@ -259,9 +260,9 @@ mod tests {
     #[test]
     fn test_extract_projects_from_valid_paths() {
         let paths = vec![
-            "projects/kubernetes_workload/my-api/environments/dev/main.tf".to_string(),
-            "projects/kubernetes_workload/my-api/environments/dev/variables.tf".to_string(),
-            "projects/postgres/postgres-db/environments/production/main.tf".to_string(),
+            "projects/my-api/environments/dev/main.tf".to_string(),
+            "projects/my-api/environments/dev/variables.tf".to_string(),
+            "projects/postgres-db/environments/production/main.tf".to_string(),
         ];
 
         let result = CiDetectChangesCommand::extract_projects_from_paths(&paths, None).unwrap();
@@ -274,11 +275,12 @@ mod tests {
     #[test]
     fn test_extract_projects_with_environment_filter() {
         let paths = vec![
-            "projects/kubernetes_workload/my-api/environments/dev/main.tf".to_string(),
-            "projects/kubernetes_workload/my-api/environments/production/main.tf".to_string(),
+            "projects/my-api/environments/dev/main.tf".to_string(),
+            "projects/my-api/environments/production/main.tf".to_string(),
         ];
 
-        let result = CiDetectChangesCommand::extract_projects_from_paths(&paths, Some("dev")).unwrap();
+        let result =
+            CiDetectChangesCommand::extract_projects_from_paths(&paths, Some("dev")).unwrap();
 
         assert_eq!(result.len(), 1);
         assert!(result.contains(&("my-api".to_string(), "dev".to_string())));
@@ -290,7 +292,7 @@ mod tests {
             ".pmp.infrastructure.yaml".to_string(),
             "README.md".to_string(),
             "docs/guide.md".to_string(),
-            "projects/kubernetes_workload/my-api/environments/dev/main.tf".to_string(),
+            "projects/my-api/environments/dev/main.tf".to_string(),
         ];
 
         let result = CiDetectChangesCommand::extract_projects_from_paths(&paths, None).unwrap();

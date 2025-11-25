@@ -128,11 +128,8 @@ impl CloneCommand {
         }
 
         // Create new project directory
-        let resource_kind_snake = Self::to_snake_case(&source_project_ref.kind);
-        let new_project_path = infrastructure_root
-            .join("projects")
-            .join(&resource_kind_snake)
-            .join(new_name);
+        // Project path format: projects/{project_name}
+        let new_project_path = infrastructure_root.join("projects").join(new_name);
 
         if ctx.fs.exists(&new_project_path) {
             anyhow::bail!("Project '{}' already exists", new_name);
@@ -237,17 +234,5 @@ impl CloneCommand {
         }
 
         Ok(())
-    }
-
-    /// Convert string to snake_case
-    fn to_snake_case(s: &str) -> String {
-        let mut result = String::new();
-        for (i, ch) in s.chars().enumerate() {
-            if ch.is_uppercase() && i > 0 {
-                result.push('_');
-            }
-            result.push(ch.to_lowercase().next().unwrap());
-        }
-        result
     }
 }

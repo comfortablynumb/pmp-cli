@@ -464,12 +464,12 @@ See `examples/template-packs/grouping/` for a complete example of a dependency-o
 11. **Auto-generate `.pmp.project.yaml`** at project root (identifier only - metadata, no spec)
 12. **Auto-generate `.pmp.environment.yaml`** in environment folder (with full spec)
 13. Generate project structure:
-    - Project root: `projects/{resource_kind_snake}/{project_name}/`
-    - Project identifier: `projects/{resource_kind_snake}/{project_name}/.pmp.project.yaml`
-    - Environment: `projects/{resource_kind_snake}/{project_name}/environments/{environment_name}/`
-    - Environment spec: `projects/{resource_kind_snake}/{project_name}/environments/{environment_name}/.pmp.environment.yaml`
-    - Backend config: `projects/{resource_kind_snake}/{project_name}/environments/{environment_name}/_common.tf` (if executor config present)
-    - Generated files: `projects/{resource_kind_snake}/{project_name}/environments/{environment_name}/...`
+    - Project root: `projects/{project_name}/`
+    - Project identifier: `projects/{project_name}/.pmp.project.yaml`
+    - Environment: `projects/{project_name}/environments/{environment_name}/`
+    - Environment spec: `projects/{project_name}/environments/{environment_name}/.pmp.environment.yaml`
+    - Backend config: `projects/{project_name}/environments/{environment_name}/_common.tf` (if executor config present)
+    - Generated files: `projects/{project_name}/environments/{environment_name}/...`
 
 ### Project Discovery
 
@@ -502,17 +502,27 @@ See `examples/template-packs/grouping/` for a complete example of a dependency-o
 collection/
 ├── .pmp.infrastructure.yaml
 └── projects/
-    └── {resource_kind_snake}/
-        └── {project_name}/
-            ├── .pmp.project.yaml (identifier only)
-            └── environments/
-                └── {environment_name}/
-                    ├── .pmp.environment.yaml (full spec)
-                    └── ... (generated terraform/tofu files)
+    └── {project_name}/
+        ├── .pmp.project.yaml (identifier only)
+        └── environments/
+            └── {environment_name}/
+                ├── .pmp.environment.yaml (full spec)
+                └── ... (generated terraform/tofu files)
 ```
 
-Example: `KubernetesWorkload` → `projects/kubernetes_workload/my-api/.pmp.project.yaml`
-Environment: `projects/kubernetes_workload/my-api/environments/dev/.pmp.environment.yaml`
+Example: `projects/my-api/.pmp.project.yaml`
+Environment: `projects/my-api/environments/dev/.pmp.environment.yaml`
+
+### Project Naming Rules
+
+- **Allowed characters**: lowercase letters (a-z), numbers (0-9), and hyphens (-)
+- **Cannot start with**: a number or hyphen
+- **Cannot end with**: a hyphen
+- **Must be unique**: across the entire infrastructure
+- **Internal variables available**:
+  - `_name` - The project name as entered (e.g., `my-api`)
+  - `_project_name_underscores` - Project name with hyphens converted to underscores (e.g., `my_api`)
+  - `_project_name_hyphens` - Legacy variable (same as `_name` for hyphenated names)
 
 ## Important Implementation Details
 
