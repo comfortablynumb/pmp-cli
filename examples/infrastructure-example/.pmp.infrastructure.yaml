@@ -44,7 +44,7 @@ spec:
               subcategories: [ ]
               templates:
                 - template_pack: kubernetes
-                  template: istio-ingress
+                  template: istio-ingress-controller
         - id: platform-secrets-managers
           name: Secrets Managers
           description: Tools that allow to manage secrets
