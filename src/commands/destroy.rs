@@ -1,6 +1,7 @@
 use crate::collection::{CollectionDiscovery, CollectionManager};
+use crate::commands::project_group::ProjectGroupHandler;
 use crate::executor::{Executor, ExecutorConfig, OpenTofuExecutor};
-use crate::hooks::HooksRunner;
+use crate::hooks::{HookOutcome, HooksRunner};
 use crate::template::{DynamicProjectEnvironmentResource, ProjectResource};
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
@@ -66,7 +67,90 @@ impl DestroyCommand {
 
         ctx.output.key_value("Kind", &resource.kind);
 
-        // Check for dependencies
+        // Get executor configuration
+        let executor_config = resource.get_executor_config();
+
+        // Check if this is a ProjectGroup with spec.projects defined
+        // ProjectGroups have special handling - they execute destroy on their defined projects (in reverse order)
+        if executor_config.name == "none" && !resource.spec.projects.is_empty() {
+            // Show confirmation prompt unless --yes flag is provided
+            if !skip_confirmation {
+                ctx.output.blank();
+                ctx.output
+                    .warning("WARNING: This will destroy all resources managed by this project group!");
+                ctx.output.dimmed(&format!(
+                    "This project group has {} configured project(s) that will be destroyed:",
+                    resource.spec.projects.len()
+                ));
+                for project in resource.spec.projects.iter().rev() {
+                    ctx.output.dimmed(&format!("  - {}", project.name));
+                }
+                ctx.output.blank();
+
+                let confirmation = ctx
+                    .input
+                    .text("Type 'yes' to confirm destruction:", None)
+                    .context("Failed to get confirmation")?;
+
+                if confirmation.trim().to_lowercase() != "yes" {
+                    ctx.output.blank();
+                    ctx.output.info("Destruction cancelled");
+                    return Ok(());
+                }
+            }
+
+            // Load collection to get infrastructure-level hooks
+            let (collection, _collection_root) = CollectionDiscovery::find_collection(&*ctx.fs)?
+                .context("Infrastructure is required to run commands")?;
+
+            let infrastructure_hooks = collection.get_hooks();
+
+            // Merge infrastructure hooks with environment hooks
+            let hooks = crate::commands::ExecutionHelper::merge_hooks(
+                &infrastructure_hooks,
+                resource.spec.hooks.as_ref(),
+            );
+            let env_dir_str = env_path
+                .to_str()
+                .context("Failed to convert environment path to string")?;
+
+            // Run pre-destroy hooks
+            if !hooks.pre_destroy.is_empty() {
+                if HooksRunner::run_hooks(&hooks.pre_destroy, env_dir_str, "pre-destroy")?
+                    == HookOutcome::Cancel
+                {
+                    ctx.output.blank();
+                    ctx.output.warning("Destroy cancelled by pre-destroy hook");
+                    return Ok(());
+                }
+            }
+
+            // Execute destroy on all configured projects (in reverse order)
+            ProjectGroupHandler::execute_command_on_projects(
+                ctx,
+                &resource,
+                &env_name,
+                "destroy",
+                extra_args,
+            )?;
+
+            // Run post-destroy hooks
+            if !hooks.post_destroy.is_empty() {
+                if HooksRunner::run_hooks(&hooks.post_destroy, env_dir_str, "post-destroy")?
+                    == HookOutcome::Cancel
+                {
+                    ctx.output.blank();
+                    ctx.output.warning("Post-destroy hooks cancelled further execution");
+                    return Ok(());
+                }
+            }
+
+            ctx.output.blank();
+            ctx.output.success("Infrastructure destroyed successfully");
+            return Ok(());
+        }
+
+        // Check for dependencies (non-ProjectGroup projects)
         let maybe_graph = crate::commands::ExecutionHelper::check_and_display_dependencies(
             ctx,
             &env_path,
@@ -164,11 +248,17 @@ impl DestroyCommand {
         // Get executor configuration
         let executor_config = resource.get_executor_config();
 
-        // Load collection to get hooks
+        // Load collection to get infrastructure-level hooks
         let (collection, _collection_root) = CollectionDiscovery::find_collection(&*ctx.fs)?
             .context("Infrastructure is required to run commands")?;
 
-        let hooks = collection.get_hooks();
+        let infrastructure_hooks = collection.get_hooks();
+
+        // Merge infrastructure hooks with environment hooks
+        let hooks = crate::commands::ExecutionHelper::merge_hooks(
+            &infrastructure_hooks,
+            resource.spec.hooks.as_ref(),
+        );
 
         // Get executor
         let executor = Self::get_executor(&executor_config.name)?;
@@ -196,7 +286,13 @@ impl DestroyCommand {
 
         // Run pre-destroy hooks
         if !hooks.pre_destroy.is_empty() {
-            HooksRunner::run_hooks(&hooks.pre_destroy, env_dir_str, "pre-destroy")?;
+            if HooksRunner::run_hooks(&hooks.pre_destroy, env_dir_str, "pre-destroy")?
+                == HookOutcome::Cancel
+            {
+                ctx.output.blank();
+                ctx.output.warning("Destroy cancelled by pre-destroy hook");
+                return Ok(());
+            }
         }
 
         // Run helm repo update if configured
@@ -248,7 +344,13 @@ impl DestroyCommand {
 
         // Run post-destroy hooks
         if !hooks.post_destroy.is_empty() {
-            HooksRunner::run_hooks(&hooks.post_destroy, env_dir_str, "post-destroy")?;
+            if HooksRunner::run_hooks(&hooks.post_destroy, env_dir_str, "post-destroy")?
+                == HookOutcome::Cancel
+            {
+                ctx.output.blank();
+                ctx.output.warning("Post-destroy hooks cancelled further execution");
+                return Ok(());
+            }
         }
 
         ctx.output.blank();

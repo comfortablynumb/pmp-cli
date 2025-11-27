@@ -1,6 +1,6 @@
 use crate::collection::{DependencyGraph, DependencyNode};
 use crate::executor::{Executor, ExecutorConfig, NoneExecutor, OpenTofuExecutor};
-use crate::hooks::HooksRunner;
+use crate::hooks::{HookOutcome, HooksRunner};
 use crate::template::metadata::InfrastructureResource;
 use crate::template::DynamicProjectEnvironmentResource;
 use anyhow::{Context, Result};
@@ -11,6 +11,30 @@ use std::process::Command;
 pub struct ExecutionHelper;
 
 impl ExecutionHelper {
+    /// Merge infrastructure hooks with environment hooks
+    /// Environment hooks take precedence (append to infrastructure hooks)
+    pub fn merge_hooks(
+        infrastructure_hooks: &crate::template::metadata::HooksConfig,
+        environment_hooks: Option<&crate::template::metadata::HooksConfig>,
+    ) -> crate::template::metadata::HooksConfig {
+        let mut merged = infrastructure_hooks.clone();
+
+        if let Some(env_hooks) = environment_hooks {
+            // Append environment hooks to infrastructure hooks
+            // Environment hooks run after infrastructure hooks
+            merged.pre_preview.extend(env_hooks.pre_preview.clone());
+            merged.post_preview.extend(env_hooks.post_preview.clone());
+            merged.pre_apply.extend(env_hooks.pre_apply.clone());
+            merged.post_apply.extend(env_hooks.post_apply.clone());
+            merged.pre_destroy.extend(env_hooks.pre_destroy.clone());
+            merged.post_destroy.extend(env_hooks.post_destroy.clone());
+            merged.pre_refresh.extend(env_hooks.pre_refresh.clone());
+            merged.post_refresh.extend(env_hooks.post_refresh.clone());
+        }
+
+        merged
+    }
+
     /// Run helm repo update if configured in infrastructure
     ///
     /// This is a workaround for the Terraform Helm provider issue where it doesn't
@@ -205,15 +229,31 @@ impl ExecutionHelper {
             .to_str()
             .context("Failed to convert environment path to string")?;
 
-        // Load collection to get hooks
+        // Load collection to get infrastructure-level hooks
         let (collection, _) = crate::collection::CollectionDiscovery::find_collection(&*ctx.fs)?
             .context("Infrastructure is required to run commands")?;
 
-        let hooks = collection.get_hooks();
+        let infrastructure_hooks = collection.get_hooks();
+
+        // Load environment resource to get environment-level hooks
+        let env_file = node.environment_path.join(".pmp.environment.yaml");
+        let env_resource = DynamicProjectEnvironmentResource::from_file(&*ctx.fs, &env_file)
+            .context("Failed to load environment resource")?;
+
+        // Merge hooks: environment hooks take precedence over infrastructure hooks
+        let hooks = Self::merge_hooks(&infrastructure_hooks, env_resource.spec.hooks.as_ref());
 
         // Run pre-preview hooks
         if !hooks.pre_preview.is_empty() {
-            HooksRunner::run_hooks(&hooks.pre_preview, env_dir_str, "pre-preview")?;
+            if HooksRunner::run_hooks(&hooks.pre_preview, env_dir_str, "pre-preview")?
+                == HookOutcome::Cancel
+            {
+                ctx.output.warning(&format!(
+                    "Preview cancelled by pre-preview hook for {} ({})",
+                    node.project_name, node.environment_name
+                ));
+                return Ok(());
+            }
         }
 
         // Run helm repo update if configured
@@ -250,7 +290,15 @@ impl ExecutionHelper {
 
         // Run post-preview hooks
         if !hooks.post_preview.is_empty() {
-            HooksRunner::run_hooks(&hooks.post_preview, env_dir_str, "post-preview")?;
+            if HooksRunner::run_hooks(&hooks.post_preview, env_dir_str, "post-preview")?
+                == HookOutcome::Cancel
+            {
+                ctx.output.warning(&format!(
+                    "Post-preview hooks cancelled for {} ({})",
+                    node.project_name, node.environment_name
+                ));
+                return Ok(());
+            }
         }
 
         ctx.output.success(&format!(
@@ -283,15 +331,31 @@ impl ExecutionHelper {
             .to_str()
             .context("Failed to convert environment path to string")?;
 
-        // Load collection to get hooks
+        // Load collection to get infrastructure-level hooks
         let (collection, _) = crate::collection::CollectionDiscovery::find_collection(&*ctx.fs)?
             .context("Infrastructure is required to run commands")?;
 
-        let hooks = collection.get_hooks();
+        let infrastructure_hooks = collection.get_hooks();
+
+        // Load environment resource to get environment-level hooks
+        let env_file = node.environment_path.join(".pmp.environment.yaml");
+        let env_resource = DynamicProjectEnvironmentResource::from_file(&*ctx.fs, &env_file)
+            .context("Failed to load environment resource")?;
+
+        // Merge hooks: environment hooks take precedence over infrastructure hooks
+        let hooks = Self::merge_hooks(&infrastructure_hooks, env_resource.spec.hooks.as_ref());
 
         // Run pre-apply hooks
         if !hooks.pre_apply.is_empty() {
-            HooksRunner::run_hooks(&hooks.pre_apply, env_dir_str, "pre-apply")?;
+            if HooksRunner::run_hooks(&hooks.pre_apply, env_dir_str, "pre-apply")?
+                == HookOutcome::Cancel
+            {
+                ctx.output.warning(&format!(
+                    "Apply cancelled by pre-apply hook for {} ({})",
+                    node.project_name, node.environment_name
+                ));
+                return Ok(());
+            }
         }
 
         // Run helm repo update if configured
@@ -328,7 +392,15 @@ impl ExecutionHelper {
 
         // Run post-apply hooks
         if !hooks.post_apply.is_empty() {
-            HooksRunner::run_hooks(&hooks.post_apply, env_dir_str, "post-apply")?;
+            if HooksRunner::run_hooks(&hooks.post_apply, env_dir_str, "post-apply")?
+                == HookOutcome::Cancel
+            {
+                ctx.output.warning(&format!(
+                    "Post-apply hooks cancelled for {} ({})",
+                    node.project_name, node.environment_name
+                ));
+                return Ok(());
+            }
         }
 
         ctx.output.success(&format!(
@@ -361,15 +433,31 @@ impl ExecutionHelper {
             .to_str()
             .context("Failed to convert environment path to string")?;
 
-        // Load collection to get hooks
+        // Load collection to get infrastructure-level hooks
         let (collection, _) = crate::collection::CollectionDiscovery::find_collection(&*ctx.fs)?
             .context("Infrastructure is required to run commands")?;
 
-        let hooks = collection.get_hooks();
+        let infrastructure_hooks = collection.get_hooks();
+
+        // Load environment resource to get environment-level hooks
+        let env_file = node.environment_path.join(".pmp.environment.yaml");
+        let env_resource = DynamicProjectEnvironmentResource::from_file(&*ctx.fs, &env_file)
+            .context("Failed to load environment resource")?;
+
+        // Merge hooks: environment hooks take precedence over infrastructure hooks
+        let hooks = Self::merge_hooks(&infrastructure_hooks, env_resource.spec.hooks.as_ref());
 
         // Run pre-destroy hooks
         if !hooks.pre_destroy.is_empty() {
-            HooksRunner::run_hooks(&hooks.pre_destroy, env_dir_str, "pre-destroy")?;
+            if HooksRunner::run_hooks(&hooks.pre_destroy, env_dir_str, "pre-destroy")?
+                == HookOutcome::Cancel
+            {
+                ctx.output.warning(&format!(
+                    "Destroy cancelled by pre-destroy hook for {} ({})",
+                    node.project_name, node.environment_name
+                ));
+                return Ok(());
+            }
         }
 
         // Run helm repo update if configured
@@ -406,7 +494,15 @@ impl ExecutionHelper {
 
         // Run post-destroy hooks
         if !hooks.post_destroy.is_empty() {
-            HooksRunner::run_hooks(&hooks.post_destroy, env_dir_str, "post-destroy")?;
+            if HooksRunner::run_hooks(&hooks.post_destroy, env_dir_str, "post-destroy")?
+                == HookOutcome::Cancel
+            {
+                ctx.output.warning(&format!(
+                    "Post-destroy hooks cancelled for {} ({})",
+                    node.project_name, node.environment_name
+                ));
+                return Ok(());
+            }
         }
 
         ctx.output.success(&format!(

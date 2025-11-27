@@ -91,15 +91,17 @@ pub trait Executor: Send + Sync {
     fn default_refresh_command(&self) -> &str;
 
     /// Generate common infrastructure file (e.g., _common.tf) with backend and module configuration
-    /// Default implementation does nothing (for executors that don't support backends)
+    /// Default implementation does nothing (only OpenTofu executor generates _common.tf)
     fn generate_common_file(
         &self,
+        _ctx: &crate::context::Context,
         _environment_path: &Path,
         _executor_config: &HashMap<String, serde_json::Value>,
         _project_metadata: &ProjectMetadata,
         _plugins: Option<&[crate::template::metadata::AddedPlugin]>,
         _template_reference_projects: &[crate::template::metadata::TemplateReferenceProject],
     ) -> Result<()> {
+        // Default: do nothing - only OpenTofu executor generates _common.tf
         Ok(())
     }
 
@@ -108,11 +110,5 @@ pub trait Executor: Send + Sync {
     #[allow(dead_code)]
     fn file_extension(&self) -> &str {
         ""
-    }
-
-    /// Check if this executor supports remote backends
-    /// Default implementation returns false
-    fn supports_backend(&self) -> bool {
-        false
     }
 }

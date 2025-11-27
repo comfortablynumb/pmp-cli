@@ -1,6 +1,7 @@
 use crate::collection::{CollectionDiscovery, CollectionManager};
+use crate::commands::project_group::ProjectGroupHandler;
 use crate::executor::{Executor, ExecutorConfig, OpenTofuExecutor};
-use crate::hooks::HooksRunner;
+use crate::hooks::{HookOutcome, HooksRunner};
 use crate::template::{DynamicProjectEnvironmentResource, ProjectResource};
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
@@ -65,7 +66,78 @@ impl PreviewCommand {
 
         ctx.output.key_value("Kind", &resource.kind);
 
-        // Check for dependencies
+        // Get executor configuration
+        let executor_config = resource.get_executor_config();
+
+        // Check if this is a ProjectGroup with spec.projects defined
+        // ProjectGroups have special handling - they execute preview on their defined projects
+        if executor_config.name == "none" && !resource.spec.projects.is_empty() {
+            // Load collection to get infrastructure-level hooks
+            let (collection, _collection_root) = CollectionDiscovery::find_collection(&*ctx.fs)?
+                .context("Infrastructure is required to run commands")?;
+
+            let infrastructure_hooks = collection.get_hooks();
+
+            // Merge infrastructure hooks with environment hooks
+            let hooks = crate::commands::ExecutionHelper::merge_hooks(
+                &infrastructure_hooks,
+                resource.spec.hooks.as_ref(),
+            );
+            let env_dir_str = env_path
+                .to_str()
+                .context("Failed to convert environment path to string")?;
+
+            // Run pre-preview hooks
+            if !hooks.pre_preview.is_empty() {
+                if HooksRunner::run_hooks(&hooks.pre_preview, env_dir_str, "pre-preview")?
+                    == HookOutcome::Cancel
+                {
+                    ctx.output.blank();
+                    ctx.output.warning("Preview cancelled by pre-preview hook");
+                    return Ok(());
+                }
+            }
+
+            // Show ProjectGroup info
+            ctx.output.blank();
+            ctx.output.subsection("Project Group Projects");
+            ctx.output.dimmed(&format!(
+                "This project group has {} configured project(s):",
+                resource.spec.projects.len()
+            ));
+            for project in &resource.spec.projects {
+                ctx.output.dimmed(&format!(
+                    "  - {} (template: {}/{})",
+                    project.name, project.template_pack, project.template
+                ));
+            }
+
+            // Execute preview on all configured projects
+            ProjectGroupHandler::execute_command_on_projects(
+                ctx,
+                &resource,
+                &env_name,
+                "preview",
+                extra_args,
+            )?;
+
+            // Run post-preview hooks
+            if !hooks.post_preview.is_empty() {
+                if HooksRunner::run_hooks(&hooks.post_preview, env_dir_str, "post-preview")?
+                    == HookOutcome::Cancel
+                {
+                    ctx.output.blank();
+                    ctx.output.warning("Post-preview hooks cancelled further execution");
+                    return Ok(());
+                }
+            }
+
+            ctx.output.blank();
+            ctx.output.success("Preview completed successfully");
+            return Ok(());
+        }
+
+        // Check for dependencies (non-ProjectGroup projects)
         let maybe_graph = crate::commands::ExecutionHelper::check_and_display_dependencies(
             ctx,
             &env_path,
@@ -90,14 +162,18 @@ impl PreviewCommand {
         }
 
         // No dependencies - proceed with single project execution
-        // Get executor configuration
-        let executor_config = resource.get_executor_config();
 
-        // Load collection to get hooks
+        // Load collection to get infrastructure-level hooks
         let (collection, _collection_root) = CollectionDiscovery::find_collection(&*ctx.fs)?
             .context("Infrastructure is required to run commands")?;
 
-        let hooks = collection.get_hooks();
+        let infrastructure_hooks = collection.get_hooks();
+
+        // Merge infrastructure hooks with environment hooks
+        let hooks = crate::commands::ExecutionHelper::merge_hooks(
+            &infrastructure_hooks,
+            resource.spec.hooks.as_ref(),
+        );
 
         // Get executor
         let executor = Self::get_executor(&executor_config.name)?;
@@ -125,7 +201,13 @@ impl PreviewCommand {
 
         // Run pre-preview hooks
         if !hooks.pre_preview.is_empty() {
-            HooksRunner::run_hooks(&hooks.pre_preview, env_dir_str, "pre-preview")?;
+            if HooksRunner::run_hooks(&hooks.pre_preview, env_dir_str, "pre-preview")?
+                == HookOutcome::Cancel
+            {
+                ctx.output.blank();
+                ctx.output.warning("Preview cancelled by pre-preview hook");
+                return Ok(());
+            }
         }
 
         // Run helm repo update if configured
@@ -177,7 +259,13 @@ impl PreviewCommand {
 
         // Run post-preview hooks
         if !hooks.post_preview.is_empty() {
-            HooksRunner::run_hooks(&hooks.post_preview, env_dir_str, "post-preview")?;
+            if HooksRunner::run_hooks(&hooks.post_preview, env_dir_str, "post-preview")?
+                == HookOutcome::Cancel
+            {
+                ctx.output.blank();
+                ctx.output.warning("Post-preview hooks cancelled further execution");
+                return Ok(());
+            }
         }
 
         ctx.output.blank();

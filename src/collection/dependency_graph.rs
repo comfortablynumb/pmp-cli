@@ -100,15 +100,28 @@ impl DependencyGraph {
                     // For each dependency, we need to resolve all its environments
                     for dep_env in &dep.project.environments {
                         // Find the dependency project
-                        let dep_node =
-                            Self::find_dependency_project(fs, &dep.project.name, dep_env)?;
-
-                        dep_nodes.push(dep_node.clone());
-                        queue.push_back(dep_node);
+                        // If create: true and project doesn't exist, skip it (will be created later)
+                        match Self::find_dependency_project(
+                            fs,
+                            &dep.project.name,
+                            dep_env,
+                            dep.project.create,
+                        )? {
+                            Some(dep_node) => {
+                                dep_nodes.push(dep_node.clone());
+                                queue.push_back(dep_node);
+                            }
+                            None => {
+                                // Dependency with create: true doesn't exist yet, skip it
+                                // It will be created by ProjectGroupHandler
+                            }
+                        }
                     }
                 }
 
-                graph.dependencies.insert(node_key, dep_nodes);
+                if !dep_nodes.is_empty() {
+                    graph.dependencies.insert(node_key, dep_nodes);
+                }
             }
         }
 
@@ -116,31 +129,48 @@ impl DependencyGraph {
     }
 
     /// Find a dependency project by name and environment
+    /// If create_if_missing is true and the project doesn't exist, returns None instead of an error
     fn find_dependency_project(
         fs: &dyn FileSystem,
         project_name: &str,
         environment_name: &str,
-    ) -> Result<DependencyNode> {
+        create_if_missing: bool,
+    ) -> Result<Option<DependencyNode>> {
         // Search for the project in the projects directory
         // Try both relative and absolute paths (for tests)
         let projects_dirs = [PathBuf::from("projects"), PathBuf::from("/projects")];
 
-        let projects_dir = projects_dirs
-            .iter()
-            .find(|dir| fs.exists(dir))
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "Projects directory not found. Cannot resolve dependency: {} (env: {})",
-                    project_name,
-                    environment_name
-                )
-            })?;
+        let projects_dir = projects_dirs.iter().find(|dir| fs.exists(dir));
+
+        let Some(projects_dir) = projects_dir else {
+            if create_if_missing {
+                // Project directory doesn't exist, but that's OK if create: true
+                return Ok(None);
+            }
+            anyhow::bail!(
+                "Projects directory not found. Cannot resolve dependency: {} (env: {})",
+                project_name,
+                environment_name
+            );
+        };
 
         // Recursively search for the project
-        let project_path = Self::search_project(fs, projects_dir, project_name)?;
+        let project_path = match Self::search_project(fs, projects_dir, project_name) {
+            Ok(path) => path,
+            Err(_) if create_if_missing => {
+                // Project doesn't exist, but that's OK if create: true
+                return Ok(None);
+            }
+            Err(e) => return Err(e),
+        };
+
         let env_path = project_path.join("environments").join(environment_name);
 
         if !fs.exists(&env_path) {
+            if create_if_missing {
+                // Environment doesn't exist, but that's OK if create: true
+                return Ok(None);
+            }
             anyhow::bail!(
                 "Environment '{}' not found for project '{}' at {:?}",
                 environment_name,
@@ -149,11 +179,11 @@ impl DependencyGraph {
             );
         }
 
-        Ok(DependencyNode::new(
+        Ok(Some(DependencyNode::new(
             project_name.to_string(),
             environment_name.to_string(),
             env_path,
-        ))
+        )))
     }
 
     /// Recursively search for a project by name

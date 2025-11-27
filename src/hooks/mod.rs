@@ -1,3 +1,3 @@
 pub mod runner;
 
-pub use runner::HooksRunner;
+pub use runner::{HookOutcome, HooksRunner};

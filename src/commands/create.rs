@@ -545,12 +545,40 @@ impl CreateCommand {
         Ok(inputs)
     }
 
+    /// Parse inputs from JSON or YAML string
+    pub fn parse_inputs(inputs_str: &str) -> Result<HashMap<String, Value>> {
+        // Try JSON first
+        if let Ok(value) = serde_json::from_str::<Value>(inputs_str) {
+            if let Value::Object(map) = value {
+                return Ok(map.into_iter().collect());
+            }
+            anyhow::bail!("Inputs must be a JSON/YAML object, not a primitive value");
+        }
+
+        // Try YAML
+        if let Ok(value) = serde_yaml::from_str::<Value>(inputs_str) {
+            if let Value::Object(map) = value {
+                return Ok(map.into_iter().collect());
+            }
+            anyhow::bail!("Inputs must be a JSON/YAML object, not a primitive value");
+        }
+
+        anyhow::bail!("Failed to parse inputs as JSON or YAML")
+    }
+
     /// Execute the create command
     pub fn execute(
         ctx: &crate::context::Context,
         output_path: Option<&str>,
         template_packs_paths: Option<&str>,
+        inputs_str: Option<&str>,
     ) -> Result<()> {
+        // Parse pre-defined inputs if provided
+        let predefined_inputs: Option<HashMap<String, Value>> = if let Some(inputs) = inputs_str {
+            Some(Self::parse_inputs(inputs)?)
+        } else {
+            None
+        };
         // Step 1: Infrastructure is REQUIRED
         let (infrastructure, infrastructure_root) = CollectionDiscovery::find_collection(&*ctx.fs)?
             .context("Infrastructure is required. No .pmp.infrastructure.yaml found in current directory or parent directories.\n\nPlease create an Infrastructure first or navigate to an existing one.")?;
@@ -1097,7 +1125,11 @@ impl CreateCommand {
         // Step 8: Select project dependencies (for dependency-only templates with executor: none)
         let mut project_dependencies = Vec::new();
 
-        if selected_template.resource.spec.executor == "none" {
+        // Skip dependency selection if the template has pre-defined projects (ProjectGroup)
+        // Those projects will be auto-created with create: true
+        if selected_template.resource.spec.executor == "none"
+            && selected_template.resource.spec.projects.is_empty()
+        {
             ctx.output.subsection("Project Dependencies");
             ctx.output.dimmed(
                 "This is a dependency-only project. Select the projects that this group should manage."
@@ -1194,6 +1226,7 @@ impl CreateCommand {
                             project: crate::template::metadata::DependencyProject {
                                 name: selected_project.name.clone(),
                                 environments: selected_envs,
+                                create: false, // User-selected dependencies don't auto-create
                             },
                         });
                     }
@@ -1206,6 +1239,16 @@ impl CreateCommand {
                     output::blank();
                 }
             }
+        } else if selected_template.resource.spec.executor == "none"
+            && !selected_template.resource.spec.projects.is_empty()
+        {
+            // ProjectGroup with pre-defined projects - inform user about auto-creation
+            ctx.output.subsection("Project Dependencies");
+            ctx.output.info(&format!(
+                "This project group has {} pre-defined project(s) that will be created automatically.",
+                selected_template.resource.spec.projects.len()
+            ));
+            output::blank();
         }
 
         // Step 9: Validate resource kind
@@ -1308,13 +1351,14 @@ impl CreateCommand {
                         .as_ref()
                         .map(|config| &config.defaults.inputs);
 
-                    // Collect inputs from user (respecting collection overrides)
+                    // Collect inputs from user (respecting collection overrides and predefined inputs)
                     inputs = Self::collect_template_inputs_with_overrides(
                         ctx,
                         &merged_inputs,
                         &project_name,
                         Some(&selected_environment),
                         collection_overrides,
+                        predefined_inputs.as_ref(),
                     )
                     .context("Failed to collect inputs")?;
                 }
@@ -1424,42 +1468,42 @@ impl CreateCommand {
             .context("Failed to render template")?;
 
         // Step 15.5: Generate common file (e.g., _common.tf) if executor config is present
+        // The executor itself decides whether to generate anything (only opentofu does)
+        let template_executor_name = &selected_template.resource.spec.executor;
         if let Some(executor_config) = &infrastructure.spec.executor
             && !executor_config.config.is_empty()
         {
-            // Create executor instance (for now, create directly; will use registry in Phase 3)
-            let executor: Box<dyn crate::executor::Executor> = match executor_config.name.as_str() {
+            // Create executor instance based on template's executor
+            let executor: Box<dyn crate::executor::Executor> = match template_executor_name.as_str() {
                 "opentofu" => Box::new(crate::executor::OpenTofuExecutor::new()),
-                _ => anyhow::bail!("Unknown executor: {}", executor_config.name),
+                "none" => Box::new(crate::executor::NoneExecutor::new()),
+                _ => anyhow::bail!("Unknown executor: {}", template_executor_name),
             };
 
-            if executor.supports_backend() {
-                ctx.output
-                    .dimmed("  Generating common file with backend configuration...");
-                let metadata = crate::executor::ProjectMetadata {
-                    api_version: &selected_template.resource.spec.api_version,
-                    kind: &selected_template.resource.spec.kind,
-                    environment: &selected_environment,
-                    project_name: &project_name,
-                };
+            let metadata = crate::executor::ProjectMetadata {
+                api_version: &selected_template.resource.spec.api_version,
+                kind: &selected_template.resource.spec.kind,
+                environment: &selected_environment,
+                project_name: &project_name,
+            };
 
-                // Pass plugins if any were added
-                let plugins_ref = if !added_plugins.is_empty() {
-                    Some(added_plugins.as_slice())
-                } else {
-                    None
-                };
+            // Pass plugins if any were added
+            let plugins_ref = if !added_plugins.is_empty() {
+                Some(added_plugins.as_slice())
+            } else {
+                None
+            };
 
-                executor
-                    .generate_common_file(
-                        &environment_path,
-                        &executor_config.config,
-                        &metadata,
-                        plugins_ref,
-                        &template_reference_projects,
-                    )
-                    .context("Failed to generate common file")?;
-            }
+            executor
+                .generate_common_file(
+                    ctx,
+                    &environment_path,
+                    &executor_config.config,
+                    &metadata,
+                    plugins_ref,
+                    &template_reference_projects,
+                )
+                .context("Failed to generate common file")?;
         }
 
         // Step 16: Auto-generate .pmp.project.yaml file (identifier only)
@@ -1544,6 +1588,7 @@ impl CreateCommand {
         collection_overrides: Option<
             &std::collections::HashMap<String, crate::template::metadata::InputOverride>,
         >,
+        predefined_inputs: Option<&HashMap<String, Value>>,
     ) -> Result<std::collections::HashMap<String, serde_json::Value>> {
         let mut inputs = std::collections::HashMap::new();
 
@@ -1561,6 +1606,15 @@ impl CreateCommand {
 
         // Collect each input defined in the template
         for input_def in inputs_spec {
+            // Check if there's a predefined value for this input
+            if let Some(predefined) = predefined_inputs.and_then(|p| p.get(&input_def.name)) {
+                // Use the predefined value directly (with variable interpolation)
+                let vars = Self::get_interpolation_variables(&inputs, project_name, environment_name);
+                let value = crate::template::utils::interpolate_value_all(predefined, &vars)?;
+                inputs.insert(input_def.name.clone(), value);
+                continue;
+            }
+
             // Check if there's a infrastructure-level override for this input
             let override_config =
                 collection_overrides.and_then(|overrides| overrides.get(&input_def.name));
@@ -2950,6 +3004,205 @@ impl CreateCommand {
         }
     }
 
+    /// Create a project programmatically without interactive prompts
+    /// Used by ProjectGroupHandler to create projects defined in spec.projects
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_project_non_interactive(
+        ctx: &crate::context::Context,
+        project_name: &str,
+        template_pack_name: &str,
+        template_name: &str,
+        environment_name: &str,
+        inputs: &std::collections::HashMap<String, serde_json::Value>,
+        use_all_defaults: bool,
+        reference_projects: &[crate::template::metadata::TemplateReferenceProject],
+        template_packs_paths: Option<&str>,
+    ) -> Result<()> {
+        use crate::template::renderer::TemplateRenderer;
+
+        // Step 1: Find infrastructure
+        let (infrastructure, infrastructure_root) = CollectionDiscovery::find_collection(&*ctx.fs)?
+            .context("Infrastructure is required")?;
+
+        // Step 2: Discover template packs
+        let flag_paths: Vec<String> = if let Some(paths) = template_packs_paths {
+            crate::template::discovery::parse_colon_separated_paths(paths)
+        } else {
+            vec![]
+        };
+
+        let env_paths: Vec<String> = std::env::var("PMP_TEMPLATE_PACKS_PATHS")
+            .ok()
+            .map(|p| crate::template::discovery::parse_colon_separated_paths(&p))
+            .unwrap_or_default();
+
+        let mut all_paths = flag_paths;
+        all_paths.extend(env_paths);
+        let custom_paths: Vec<&str> = all_paths.iter().map(|s| s.as_str()).collect();
+
+        let all_template_packs = TemplateDiscovery::discover_template_packs_with_custom_paths(
+            &*ctx.fs,
+            &*ctx.output,
+            &custom_paths,
+        )?;
+
+        // Step 3: Find the template pack
+        let template_pack = all_template_packs
+            .iter()
+            .find(|pack| {
+                let pack_name = pack
+                    .resource
+                    .metadata
+                    .name
+                    .to_lowercase()
+                    .replace(' ', "-");
+                pack_name == template_pack_name.to_lowercase()
+                    || pack.resource.metadata.name.to_lowercase() == template_pack_name.to_lowercase()
+            })
+            .context(format!(
+                "Template pack '{}' not found",
+                template_pack_name
+            ))?;
+
+        // Step 4: Discover templates in the pack and find the template
+        let templates =
+            TemplateDiscovery::discover_templates_in_pack(&*ctx.fs, &*ctx.output, &template_pack.path)?;
+
+        let template = templates
+            .iter()
+            .find(|t| t.resource.metadata.name.to_lowercase() == template_name.to_lowercase())
+            .context(format!(
+                "Template '{}' not found in pack '{}'",
+                template_name, template_pack_name
+            ))?;
+
+        // Step 5: Build inputs - use provided inputs and fill with defaults
+        let mut final_inputs: std::collections::HashMap<String, serde_json::Value> = inputs.clone();
+
+        // Add internal variables for template rendering
+        final_inputs.insert(
+            "_name".to_string(),
+            serde_json::Value::String(project_name.to_string()),
+        );
+        final_inputs.insert(
+            "_project_name_underscores".to_string(),
+            serde_json::Value::String(project_name.replace('-', "_")),
+        );
+        final_inputs.insert(
+            "_project_name_hyphens".to_string(),
+            serde_json::Value::String(project_name.to_string()),
+        );
+        final_inputs.insert(
+            "_environment".to_string(),
+            serde_json::Value::String(environment_name.to_string()),
+        );
+        final_inputs.insert(
+            "_environment_name".to_string(),
+            serde_json::Value::String(environment_name.to_string()),
+        );
+        final_inputs.insert(
+            "_resource_api_version".to_string(),
+            serde_json::Value::String(template.resource.spec.api_version.clone()),
+        );
+        final_inputs.insert(
+            "_resource_kind".to_string(),
+            serde_json::Value::String(template.resource.spec.kind.clone()),
+        );
+
+        // Fill in defaults for any missing inputs
+        for input_def in &template.resource.spec.inputs {
+            if !final_inputs.contains_key(&input_def.name) {
+                if use_all_defaults {
+                    // Use default value if available
+                    if let Some(default) = &input_def.default {
+                        final_inputs.insert(input_def.name.clone(), default.clone());
+                    }
+                }
+            }
+        }
+
+        // Step 6: Determine project paths
+        // Project folder uses underscores instead of hyphens
+        let project_folder = project_name.replace('-', "_");
+
+        let project_root = infrastructure_root
+            .join("projects")
+            .join(&project_folder);
+        let environment_path = project_root
+            .join("environments")
+            .join(environment_name);
+
+        // Step 7: Create directory structure
+        ctx.fs.create_dir_all(&environment_path)?;
+
+        // Step 8: Render template files
+        let template_src = &template.path;
+        let renderer = TemplateRenderer::new();
+        renderer
+            .render_template(ctx, template_src, environment_path.as_path(), &final_inputs, None)
+            .context("Failed to render template")?;
+
+        // Step 9: Generate _common.tf if needed (only opentofu executor does this)
+        let template_executor_name = &template.resource.spec.executor;
+        if let Some(executor_config) = &infrastructure.spec.executor
+            && !executor_config.config.is_empty()
+        {
+            let executor: Box<dyn crate::executor::Executor> = match template_executor_name.as_str() {
+                "opentofu" => Box::new(crate::executor::OpenTofuExecutor::new()),
+                _ => Box::new(crate::executor::NoneExecutor::new()),
+            };
+
+            let metadata = crate::executor::ProjectMetadata {
+                api_version: &template.resource.spec.api_version,
+                kind: &template.resource.spec.kind,
+                environment: environment_name,
+                project_name,
+            };
+
+            executor
+                .generate_common_file(
+                    ctx,
+                    &environment_path,
+                    &executor_config.config,
+                    &metadata,
+                    None, // No plugins for now
+                    reference_projects,
+                )
+                .context("Failed to generate common file")?;
+        }
+
+        // Step 10: Generate .pmp.project.yaml
+        Self::generate_project_identifier_yaml(
+            ctx,
+            &project_root,
+            project_name,
+            None, // No description
+            &template.resource.metadata.labels,
+        )?;
+
+        // Step 11: Generate .pmp.environment.yaml
+        Self::generate_project_environment_yaml(
+            ctx,
+            &environment_path,
+            environment_name,
+            project_name,
+            &template.resource,
+            &final_inputs,
+            template_pack_name,
+            template_name,
+            reference_projects,
+            &[], // No added plugins
+            &[], // No project dependencies (the caller handles this)
+        )?;
+
+        ctx.output.success(&format!(
+            "Created project '{}' in environment '{}'",
+            project_name, environment_name
+        ));
+
+        Ok(())
+    }
+
     /// Generate the .pmp.project.yaml file for the project (identifier only, no spec)
     fn generate_project_identifier_yaml(
         ctx: &crate::context::Context,
@@ -3009,10 +3262,28 @@ impl CreateCommand {
         project_dependencies: &[crate::template::metadata::ProjectDependency],
     ) -> Result<()> {
         use crate::template::metadata::{
-            DynamicProjectEnvironmentMetadata, DynamicProjectEnvironmentResource,
-            EnvironmentReference, ProjectPlugins, ProjectSpec, ResourceDefinition,
+            DependencyProject, DynamicProjectEnvironmentMetadata, DynamicProjectEnvironmentResource,
+            EnvironmentReference, ProjectDependency, ProjectPlugins, ProjectSpec, ResourceDefinition,
             TemplateReference,
         };
+
+        // Copy projects from template spec
+        let template_projects = template.spec.projects.clone();
+
+        // Generate dependencies from template projects (if any)
+        // Each project in spec.projects becomes a dependency
+        let mut all_dependencies = project_dependencies.to_vec();
+        for project_config in &template_projects {
+            // Add each project as a dependency with the current environment
+            // Set create: true because ProjectGroup dependencies should be auto-created
+            all_dependencies.push(ProjectDependency {
+                project: DependencyProject {
+                    name: project_config.name.clone(),
+                    environments: vec![environment_name.to_string()],
+                    create: true, // Auto-create dependencies from ProjectGroup
+                },
+            });
+        }
 
         // Create DynamicProjectEnvironmentResource structure with apiVersion/kind from template
         let project_env = DynamicProjectEnvironmentResource {
@@ -3051,7 +3322,9 @@ impl CreateCommand {
                     name: environment_name.to_string(),
                 }),
                 template_reference_projects: template_reference_projects.to_vec(),
-                dependencies: project_dependencies.to_vec(),
+                dependencies: all_dependencies,
+                projects: template_projects,
+                hooks: template.spec.hooks.clone(), // Copy hooks from template
             },
         };
 
@@ -3459,6 +3732,7 @@ spec:
         let result = CreateCommand::execute(
             &ctx, None, // output_path
             None, // template_packs_paths
+            None, // inputs_str
         );
 
         // Verify template was allowed and project was created
@@ -3500,7 +3774,7 @@ spec:
         let ctx = create_test_context(Arc::clone(&fs), input);
 
         // Run create command
-        let result = CreateCommand::execute(&ctx, None, None);
+        let result = CreateCommand::execute(&ctx, None, None, None);
 
         // Should fail because no templates are available
         assert!(
@@ -3565,7 +3839,7 @@ spec:
         let ctx = create_test_context(Arc::clone(&fs), input);
 
         // Run create command
-        let result = CreateCommand::execute(&ctx, None, None);
+        let result = CreateCommand::execute(&ctx, None, None, None);
 
         assert!(
             result.is_ok(),
@@ -3640,7 +3914,7 @@ spec:
         let ctx = create_test_context(Arc::clone(&fs), input);
 
         // Run create command
-        let result = CreateCommand::execute(&ctx, None, None);
+        let result = CreateCommand::execute(&ctx, None, None, None);
 
         assert!(
             result.is_ok(),
@@ -3706,7 +3980,7 @@ spec:
         let ctx = create_test_context(Arc::clone(&fs), input);
 
         // Run create command
-        let result = CreateCommand::execute(&ctx, None, None);
+        let result = CreateCommand::execute(&ctx, None, None, None);
 
         assert!(
             result.is_ok(),
@@ -3796,7 +4070,7 @@ spec:
         let ctx = create_test_context(Arc::clone(&fs), input);
 
         // Run create command
-        let result = CreateCommand::execute(&ctx, None, None);
+        let result = CreateCommand::execute(&ctx, None, None, None);
 
         assert!(
             result.is_ok(),
@@ -3861,7 +4135,7 @@ spec:
         let ctx = create_test_context(Arc::clone(&fs), input);
 
         // Run create command
-        let result = CreateCommand::execute(&ctx, None, None);
+        let result = CreateCommand::execute(&ctx, None, None, None);
 
         assert!(
             result.is_ok(),
@@ -3922,7 +4196,7 @@ spec:
         let ctx = create_test_context(Arc::clone(&fs), input);
 
         // Run create command
-        let result = CreateCommand::execute(&ctx, None, None);
+        let result = CreateCommand::execute(&ctx, None, None, None);
 
         assert!(
             result.is_ok(),
@@ -3996,7 +4270,7 @@ spec:
         let ctx = create_test_context(Arc::clone(&fs), input);
 
         // Run create command
-        let result = CreateCommand::execute(&ctx, None, None);
+        let result = CreateCommand::execute(&ctx, None, None, None);
 
         assert!(
             result.is_ok(),
@@ -4057,7 +4331,7 @@ spec:
         let ctx = create_test_context(Arc::clone(&fs), input);
 
         // Run create command
-        let result = CreateCommand::execute(&ctx, None, None);
+        let result = CreateCommand::execute(&ctx, None, None, None);
 
         assert!(
             result.is_ok(),
@@ -4125,7 +4399,7 @@ spec:
         let ctx = create_test_context(Arc::clone(&fs), input);
 
         // Run create command
-        let result = CreateCommand::execute(&ctx, None, None);
+        let result = CreateCommand::execute(&ctx, None, None, None);
 
         assert!(
             result.is_ok(),
@@ -4189,7 +4463,7 @@ spec:
         let ctx = create_test_context(Arc::clone(&fs), input);
 
         // Run create command
-        let result = CreateCommand::execute(&ctx, None, None);
+        let result = CreateCommand::execute(&ctx, None, None, None);
 
         assert!(
             result.is_ok(),
@@ -4251,7 +4525,7 @@ spec:
         let ctx = create_test_context(Arc::clone(&fs), input);
 
         // Run create command
-        let result = CreateCommand::execute(&ctx, None, None);
+        let result = CreateCommand::execute(&ctx, None, None, None);
 
         assert!(
             result.is_ok(),
@@ -4371,7 +4645,7 @@ spec:
         let ctx = create_test_context(Arc::clone(&fs), input);
 
         // Run create command
-        let result = CreateCommand::execute(&ctx, None, None);
+        let result = CreateCommand::execute(&ctx, None, None, None);
 
         assert!(
             result.is_ok(),
@@ -4432,7 +4706,7 @@ spec:
         let ctx = create_test_context(Arc::clone(&fs), input);
 
         // Run create command
-        let result = CreateCommand::execute(&ctx, None, None);
+        let result = CreateCommand::execute(&ctx, None, None, None);
 
         assert!(
             result.is_ok(),

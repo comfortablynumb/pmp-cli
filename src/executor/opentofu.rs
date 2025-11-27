@@ -4,7 +4,14 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::process::{Child, Command, Output, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Once};
+
+// Global state for CTRL+C handling - shared across all executions
+lazy_static::lazy_static! {
+    static ref CHILD_PROCESS: Arc<Mutex<Option<Child>>> = Arc::new(Mutex::new(None));
+    static ref INTERRUPTED: AtomicBool = AtomicBool::new(false);
+}
+static HANDLER_INIT: Once = Once::new();
 
 /// OpenTofu executor implementation
 pub struct OpenTofuExecutor;
@@ -14,6 +21,22 @@ impl OpenTofuExecutor {
         Self
     }
 
+    /// Initialize the CTRL+C handler (only runs once per process)
+    fn init_signal_handler() {
+        HANDLER_INIT.call_once(|| {
+            let _ = ctrlc::set_handler(move || {
+                INTERRUPTED.store(true, Ordering::SeqCst);
+                if let Ok(mut child_guard) = CHILD_PROCESS.lock() {
+                    if let Some(child) = child_guard.as_mut() {
+                        // Kill the child process
+                        let _ = child.kill();
+                    }
+                }
+                std::process::exit(130); // Standard exit code for SIGINT
+            });
+        });
+    }
+
     /// Execute a command with proper signal handling to kill child processes on CTRL+C
     fn execute_with_signal_handling(
         &self,
@@ -21,24 +44,11 @@ impl OpenTofuExecutor {
         args: &[&str],
         working_dir: &str,
     ) -> Result<()> {
-        // Set up shared state for the child process
-        let child_process: Arc<Mutex<Option<Child>>> = Arc::new(Mutex::new(None));
-        let child_clone = Arc::clone(&child_process);
-        let interrupted = Arc::new(AtomicBool::new(false));
-        let interrupted_clone = Arc::clone(&interrupted);
+        // Initialize handler if not already done
+        Self::init_signal_handler();
 
-        // Set up CTRL+C handler
-        ctrlc::set_handler(move || {
-            interrupted_clone.store(true, Ordering::SeqCst);
-            if let Ok(mut child_guard) = child_clone.lock()
-                && let Some(child) = child_guard.as_mut()
-            {
-                // Kill the child process
-                let _ = child.kill();
-            }
-            std::process::exit(130); // Standard exit code for SIGINT
-        })
-        .context("Failed to set CTRL+C handler")?;
+        // Reset interrupted flag for this execution
+        INTERRUPTED.store(false, Ordering::SeqCst);
 
         // Spawn the child process
         let child = Command::new(command)
@@ -52,13 +62,13 @@ impl OpenTofuExecutor {
 
         // Store the child process handle
         {
-            let mut child_guard = child_process.lock().unwrap();
+            let mut child_guard = CHILD_PROCESS.lock().unwrap();
             *child_guard = Some(child);
         }
 
         // Wait for the child to complete
         let status = {
-            let mut child_guard = child_process.lock().unwrap();
+            let mut child_guard = CHILD_PROCESS.lock().unwrap();
             if let Some(ref mut c) = *child_guard {
                 c.wait().context("Failed to wait for child process")?
             } else {
@@ -68,12 +78,12 @@ impl OpenTofuExecutor {
 
         // Clear the child process handle
         {
-            let mut child_guard = child_process.lock().unwrap();
+            let mut child_guard = CHILD_PROCESS.lock().unwrap();
             *child_guard = None;
         }
 
         // Check if we were interrupted
-        if interrupted.load(Ordering::SeqCst) {
+        if INTERRUPTED.load(Ordering::SeqCst) {
             anyhow::bail!("Command interrupted by user");
         }
 
@@ -245,6 +255,7 @@ impl Executor for OpenTofuExecutor {
 
     fn generate_common_file(
         &self,
+        ctx: &crate::context::Context,
         environment_path: &Path,
         executor_config: &HashMap<String, serde_json::Value>,
         project_metadata: &ProjectMetadata,
@@ -255,6 +266,9 @@ impl Executor for OpenTofuExecutor {
             generate_backend_config, generate_data_source_backends, generate_module_blocks,
             generate_plugin_override_variables, generate_template_data_source_backends,
         };
+
+        ctx.output
+            .dimmed("  Generating _common.tf with backend configuration...");
 
         // Generate backend HCL with project metadata for table name generation
         let backend_hcl = generate_backend_config(
@@ -318,17 +332,14 @@ impl Executor for OpenTofuExecutor {
         std::fs::write(&common_tf_path, combined_hcl)
             .with_context(|| format!("Failed to write _common.tf file: {:?}", common_tf_path))?;
 
-        crate::output::dimmed(&format!("  Created: {}", common_tf_path.display()));
+        ctx.output
+            .dimmed(&format!("  Created: {}", common_tf_path.display()));
 
         Ok(())
     }
 
     fn file_extension(&self) -> &str {
         ".tf"
-    }
-
-    fn supports_backend(&self) -> bool {
-        true
     }
 }
 

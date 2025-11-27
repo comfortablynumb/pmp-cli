@@ -14,6 +14,7 @@ pub mod graph;
 pub mod infrastructure;
 pub mod policy;
 pub mod preview;
+pub mod project_group;
 pub mod refresh;
 pub mod search;
 pub mod state;

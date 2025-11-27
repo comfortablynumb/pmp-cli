@@ -1,6 +1,6 @@
 use crate::collection::{CollectionDiscovery, CollectionManager};
 use crate::executor::{Executor, ExecutorConfig, OpenTofuExecutor};
-use crate::hooks::HooksRunner;
+use crate::hooks::{HookOutcome, HooksRunner};
 use crate::template::{DynamicProjectEnvironmentResource, ProjectResource};
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
@@ -68,11 +68,17 @@ impl RefreshCommand {
         // Get executor configuration
         let executor_config = resource.get_executor_config();
 
-        // Load collection to get hooks
+        // Load collection to get infrastructure-level hooks
         let (collection, _collection_root) = CollectionDiscovery::find_collection(&*ctx.fs)?
             .context("Infrastructure is required to run commands")?;
 
-        let hooks = collection.get_hooks();
+        let infrastructure_hooks = collection.get_hooks();
+
+        // Merge infrastructure hooks with environment hooks
+        let hooks = crate::commands::ExecutionHelper::merge_hooks(
+            &infrastructure_hooks,
+            resource.spec.hooks.as_ref(),
+        );
 
         // Get executor
         let executor = Self::get_executor(&executor_config.name)?;
@@ -100,7 +106,13 @@ impl RefreshCommand {
 
         // Run pre-refresh hooks
         if !hooks.pre_refresh.is_empty() {
-            HooksRunner::run_hooks(&hooks.pre_refresh, env_dir_str, "pre-refresh")?;
+            if HooksRunner::run_hooks(&hooks.pre_refresh, env_dir_str, "pre-refresh")?
+                == HookOutcome::Cancel
+            {
+                ctx.output.blank();
+                ctx.output.warning("Refresh cancelled by pre-refresh hook");
+                return Ok(());
+            }
         }
 
         // Initialize executor
@@ -145,7 +157,13 @@ impl RefreshCommand {
 
         // Run post-refresh hooks
         if !hooks.post_refresh.is_empty() {
-            HooksRunner::run_hooks(&hooks.post_refresh, env_dir_str, "post-refresh")?;
+            if HooksRunner::run_hooks(&hooks.post_refresh, env_dir_str, "post-refresh")?
+                == HookOutcome::Cancel
+            {
+                ctx.output.blank();
+                ctx.output.warning("Post-refresh hooks cancelled further execution");
+                return Ok(());
+            }
         }
 
         ctx.output.blank();

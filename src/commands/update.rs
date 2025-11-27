@@ -54,7 +54,14 @@ impl UpdateCommand {
         ctx: &crate::context::Context,
         project_path: Option<&str>,
         template_packs_paths: Option<&str>,
+        inputs_str: Option<&str>,
     ) -> Result<()> {
+        // Parse pre-defined inputs if provided
+        let predefined_inputs: Option<HashMap<String, Value>> = if let Some(inputs) = inputs_str {
+            Some(crate::commands::CreateCommand::parse_inputs(inputs)?)
+        } else {
+            None
+        };
         // Determine working directory
         let work_dir = if let Some(path) = project_path {
             PathBuf::from(path)
@@ -261,6 +268,7 @@ impl UpdateCommand {
             current_inputs,
             &project_name,
             &env_name,
+            predefined_inputs.as_ref(),
         )
         .context("Failed to collect inputs")?;
 
@@ -457,38 +465,38 @@ impl UpdateCommand {
         if let Some(executor_config) = &collection.spec.executor
             && !executor_config.config.is_empty()
         {
-            // Create executor instance
-            let executor: Box<dyn crate::executor::Executor> = match executor_config.name.as_str() {
+            // Create executor instance based on template's executor
+            let template_executor_name = &matching_template.resource.spec.executor;
+            let executor: Box<dyn crate::executor::Executor> = match template_executor_name.as_str() {
                 "opentofu" => Box::new(crate::executor::OpenTofuExecutor::new()),
-                _ => anyhow::bail!("Unknown executor: {}", executor_config.name),
+                "none" => Box::new(crate::executor::NoneExecutor::new()),
+                _ => anyhow::bail!("Unknown executor: {}", template_executor_name),
             };
 
-            if executor.supports_backend() {
-                output::dimmed("  Updating common file with backend configuration...");
-                // Use merged plugins list (existing + newly added)
-                let plugins = if !all_plugins_for_rendering.added.is_empty() {
-                    Some(all_plugins_for_rendering.added.as_slice())
-                } else {
-                    None
-                };
-                let template_reference_projects =
-                    &current_env_resource.spec.template_reference_projects;
-                let metadata = crate::executor::ProjectMetadata {
-                    api_version: &matching_template.resource.spec.api_version,
-                    kind: &matching_template.resource.spec.kind,
-                    environment: &env_name,
-                    project_name: &project_name,
-                };
-                executor
-                    .generate_common_file(
-                        &env_path,
-                        &executor_config.config,
-                        &metadata,
-                        plugins,
-                        template_reference_projects,
-                    )
-                    .context("Failed to generate common file")?;
-            }
+            // Use merged plugins list (existing + newly added)
+            let plugins = if !all_plugins_for_rendering.added.is_empty() {
+                Some(all_plugins_for_rendering.added.as_slice())
+            } else {
+                None
+            };
+            let template_reference_projects =
+                &current_env_resource.spec.template_reference_projects;
+            let metadata = crate::executor::ProjectMetadata {
+                api_version: &matching_template.resource.spec.api_version,
+                kind: &matching_template.resource.spec.kind,
+                environment: &env_name,
+                project_name: &project_name,
+            };
+            executor
+                .generate_common_file(
+                    ctx,
+                    &env_path,
+                    &executor_config.config,
+                    &metadata,
+                    plugins,
+                    template_reference_projects,
+                )
+                .context("Failed to generate common file")?;
         }
 
         // Regenerate .pmp.environment.yaml file
@@ -1235,39 +1243,39 @@ impl UpdateCommand {
             .write(&target_env_file, &yaml_content)
             .with_context(|| format!("Failed to write environment file: {:?}", target_env_file))?;
 
-        // Regenerate common file to include the new plugin module
+        // Regenerate common file to include the new plugin module (only for opentofu)
         if let Some(executor_config) = &collection.spec.executor
             && !executor_config.config.is_empty()
         {
-            let executor: Box<dyn crate::executor::Executor> = match executor_config.name.as_str() {
+            let project_executor_name = &env_resource.spec.executor.name;
+            let executor: Box<dyn crate::executor::Executor> = match project_executor_name.as_str() {
                 "opentofu" => Box::new(crate::executor::OpenTofuExecutor::new()),
-                _ => anyhow::bail!("Unknown executor: {}", executor_config.name),
+                "none" => Box::new(crate::executor::NoneExecutor::new()),
+                _ => anyhow::bail!("Unknown executor: {}", project_executor_name),
             };
 
-            if executor.supports_backend() {
-                output::dimmed("  Regenerating common file with plugin modules...");
-                let plugins = env_resource
-                    .spec
-                    .plugins
-                    .as_ref()
-                    .map(|p| p.added.as_slice());
-                let template_reference_projects = &env_resource.spec.template_reference_projects;
-                let metadata = crate::executor::ProjectMetadata {
-                    api_version: &env_resource.api_version,
-                    kind: &env_resource.kind,
-                    environment: target_env_name,
-                    project_name: target_project_name,
-                };
-                executor
-                    .generate_common_file(
-                        target_env_path,
-                        &executor_config.config,
-                        &metadata,
-                        plugins,
-                        template_reference_projects,
-                    )
-                    .context("Failed to regenerate common file")?;
-            }
+            let plugins = env_resource
+                .spec
+                .plugins
+                .as_ref()
+                .map(|p| p.added.as_slice());
+            let template_reference_projects = &env_resource.spec.template_reference_projects;
+            let metadata = crate::executor::ProjectMetadata {
+                api_version: &env_resource.api_version,
+                kind: &env_resource.kind,
+                environment: target_env_name,
+                project_name: target_project_name,
+            };
+            executor
+                .generate_common_file(
+                    ctx,
+                    target_env_path,
+                    &executor_config.config,
+                    &metadata,
+                    plugins,
+                    template_reference_projects,
+                )
+                .context("Failed to regenerate common file")?;
         }
 
         output::blank();
@@ -1406,39 +1414,39 @@ impl UpdateCommand {
             .write(&env_file, &yaml_content)
             .with_context(|| format!("Failed to write environment file: {:?}", env_file))?;
 
-        // Regenerate common file without the removed plugin
+        // Regenerate common file without the removed plugin (only for opentofu)
         if let Some(executor_config) = &collection.spec.executor
             && !executor_config.config.is_empty()
         {
-            let executor: Box<dyn crate::executor::Executor> = match executor_config.name.as_str() {
+            let project_executor_name = &env_resource.spec.executor.name;
+            let executor: Box<dyn crate::executor::Executor> = match project_executor_name.as_str() {
                 "opentofu" => Box::new(crate::executor::OpenTofuExecutor::new()),
-                _ => anyhow::bail!("Unknown executor: {}", executor_config.name),
+                "none" => Box::new(crate::executor::NoneExecutor::new()),
+                _ => anyhow::bail!("Unknown executor: {}", project_executor_name),
             };
 
-            if executor.supports_backend() {
-                output::dimmed("  Regenerating common file...");
-                let plugins = env_resource
-                    .spec
-                    .plugins
-                    .as_ref()
-                    .map(|p| p.added.as_slice());
-                let template_reference_projects = &env_resource.spec.template_reference_projects;
-                let metadata = crate::executor::ProjectMetadata {
-                    api_version: &env_resource.api_version,
-                    kind: &env_resource.kind,
-                    environment: env_name,
-                    project_name,
-                };
-                executor
-                    .generate_common_file(
-                        env_path,
-                        &executor_config.config,
-                        &metadata,
-                        plugins,
-                        template_reference_projects,
-                    )
-                    .context("Failed to regenerate common file")?;
-            }
+            let plugins = env_resource
+                .spec
+                .plugins
+                .as_ref()
+                .map(|p| p.added.as_slice());
+            let template_reference_projects = &env_resource.spec.template_reference_projects;
+            let metadata = crate::executor::ProjectMetadata {
+                api_version: &env_resource.api_version,
+                kind: &env_resource.kind,
+                environment: env_name,
+                project_name,
+            };
+            executor
+                .generate_common_file(
+                    ctx,
+                    env_path,
+                    &executor_config.config,
+                    &metadata,
+                    plugins,
+                    template_reference_projects,
+                )
+                .context("Failed to regenerate common file")?;
         }
 
         output::blank();
@@ -1652,39 +1660,39 @@ impl UpdateCommand {
             .with_context(|| format!("Failed to write environment file: {:?}", env_file))?;
         output::dimmed(&format!("  Updated: {}", env_file.display()));
 
-        // Regenerate common file with updated plugin
+        // Regenerate common file with updated plugin (only for opentofu)
         if let Some(executor_config) = &collection.spec.executor
             && !executor_config.config.is_empty()
         {
-            let executor: Box<dyn crate::executor::Executor> = match executor_config.name.as_str() {
+            let project_executor_name = &env_resource.spec.executor.name;
+            let executor: Box<dyn crate::executor::Executor> = match project_executor_name.as_str() {
                 "opentofu" => Box::new(crate::executor::OpenTofuExecutor::new()),
-                _ => anyhow::bail!("Unknown executor: {}", executor_config.name),
+                "none" => Box::new(crate::executor::NoneExecutor::new()),
+                _ => anyhow::bail!("Unknown executor: {}", project_executor_name),
             };
 
-            if executor.supports_backend() {
-                output::dimmed("  Regenerating common file...");
-                let plugins = env_resource
-                    .spec
-                    .plugins
-                    .as_ref()
-                    .map(|p| p.added.as_slice());
-                let template_reference_projects = &env_resource.spec.template_reference_projects;
-                let metadata = crate::executor::ProjectMetadata {
-                    api_version: &env_resource.api_version,
-                    kind: &env_resource.kind,
-                    environment: env_name,
-                    project_name,
-                };
-                executor
-                    .generate_common_file(
-                        env_path,
-                        &executor_config.config,
-                        &metadata,
-                        plugins,
-                        template_reference_projects,
-                    )
-                    .context("Failed to regenerate common file")?;
-            }
+            let plugins = env_resource
+                .spec
+                .plugins
+                .as_ref()
+                .map(|p| p.added.as_slice());
+            let template_reference_projects = &env_resource.spec.template_reference_projects;
+            let metadata = crate::executor::ProjectMetadata {
+                api_version: &env_resource.api_version,
+                kind: &env_resource.kind,
+                environment: env_name,
+                project_name,
+            };
+            executor
+                .generate_common_file(
+                    ctx,
+                    env_path,
+                    &executor_config.config,
+                    &metadata,
+                    plugins,
+                    template_reference_projects,
+                )
+                .context("Failed to regenerate common file")?;
         }
 
         output::blank();
@@ -1828,6 +1836,7 @@ impl UpdateCommand {
         current_inputs: &std::collections::HashMap<String, serde_json::Value>,
         project_name: &str,
         environment_name: &str,
+        predefined_inputs: Option<&HashMap<String, Value>>,
     ) -> Result<std::collections::HashMap<String, serde_json::Value>> {
         use crate::template::utils::{interpolate_all, interpolate_value_all};
 
@@ -1853,6 +1862,32 @@ impl UpdateCommand {
             {
                 continue;
             }
+
+            // Check if there's a predefined value for this input
+            if let Some(predefined) = predefined_inputs.and_then(|p| p.get(&input_def.name)) {
+                // Build vars for interpolation
+                let mut vars = std::collections::HashMap::new();
+                vars.insert(
+                    "_project_name_underscores".to_string(),
+                    serde_json::Value::String(project_name_underscores.clone()),
+                );
+                vars.insert(
+                    "_project_name_hyphens".to_string(),
+                    serde_json::Value::String(project_name_hyphens.clone()),
+                );
+                vars.insert(
+                    "_environment_name".to_string(),
+                    serde_json::Value::String(environment_name.to_string()),
+                );
+                for (key, value) in &inputs {
+                    vars.insert(key.clone(), value.clone());
+                }
+                // Use the predefined value directly (with variable interpolation)
+                let value = interpolate_value_all(predefined, &vars)?;
+                inputs.insert(input_def.name.clone(), value);
+                continue;
+            }
+
             // Get variables for interpolation
             let mut vars = std::collections::HashMap::new();
             vars.insert(
@@ -2308,6 +2343,8 @@ impl UpdateCommand {
                 }),
                 template_reference_projects: current_env.spec.template_reference_projects.clone(), // Preserve from current env
                 dependencies: current_env.spec.dependencies.clone(), // Preserve from current env
+                projects: current_env.spec.projects.clone(), // Preserve from current env
+                hooks: current_env.spec.hooks.clone().or_else(|| template.spec.hooks.clone()), // Preserve existing hooks, or use template hooks
             },
         };
 

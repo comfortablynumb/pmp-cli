@@ -138,15 +138,19 @@ impl TemplateRenderer {
             .read_to_string(file_path)
             .with_context(|| format!("Failed to read template file: {:?}", file_path))?;
 
-        // Render template
+        // Render template with Handlebars (handles {{variable}} syntax)
         let rendered = self
             .handlebars
             .render_template(&template_content, variables)
             .with_context(|| format!("Failed to render template: {:?}", file_path))?;
 
+        // Post-process for ${var:...} and ${env:...} interpolation patterns
+        let final_content = crate::template::utils::interpolate_all(&rendered, variables)
+            .with_context(|| format!("Failed to interpolate variables in: {:?}", file_path))?;
+
         // Write rendered content
         ctx.fs
-            .write(&output_path, &rendered)
+            .write(&output_path, &final_content)
             .with_context(|| format!("Failed to write output file: {:?}", output_path))?;
 
         ctx.output

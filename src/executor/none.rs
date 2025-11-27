@@ -87,10 +87,6 @@ impl Executor for NoneExecutor {
     fn default_refresh_command(&self) -> &str {
         ""
     }
-
-    fn supports_backend(&self) -> bool {
-        false
-    }
 }
 
 #[cfg(test)]
@@ -177,9 +173,4 @@ mod tests {
         assert_eq!(executor.default_refresh_command(), "");
     }
 
-    #[test]
-    fn test_none_executor_does_not_support_backend() {
-        let executor = NoneExecutor::new();
-        assert!(!executor.supports_backend());
-    }
 }

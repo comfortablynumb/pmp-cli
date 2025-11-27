@@ -58,6 +58,12 @@ spec:
                   template: vault
                 - template_pack: vault
                   template: vault-core-configuration
+    - id: examples
+      name: Examples
+      description: This category contains specific examples of several use cases
+      templates:
+        - template_pack: examples
+          template: basic-infrastructure
   template_packs:
     postgres:
       templates:
@@ -141,7 +147,6 @@ spec:
     development:
       name: Development
       description: Development environment for testing and iteration
-  hooks: null
   executor:
     name: opentofu
     config:

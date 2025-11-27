@@ -52,7 +52,7 @@ enum InfrastructureSubcommands {
 enum ProjectSubcommands {
     /// Create a new project
     #[command(
-        long_about = "Create a new project from a template\n\nExamples:\n  pmp project create\n  pmp project create --output ./my-project\n  pmp project create --template-packs-paths /custom/packs"
+        long_about = "Create a new project from a template\n\nExamples:\n  pmp project create\n  pmp project create --output ./my-project\n  pmp project create --template-packs-paths /custom/packs\n  pmp project create --inputs '{\"replicas\": 3, \"namespace\": \"prod\"}'"
     )]
     Create {
         /// Output directory for the project (optional)
@@ -62,6 +62,10 @@ enum ProjectSubcommands {
         /// Additional template packs directories to search (colon-separated)
         #[arg(long)]
         template_packs_paths: Option<String>,
+
+        /// Pre-defined input values as JSON or YAML string (skips prompting for these inputs)
+        #[arg(long)]
+        inputs: Option<String>,
     },
 
     /// Find projects in an Infrastructure
@@ -80,7 +84,7 @@ enum ProjectSubcommands {
 
     /// Update an existing project environment by regenerating files from the original template
     #[command(
-        long_about = "Update an existing project environment by regenerating files from the original template\n\nExamples:\n  pmp project update\n  pmp project update --path ./my-project\n  pmp project update --template-packs-paths /custom/packs1:/custom/packs2"
+        long_about = "Update an existing project environment by regenerating files from the original template\n\nExamples:\n  pmp project update\n  pmp project update --path ./my-project\n  pmp project update --template-packs-paths /custom/packs1:/custom/packs2\n  pmp project update --inputs '{\"replicas\": 3}'"
     )]
     Update {
         /// Path to the project directory (defaults to current directory)
@@ -90,6 +94,10 @@ enum ProjectSubcommands {
         /// Additional template packs directories to search (colon-separated)
         #[arg(short, long)]
         template_packs_paths: Option<String>,
+
+        /// Pre-defined input values as JSON or YAML string (skips prompting for these inputs)
+        #[arg(long)]
+        inputs: Option<String>,
     },
 
     /// Clone an existing project
@@ -735,8 +743,14 @@ fn main() -> Result<()> {
             ProjectSubcommands::Create {
                 output,
                 template_packs_paths,
+                inputs,
             } => {
-                CreateCommand::execute(&ctx, output.as_deref(), template_packs_paths.as_deref())?;
+                CreateCommand::execute(
+                    &ctx,
+                    output.as_deref(),
+                    template_packs_paths.as_deref(),
+                    inputs.as_deref(),
+                )?;
             }
             ProjectSubcommands::Find { name, kind } => {
                 FindCommand::execute(&ctx, name.as_deref(), kind.as_deref())?;
@@ -744,8 +758,14 @@ fn main() -> Result<()> {
             ProjectSubcommands::Update {
                 path,
                 template_packs_paths,
+                inputs,
             } => {
-                UpdateCommand::execute(&ctx, path.as_deref(), template_packs_paths.as_deref())?;
+                UpdateCommand::execute(
+                    &ctx,
+                    path.as_deref(),
+                    template_packs_paths.as_deref(),
+                    inputs.as_deref(),
+                )?;
             }
             ProjectSubcommands::Clone {
                 source,

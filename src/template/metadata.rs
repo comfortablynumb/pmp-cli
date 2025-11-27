@@ -109,6 +109,19 @@ pub struct TemplateSpec {
     /// Lower values are collected first. When equal with plugins, template has precedence.
     #[serde(default)]
     pub order: i32,
+
+    /// Projects to create as part of this project group (for ProjectGroup templates)
+    /// These projects will be created when a project from this template is created
+    /// and will be added as dependencies to the environment
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub projects: Vec<ProjectGroupProject>,
+
+    /// Hooks to run before and after commands
+    /// These hooks will be added to the generated environment file
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hooks: Option<HooksConfig>,
 }
 
 /// Custom deserializer for inputs that supports both HashMap and Vec formats
@@ -858,6 +871,12 @@ pub struct DependencyProject {
 
     /// List of environments of the dependency project
     pub environments: Vec<String>,
+
+    /// If true, create the project if it doesn't exist (default: false)
+    /// This is typically set to true for dependencies generated from ProjectGroup's spec.projects
+    #[serde(default)]
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub create: bool,
 }
 
 /// Project dependency configuration
@@ -865,6 +884,69 @@ pub struct DependencyProject {
 pub struct ProjectDependency {
     /// Project reference
     pub project: DependencyProject,
+}
+
+// ============================================================================
+// Project Group Configuration (for grouping template)
+// ============================================================================
+
+/// Input configuration for a project in a project group
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectGroupInputConfig {
+    /// The value to use for this input (optional if use_default is true)
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value: Option<Value>,
+
+    /// If true, use the template's default value for this input
+    #[serde(default)]
+    pub use_default: bool,
+}
+
+/// Reference project configuration for a project in a project group
+/// This is a simplified configuration that references projects by name
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectGroupReferenceProject {
+    /// Name of the reference project
+    pub name: String,
+
+    /// Optional: Environment name (defaults to same environment as the project group)
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub environment: Option<String>,
+
+    /// Optional: Data source name for this reference in _common.tf
+    /// If not provided, will be auto-generated as ref_0, ref_1, etc.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data_source_name: Option<String>,
+}
+
+/// A project configuration within a project group
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectGroupProject {
+    /// Name of the project to create
+    pub name: String,
+
+    /// Name of the template pack to use
+    pub template_pack: String,
+
+    /// Name of the template within the pack
+    pub template: String,
+
+    /// Optional: Individual input configurations
+    #[serde(default)]
+    #[serde(skip_serializing_if = "HashMap::is_empty")]
+    pub inputs: HashMap<String, ProjectGroupInputConfig>,
+
+    /// If true, use all default values from the template (don't prompt for any inputs)
+    #[serde(default)]
+    pub use_all_defaults: bool,
+
+    /// Optional: Reference projects to pass when creating/updating this project
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub reference_projects: Vec<ProjectGroupReferenceProject>,
 }
 
 /// Project specification
@@ -907,6 +989,19 @@ pub struct ProjectSpec {
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub dependencies: Vec<ProjectDependency>,
+
+    /// Projects to manage (for project group template)
+    /// When this field is populated, the project group will create/update these projects
+    /// and execute commands on them when apply/preview/destroy is run
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub projects: Vec<ProjectGroupProject>,
+
+    /// Hooks to run before and after commands
+    /// These hooks are copied from the template and can be overridden per environment
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hooks: Option<HooksConfig>,
 }
 
 // ============================================================================
@@ -1107,40 +1202,97 @@ pub struct ExecutorCollectionConfig {
     pub config: HashMap<String, Value>,
 }
 
+/// Configuration for a command hook
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandHookConfig {
+    /// The shell command to execute
+    pub command: String,
+}
+
+/// Configuration for a confirm hook
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConfirmHookConfig {
+    /// The question to ask the user
+    pub question: String,
+
+    /// If true, exit (cancel) the command when user cancels/declines the confirmation
+    #[serde(default = "default_exit_on_cancel")]
+    pub exit_on_cancel: bool,
+
+    /// If true, exit (cancel) the command when user confirms
+    #[serde(default)]
+    pub exit_on_confirm: bool,
+}
+
+fn default_exit_on_cancel() -> bool {
+    true
+}
+
+/// Configuration for a set_environment hook
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetEnvironmentHookConfig {
+    /// The environment variable name to set
+    pub name: String,
+
+    /// The prompt message to show the user
+    pub prompt: String,
+
+    /// If true, use password-like input (hidden characters)
+    #[serde(default)]
+    pub sensitive: bool,
+}
+
+/// A hook that can be executed before or after a command
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", content = "config")]
+pub enum Hook {
+    /// Execute a shell command
+    #[serde(rename = "command")]
+    Command(CommandHookConfig),
+
+    /// Ask user for confirmation before proceeding
+    #[serde(rename = "confirm")]
+    Confirm(ConfirmHookConfig),
+
+    /// Ask user for a value and set it as an environment variable
+    #[serde(rename = "set_environment")]
+    SetEnvironment(SetEnvironmentHookConfig),
+}
+
 /// Hooks configuration
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct HooksConfig {
-    /// Commands to run before preview
+    /// Hooks to run before preview
     #[serde(default)]
-    pub pre_preview: Vec<String>,
+    pub pre_preview: Vec<Hook>,
 
-    /// Commands to run after preview
+    /// Hooks to run after preview
     #[serde(default)]
-    pub post_preview: Vec<String>,
+    pub post_preview: Vec<Hook>,
 
-    /// Commands to run before apply
+    /// Hooks to run before apply
     #[serde(default)]
-    pub pre_apply: Vec<String>,
+    pub pre_apply: Vec<Hook>,
 
-    /// Commands to run after apply
+    /// Hooks to run after apply
     #[serde(default)]
-    pub post_apply: Vec<String>,
+    pub post_apply: Vec<Hook>,
 
-    /// Commands to run before destroy
+    /// Hooks to run before destroy
     #[serde(default)]
-    pub pre_destroy: Vec<String>,
+    pub pre_destroy: Vec<Hook>,
 
-    /// Commands to run after destroy
+    /// Hooks to run after destroy
     #[serde(default)]
-    pub post_destroy: Vec<String>,
+    pub post_destroy: Vec<Hook>,
 
-    /// Commands to run before refresh
+    /// Hooks to run before refresh
     #[serde(default)]
-    pub pre_refresh: Vec<String>,
+    pub pre_refresh: Vec<Hook>,
 
-    /// Commands to run after refresh
+    /// Hooks to run after refresh
     #[serde(default)]
-    pub post_refresh: Vec<String>,
+    pub post_refresh: Vec<Hook>,
 }
 
 /// Input override configuration for infrastructure-level input customization
@@ -2347,20 +2499,24 @@ spec:
             template: None,
             environment: None,
             template_reference_projects: Vec::new(),
+            projects: Vec::new(),
             dependencies: vec![
                 ProjectDependency {
                     project: DependencyProject {
                         name: "db-project".to_string(),
                         environments: vec!["dev".to_string(), "staging".to_string()],
+                        create: false,
                     },
                 },
                 ProjectDependency {
                     project: DependencyProject {
                         name: "network-project".to_string(),
                         environments: vec!["dev".to_string()],
+                        create: false,
                     },
                 },
             ],
+            hooks: None,
         };
 
         let yaml = serde_yaml::to_string(&project_spec).unwrap();
@@ -2386,6 +2542,7 @@ spec:
         let dep = DependencyProject {
             name: "test-project".to_string(),
             environments: vec!["production".to_string()],
+            create: false,
         };
 
         assert_eq!(dep.name, "test-project");
@@ -2402,6 +2559,7 @@ spec:
                 "staging".to_string(),
                 "production".to_string(),
             ],
+            create: false,
         };
 
         assert_eq!(dep.name, "multi-env-project");

@@ -1,6 +1,7 @@
 use crate::collection::{CollectionDiscovery, CollectionManager};
+use crate::commands::project_group::ProjectGroupHandler;
 use crate::executor::{Executor, ExecutorConfig, OpenTofuExecutor};
-use crate::hooks::HooksRunner;
+use crate::hooks::{HookOutcome, HooksRunner};
 use crate::template::{DynamicProjectEnvironmentResource, ProjectResource};
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
@@ -65,7 +66,74 @@ impl ApplyCommand {
 
         ctx.output.key_value("Kind", &resource.kind);
 
-        // Check for dependencies
+        // Get executor configuration
+        let executor_config = resource.get_executor_config();
+
+        // Check if this is a ProjectGroup with spec.projects defined
+        // ProjectGroups have special handling - they create and execute their defined projects
+        if executor_config.name == "none" && !resource.spec.projects.is_empty() {
+            // Load collection to get infrastructure-level hooks
+            let (collection, _collection_root) = CollectionDiscovery::find_collection(&*ctx.fs)?
+                .context("Infrastructure is required to run commands")?;
+
+            let infrastructure_hooks = collection.get_hooks();
+
+            // Merge infrastructure hooks with environment hooks
+            let hooks = crate::commands::ExecutionHelper::merge_hooks(
+                &infrastructure_hooks,
+                resource.spec.hooks.as_ref(),
+            );
+            let env_dir_str = env_path
+                .to_str()
+                .context("Failed to convert environment path to string")?;
+
+            // Run pre-apply hooks
+            if !hooks.pre_apply.is_empty() {
+                if HooksRunner::run_hooks(&hooks.pre_apply, env_dir_str, "pre-apply")?
+                    == HookOutcome::Cancel
+                {
+                    ctx.output.blank();
+                    ctx.output.warning("Apply cancelled by pre-apply hook");
+                    return Ok(());
+                }
+            }
+
+            // Process ProjectGroup - create/update and then execute on all defined projects
+            ctx.output.blank();
+            ctx.output.subsection("Processing Project Group");
+            ProjectGroupHandler::process_projects(
+                ctx,
+                &resource,
+                &env_name,
+                None, // template_packs_paths
+            )?;
+
+            // Execute apply on all configured projects
+            ProjectGroupHandler::execute_command_on_projects(
+                ctx,
+                &resource,
+                &env_name,
+                "apply",
+                extra_args,
+            )?;
+
+            // Run post-apply hooks
+            if !hooks.post_apply.is_empty() {
+                if HooksRunner::run_hooks(&hooks.post_apply, env_dir_str, "post-apply")?
+                    == HookOutcome::Cancel
+                {
+                    ctx.output.blank();
+                    ctx.output.warning("Post-apply hooks cancelled further execution");
+                    return Ok(());
+                }
+            }
+
+            ctx.output.blank();
+            ctx.output.success("Apply completed successfully");
+            return Ok(());
+        }
+
+        // Check for dependencies (non-ProjectGroup projects)
         let maybe_graph = crate::commands::ExecutionHelper::check_and_display_dependencies(
             ctx,
             &env_path,
@@ -90,14 +158,18 @@ impl ApplyCommand {
         }
 
         // No dependencies - proceed with single project execution
-        // Get executor configuration
-        let executor_config = resource.get_executor_config();
 
-        // Load collection to get hooks
+        // Load collection to get infrastructure-level hooks
         let (collection, _collection_root) = CollectionDiscovery::find_collection(&*ctx.fs)?
             .context("Infrastructure is required to run commands")?;
 
-        let hooks = collection.get_hooks();
+        let infrastructure_hooks = collection.get_hooks();
+
+        // Merge infrastructure hooks with environment hooks
+        let hooks = crate::commands::ExecutionHelper::merge_hooks(
+            &infrastructure_hooks,
+            resource.spec.hooks.as_ref(),
+        );
 
         // Get executor
         let executor = Self::get_executor(&executor_config.name)?;
@@ -125,7 +197,13 @@ impl ApplyCommand {
 
         // Run pre-apply hooks
         if !hooks.pre_apply.is_empty() {
-            HooksRunner::run_hooks(&hooks.pre_apply, env_dir_str, "pre-apply")?;
+            if HooksRunner::run_hooks(&hooks.pre_apply, env_dir_str, "pre-apply")?
+                == HookOutcome::Cancel
+            {
+                ctx.output.blank();
+                ctx.output.warning("Apply cancelled by pre-apply hook");
+                return Ok(());
+            }
         }
 
         // Run helm repo update if configured
@@ -177,7 +255,13 @@ impl ApplyCommand {
 
         // Run post-apply hooks
         if !hooks.post_apply.is_empty() {
-            HooksRunner::run_hooks(&hooks.post_apply, env_dir_str, "post-apply")?;
+            if HooksRunner::run_hooks(&hooks.post_apply, env_dir_str, "post-apply")?
+                == HookOutcome::Cancel
+            {
+                ctx.output.blank();
+                ctx.output.warning("Post-apply hooks cancelled further execution");
+                return Ok(());
+            }
         }
 
         ctx.output.blank();
