@@ -563,11 +563,9 @@ impl ProjectGroupHandler {
     ) -> Result<HashMap<String, Value>> {
         let mut inputs = HashMap::new();
 
-        // If use_all_defaults is true, we don't need to build any inputs
-        // The create/update command will use template defaults
-        if project_config.use_all_defaults {
-            return Ok(inputs);
-        }
+        // Note: Even when use_all_defaults is true, we still need to process
+        // any explicitly configured input overrides in project_config.inputs
+        // The use_all_defaults flag only affects non-configured inputs
 
         // Find the template to get its input definitions
         let flag_paths: Vec<String> = if let Some(paths) = template_packs_paths {
