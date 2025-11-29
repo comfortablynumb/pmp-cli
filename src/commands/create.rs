@@ -435,6 +435,20 @@ impl CreateCommand {
                 continue;
             }
 
+            // Check if input should be shown based on conditions
+            if !input_def.should_show(&inputs) {
+                // Conditions not met, use default value if available
+                if let Some(default) = &input_def.default {
+                    // Get variables for interpolation
+                    let vars = Self::get_interpolation_variables(&inputs, project_name, environment_name);
+
+                    // Interpolate variables in the default value
+                    let interpolated_value = crate::template::utils::interpolate_value_all(default, &vars)?;
+                    inputs.insert(input_def.name.clone(), interpolated_value);
+                }
+                continue; // Skip prompting for this input
+            }
+
             // Get variables for interpolation
             let vars = Self::get_interpolation_variables(&inputs, project_name, environment_name);
 
@@ -1613,6 +1627,20 @@ impl CreateCommand {
                 let value = crate::template::utils::interpolate_value_all(predefined, &vars)?;
                 inputs.insert(input_def.name.clone(), value);
                 continue;
+            }
+
+            // Check if input should be shown based on conditions
+            if !input_def.should_show(&inputs) {
+                // Conditions not met, use default value if available
+                if let Some(default) = &input_def.default {
+                    // Get variables for interpolation
+                    let vars = Self::get_interpolation_variables(&inputs, project_name, environment_name);
+
+                    // Interpolate variables in the default value
+                    let interpolated_value = crate::template::utils::interpolate_value_all(default, &vars)?;
+                    inputs.insert(input_def.name.clone(), interpolated_value);
+                }
+                continue; // Skip prompting for this input
             }
 
             // Check if there's a infrastructure-level override for this input
@@ -3122,12 +3150,10 @@ impl CreateCommand {
         }
 
         // Step 6: Determine project paths
-        // Project folder uses underscores instead of hyphens
-        let project_folder = project_name.replace('-', "_");
-
+        // Project folder uses the original project name (preserving hyphens)
         let project_root = infrastructure_root
             .join("projects")
-            .join(&project_folder);
+            .join(project_name);
         let environment_path = project_root
             .join("environments")
             .join(environment_name);

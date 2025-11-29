@@ -1888,6 +1888,34 @@ impl UpdateCommand {
                 continue;
             }
 
+            // Check if input should be shown based on conditions
+            if !input_def.should_show(&inputs) {
+                // Conditions not met, use default value if available
+                if let Some(default) = &input_def.default {
+                    // Build vars for interpolation
+                    let mut vars = std::collections::HashMap::new();
+                    vars.insert(
+                        "_project_name_underscores".to_string(),
+                        serde_json::Value::String(project_name_underscores.clone()),
+                    );
+                    vars.insert(
+                        "_project_name_hyphens".to_string(),
+                        serde_json::Value::String(project_name_hyphens.clone()),
+                    );
+                    vars.insert(
+                        "_environment_name".to_string(),
+                        serde_json::Value::String(environment_name.to_string()),
+                    );
+                    for (key, value) in &inputs {
+                        vars.insert(key.clone(), value.clone());
+                    }
+                    // Interpolate variables in the default value
+                    let interpolated_value = interpolate_value_all(default, &vars)?;
+                    inputs.insert(input_def.name.clone(), interpolated_value);
+                }
+                continue; // Skip prompting for this input
+            }
+
             // Get variables for interpolation
             let mut vars = std::collections::HashMap::new();
             vars.insert(

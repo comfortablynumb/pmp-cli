@@ -45,6 +45,12 @@ spec:
               templates:
                 - template_pack: kubernetes
                   template: istio-ingress-controller
+        - id: platform-logging
+          name: Kubernetes Logging
+          description: Logging support in Kubernetes
+          templates:
+            - template_pack: kubernetes
+              template: loki
         - id: platform-secrets-managers
           name: Secrets Managers
           description: Tools that allow to manage secrets

@@ -167,6 +167,7 @@ where
                     default: input_spec.default,
                     description: input_spec.description,
                     validation: input_spec.validation,
+                    conditions: input_spec.conditions,
                 });
             }
             Ok(inputs)
@@ -647,6 +648,36 @@ pub struct UrlValidation {
     pub allowed_schemes: Vec<String>,
 }
 
+/// Condition for showing an input
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InputCondition {
+    /// Name of the input to check
+    pub input_name: String,
+
+    /// Value that the input must equal (optional)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub equals: Option<Value>,
+}
+
+impl InputCondition {
+    /// Evaluate if this condition is met given the current inputs
+    pub fn is_met(&self, inputs: &std::collections::HashMap<String, Value>) -> bool {
+        // Get the value of the input we're checking
+        let input_value = match inputs.get(&self.input_name) {
+            Some(val) => val,
+            None => return false, // Input not found, condition not met
+        };
+
+        // If equals is not specified, just check if the input exists
+        let Some(ref expected_value) = self.equals else {
+            return true; // Input exists, condition met
+        };
+
+        // Compare the values
+        input_value == expected_value
+    }
+}
+
 /// Input specification for a template input
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InputSpec {
@@ -669,6 +700,10 @@ pub struct InputSpec {
     /// Validation rules
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub validation: Option<InputValidation>,
+
+    /// Conditional visibility - only show this input if all conditions are met
+    #[serde(default, skip_serializing_if = "Vec::is_empty", rename = "if")]
+    pub conditions: Vec<InputCondition>,
 }
 
 /// Input definition with a name (used in array format)
@@ -696,6 +731,10 @@ pub struct InputDefinition {
     /// Validation rules
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub validation: Option<InputValidation>,
+
+    /// Conditional visibility - only show this input if all conditions are met
+    #[serde(default, skip_serializing_if = "Vec::is_empty", rename = "if")]
+    pub conditions: Vec<InputCondition>,
 }
 
 impl InputDefinition {
@@ -707,7 +746,19 @@ impl InputDefinition {
             default: self.default.clone(),
             description: self.description.clone(),
             validation: self.validation.clone(),
+            conditions: self.conditions.clone(),
         }
+    }
+
+    /// Check if all conditions for this input are met
+    pub fn should_show(&self, inputs: &std::collections::HashMap<String, Value>) -> bool {
+        // If no conditions, always show
+        if self.conditions.is_empty() {
+            return true;
+        }
+
+        // All conditions must be met
+        self.conditions.iter().all(|cond| cond.is_met(inputs))
     }
 }
 
@@ -2567,5 +2618,209 @@ spec:
         assert!(dep.environments.contains(&"dev".to_string()));
         assert!(dep.environments.contains(&"staging".to_string()));
         assert!(dep.environments.contains(&"production".to_string()));
+    }
+
+    #[test]
+    fn test_input_condition_equals() {
+        let mut inputs = HashMap::new();
+        inputs.insert("status".to_string(), Value::String("active".to_string()));
+
+        let condition = InputCondition {
+            input_name: "status".to_string(),
+            equals: Some(Value::String("active".to_string())),
+        };
+
+        assert!(condition.is_met(&inputs));
+
+        // Test with different value
+        let condition_not_met = InputCondition {
+            input_name: "status".to_string(),
+            equals: Some(Value::String("inactive".to_string())),
+        };
+
+        assert!(!condition_not_met.is_met(&inputs));
+    }
+
+    #[test]
+    fn test_input_condition_exists() {
+        let mut inputs = HashMap::new();
+        inputs.insert("has_feature".to_string(), Value::Bool(true));
+
+        // Condition without equals just checks if input exists
+        let condition = InputCondition {
+            input_name: "has_feature".to_string(),
+            equals: None,
+        };
+
+        assert!(condition.is_met(&inputs));
+
+        // Test with non-existent input
+        let condition_not_found = InputCondition {
+            input_name: "missing_input".to_string(),
+            equals: None,
+        };
+
+        assert!(!condition_not_found.is_met(&inputs));
+    }
+
+    #[test]
+    fn test_input_definition_should_show_no_conditions() {
+        let input_def = InputDefinition {
+            name: "simple_input".to_string(),
+            input_type: None,
+            enum_values: None,
+            default: Some(Value::String("default".to_string())),
+            description: Some("A simple input".to_string()),
+            validation: None,
+            conditions: vec![], // No conditions
+        };
+
+        let inputs = HashMap::new();
+        assert!(input_def.should_show(&inputs));
+    }
+
+    #[test]
+    fn test_input_definition_should_show_single_condition_met() {
+        let input_def = InputDefinition {
+            name: "conditional_input".to_string(),
+            input_type: None,
+            enum_values: None,
+            default: Some(Value::String("default".to_string())),
+            description: Some("A conditional input".to_string()),
+            validation: None,
+            conditions: vec![InputCondition {
+                input_name: "status".to_string(),
+                equals: Some(Value::String("active".to_string())),
+            }],
+        };
+
+        let mut inputs = HashMap::new();
+        inputs.insert("status".to_string(), Value::String("active".to_string()));
+
+        assert!(input_def.should_show(&inputs));
+    }
+
+    #[test]
+    fn test_input_definition_should_show_single_condition_not_met() {
+        let input_def = InputDefinition {
+            name: "conditional_input".to_string(),
+            input_type: None,
+            enum_values: None,
+            default: Some(Value::String("default".to_string())),
+            description: Some("A conditional input".to_string()),
+            validation: None,
+            conditions: vec![InputCondition {
+                input_name: "status".to_string(),
+                equals: Some(Value::String("active".to_string())),
+            }],
+        };
+
+        let mut inputs = HashMap::new();
+        inputs.insert("status".to_string(), Value::String("inactive".to_string()));
+
+        assert!(!input_def.should_show(&inputs));
+    }
+
+    #[test]
+    fn test_input_definition_should_show_multiple_conditions_all_met() {
+        let input_def = InputDefinition {
+            name: "conditional_input".to_string(),
+            input_type: None,
+            enum_values: None,
+            default: Some(Value::String("default".to_string())),
+            description: Some("A conditional input".to_string()),
+            validation: None,
+            conditions: vec![
+                InputCondition {
+                    input_name: "external_id".to_string(),
+                    equals: Some(Value::String("some-external-id".to_string())),
+                },
+                InputCondition {
+                    input_name: "status".to_string(),
+                    equals: Some(Value::String("active".to_string())),
+                },
+            ],
+        };
+
+        let mut inputs = HashMap::new();
+        inputs.insert(
+            "external_id".to_string(),
+            Value::String("some-external-id".to_string()),
+        );
+        inputs.insert("status".to_string(), Value::String("active".to_string()));
+
+        assert!(input_def.should_show(&inputs));
+    }
+
+    #[test]
+    fn test_input_definition_should_show_multiple_conditions_one_not_met() {
+        let input_def = InputDefinition {
+            name: "conditional_input".to_string(),
+            input_type: None,
+            enum_values: None,
+            default: Some(Value::String("default".to_string())),
+            description: Some("A conditional input".to_string()),
+            validation: None,
+            conditions: vec![
+                InputCondition {
+                    input_name: "external_id".to_string(),
+                    equals: Some(Value::String("some-external-id".to_string())),
+                },
+                InputCondition {
+                    input_name: "status".to_string(),
+                    equals: Some(Value::String("active".to_string())),
+                },
+            ],
+        };
+
+        let mut inputs = HashMap::new();
+        inputs.insert(
+            "external_id".to_string(),
+            Value::String("some-external-id".to_string()),
+        );
+        inputs.insert("status".to_string(), Value::String("inactive".to_string())); // Wrong value
+
+        assert!(!input_def.should_show(&inputs));
+    }
+
+    #[test]
+    fn test_conditional_input_serialization() {
+        let yaml = r#"
+apiVersion: pmp.io/v1
+kind: Template
+metadata:
+  name: test-template
+  description: Test template with conditional inputs
+spec:
+  apiVersion: pmp.io/v1
+  kind: TestResource
+  executor: opentofu
+  inputs:
+    - name: status
+      description: Status of the resource
+      default: "active"
+      enum_values:
+        - active
+        - inactive
+    - name: conditional_field
+      description: This field is only shown when status is active
+      default: "default_value"
+      if:
+        - input_name: status
+          equals: "active"
+  environments: {}
+"#;
+
+        let template: TemplateResource = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(template.spec.inputs.len(), 2);
+
+        let conditional_input = &template.spec.inputs[1];
+        assert_eq!(conditional_input.name, "conditional_field");
+        assert_eq!(conditional_input.conditions.len(), 1);
+        assert_eq!(conditional_input.conditions[0].input_name, "status");
+        assert_eq!(
+            conditional_input.conditions[0].equals,
+            Some(Value::String("active".to_string()))
+        );
     }
 }
