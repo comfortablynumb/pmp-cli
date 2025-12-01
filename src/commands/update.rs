@@ -470,6 +470,94 @@ impl UpdateCommand {
                 .extend(newly_added_plugins.clone());
         }
 
+        // Re-render ALL existing plugins to pick up template changes
+        if !all_plugins_for_rendering.added.is_empty() {
+            output::subsection("Updating Existing Plugins");
+            output::dimmed("Regenerating existing plugin modules from templates...");
+
+            for existing_plugin in &all_plugins_for_rendering.added {
+                // Find the template pack containing this plugin
+                let template_pack = _all_template_packs
+                    .iter()
+                    .find(|pack| pack.resource.metadata.name == existing_plugin.template_pack_name);
+
+                let template_pack = match template_pack {
+                    Some(pack) => pack,
+                    None => {
+                        ctx.output.warning(&format!(
+                            "  Template pack '{}' not found. Skipping plugin '{}'.",
+                            existing_plugin.template_pack_name, existing_plugin.name
+                        ));
+                        continue;
+                    }
+                };
+
+                // Discover plugins in this template pack
+                let plugins = TemplateDiscovery::discover_plugins_in_pack(
+                    &*ctx.fs,
+                    &*ctx.output,
+                    &template_pack.path,
+                    &template_pack.resource.metadata.name,
+                )?;
+
+                // Find the specific plugin
+                let plugin_info = plugins
+                    .iter()
+                    .find(|p| p.resource.metadata.name == existing_plugin.name);
+
+                let plugin_info = match plugin_info {
+                    Some(info) => info,
+                    None => {
+                        ctx.output.warning(&format!(
+                            "  Plugin '{}' not found in template pack '{}'. Skipping.",
+                            existing_plugin.name, existing_plugin.template_pack_name
+                        ));
+                        continue;
+                    }
+                };
+
+                // Build module path
+                let mut module_path = env_path
+                    .join("modules")
+                    .join(&existing_plugin.template_pack_name)
+                    .join(&existing_plugin.name);
+
+                // Add reference project name to path if this plugin has a reference project
+                if let Some(ref_project) = &existing_plugin.reference_project {
+                    module_path = module_path.join(&ref_project.name);
+                }
+
+                // Delete existing plugin module directory to ensure clean regeneration
+                if ctx.fs.exists(&module_path) {
+                    ctx.fs.remove_dir_all(&module_path).with_context(|| {
+                        format!("Failed to delete existing plugin module: {:?}", module_path)
+                    })?;
+                }
+
+                // Re-render plugin from template
+                let plugin_renderer = TemplateRenderer::new();
+                let plugin_context = Some((
+                    existing_plugin.template_pack_name.as_str(),
+                    existing_plugin.name.as_str(),
+                ));
+
+                let _generated_files = plugin_renderer
+                    .render_template(
+                        ctx,
+                        &plugin_info.path,
+                        &module_path,
+                        &existing_plugin.inputs,
+                        plugin_context,
+                    )
+                    .context("Failed to re-render plugin files")?;
+
+                ctx.output.dimmed(&format!(
+                    "  Regenerated: {}/{}",
+                    existing_plugin.template_pack_name, existing_plugin.name
+                ));
+            }
+        }
+
         // Render template into environment directory
         output::subsection("Regenerating Files");
         output::dimmed("Regenerating template files...");
