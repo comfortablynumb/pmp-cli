@@ -4,7 +4,7 @@ use crate::output;
 use crate::template::DynamicProjectEnvironmentResource;
 use anyhow::{Context as _, Result};
 use serde::Serialize;
-use std::collections::{HashSet, HashMap};
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -30,7 +30,9 @@ impl CiDetectChangesCommand {
         // Step 1: Check if infrastructure file changed
         if Self::has_infrastructure_changes(base_ref, head_ref)? {
             output::warning("Infrastructure configuration file changed (.pmp.infrastructure.yaml)");
-            output::dimmed("Skipping project CI - infrastructure changes should be deployed separately");
+            output::dimmed(
+                "Skipping project CI - infrastructure changes should be deployed separately",
+            );
             std::process::exit(2); // Exit code 2 = infrastructure change
         }
 
@@ -44,7 +46,8 @@ impl CiDetectChangesCommand {
         }
 
         // Step 3: Parse changed files to extract projects
-        let changed_projects = Self::extract_projects_from_paths(&changed_files, environment_filter)?;
+        let changed_projects =
+            Self::extract_projects_from_paths(&changed_files, environment_filter)?;
 
         if changed_projects.is_empty() {
             output::info("No project files changed");
@@ -53,11 +56,13 @@ impl CiDetectChangesCommand {
         }
 
         // Step 4: Load infrastructure and discover projects
-        let (_infrastructure, infrastructure_root) = CollectionDiscovery::find_collection(&*ctx.fs)?
-            .context("Infrastructure is required. Run 'pmp infrastructure init' first.")?;
+        let (_infrastructure, infrastructure_root) =
+            CollectionDiscovery::find_collection(&*ctx.fs)?
+                .context("Infrastructure is required. Run 'pmp infrastructure init' first.")?;
 
         // Discover all projects
-        let project_refs = CollectionDiscovery::discover_projects(&*ctx.fs, &*ctx.output, &infrastructure_root)?;
+        let project_refs =
+            CollectionDiscovery::discover_projects(&*ctx.fs, &*ctx.output, &infrastructure_root)?;
 
         // Step 5: Build map of all project environments
         let mut project_envs: HashMap<(String, String), PathBuf> = HashMap::new();
@@ -70,21 +75,22 @@ impl CiDetectChangesCommand {
                 for env_path in env_entries {
                     let env_file = env_path.join(".pmp.environment.yaml");
                     if ctx.fs.exists(&env_file)
-                        && let Ok(resource) = DynamicProjectEnvironmentResource::from_file(&*ctx.fs, &env_file) {
-                            let key = (resource.metadata.name.clone(), resource.metadata.environment_name.clone());
-                            project_envs.insert(key, env_path);
-                        }
+                        && let Ok(resource) =
+                            DynamicProjectEnvironmentResource::from_file(&*ctx.fs, &env_file)
+                    {
+                        let key = (
+                            resource.metadata.name.clone(),
+                            resource.metadata.environment_name.clone(),
+                        );
+                        project_envs.insert(key, env_path);
+                    }
                 }
             }
         }
 
         // Step 6: Include all dependent projects
-        let affected_projects = Self::include_dependents(
-            &changed_projects,
-            &project_envs,
-            ctx,
-            &infrastructure_root,
-        )?;
+        let affected_projects =
+            Self::include_dependents(&changed_projects, &project_envs, ctx, &infrastructure_root)?;
 
         // Step 6: Format and output results
         Self::output_results(&affected_projects, output_format)?;
@@ -112,8 +118,8 @@ impl CiDetectChangesCommand {
 
         // Check if .pmp.infrastructure.yaml changed
         Ok(files.lines().any(|line| {
-            line.trim() == ".pmp.infrastructure.yaml" ||
-            line.trim().ends_with("/.pmp.infrastructure.yaml")
+            line.trim() == ".pmp.infrastructure.yaml"
+                || line.trim().ends_with("/.pmp.infrastructure.yaml")
         }))
     }
 
@@ -188,18 +194,17 @@ impl CiDetectChangesCommand {
             let (proj_name, proj_env) = project_key;
 
             // Try to build dependency graph for this project
-            if let Ok(dep_graph) = DependencyGraph::build(
-                &*ctx.fs,
-                infrastructure_root,
-                proj_name,
-                proj_env,
-            ) {
+            if let Ok(dep_graph) =
+                DependencyGraph::build(&*ctx.fs, infrastructure_root, proj_name, proj_env)
+            {
                 // Check if this project depends on any of the changed projects
                 for (changed_name, changed_env) in changed_projects {
                     // Check if this project's dependency graph includes the changed project
                     if let Ok(execution_order) = dep_graph.execution_order() {
                         for node in &execution_order {
-                            if node.project_name == *changed_name && node.environment_name == *changed_env {
+                            if node.project_name == *changed_name
+                                && node.environment_name == *changed_env
+                            {
                                 // This project depends on a changed project, so include it
                                 affected.insert((proj_name.clone(), proj_env.clone()));
                                 break;
@@ -225,7 +230,9 @@ impl CiDetectChangesCommand {
 
         // Sort for deterministic output
         result.sort_by(|a, b| {
-            a.name.cmp(&b.name).then_with(|| a.environment.cmp(&b.environment))
+            a.name
+                .cmp(&b.name)
+                .then_with(|| a.environment.cmp(&b.environment))
         });
 
         Ok(result)
@@ -240,12 +247,15 @@ impl CiDetectChangesCommand {
                 println!("{}", json);
             }
             "yaml" => {
-                let yaml = serde_yaml::to_string(projects)
-                    .context("Failed to serialize to YAML")?;
+                let yaml =
+                    serde_yaml::to_string(projects).context("Failed to serialize to YAML")?;
                 println!("{}", yaml);
             }
             _ => {
-                anyhow::bail!("Unsupported output format: {}. Use 'json' or 'yaml'", format);
+                anyhow::bail!(
+                    "Unsupported output format: {}. Use 'json' or 'yaml'",
+                    format
+                );
             }
         }
 

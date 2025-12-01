@@ -289,83 +289,84 @@ impl UpdateCommand {
         // Process installed plugins from template spec
         let mut newly_collected_plugins = Vec::new();
         if let Some(plugins_config) = &matching_template.resource.spec.plugins
-            && !plugins_config.installed.is_empty() {
-                output::blank();
-                output::subsection("Processing Installed Plugins");
-                output::dimmed("Checking for new plugins defined in template...");
+            && !plugins_config.installed.is_empty()
+        {
+            output::blank();
+            output::subsection("Processing Installed Plugins");
+            output::dimmed("Checking for new plugins defined in template...");
 
-                // Get currently added plugins from environment
-                let current_plugins = current_env_resource
-                    .spec
-                    .plugins
-                    .as_ref()
-                    .map(|p| &p.added)
-                    .map(|p| p.as_slice())
-                    .unwrap_or(&[]);
+            // Get currently added plugins from environment
+            let current_plugins = current_env_resource
+                .spec
+                .plugins
+                .as_ref()
+                .map(|p| &p.added)
+                .map(|p| p.as_slice())
+                .unwrap_or(&[]);
 
-                // Discover projects (needed for plugins that require reference projects)
-                let discovered_projects = CollectionDiscovery::discover_projects(
-                    &*ctx.fs,
-                    &*ctx.output,
-                    &collection_root,
-                )?;
+            // Discover projects (needed for plugins that require reference projects)
+            let discovered_projects =
+                CollectionDiscovery::discover_projects(&*ctx.fs, &*ctx.output, &collection_root)?;
 
-                // Check each installed plugin
-                for installed_config in &plugins_config.installed {
-                    // Check if this plugin is already added to the environment
-                    let already_added = current_plugins.iter().any(|added_plugin| {
-                        added_plugin.template_pack_name == installed_config.template_pack_name
-                            && added_plugin.name == installed_config.plugin_name
-                    });
+            // Check each installed plugin
+            for installed_config in &plugins_config.installed {
+                // Check if this plugin is already added to the environment
+                let already_added = current_plugins.iter().any(|added_plugin| {
+                    added_plugin.template_pack_name == installed_config.template_pack_name
+                        && added_plugin.name == installed_config.plugin_name
+                });
 
-                    if already_added {
-                        output::dimmed(&format!(
-                            "  Plugin {}/{} is already added, skipping",
-                            installed_config.template_pack_name, installed_config.plugin_name
-                        ));
-                        continue;
-                    }
-
-                    // Plugin not added yet, collect inputs for it
-                    output::blank();
+                if already_added {
                     output::dimmed(&format!(
-                        "  Installing new plugin: {}/{}",
+                        "  Plugin {}/{} is already added, skipping",
                         installed_config.template_pack_name, installed_config.plugin_name
                     ));
+                    continue;
+                }
 
-                    // Reuse collect_plugin_info from create command
-                    if let Some(plugin_info) = Self::collect_plugin_info_for_update(
-                        ctx,
-                        installed_config,
-                        &_all_template_packs,
-                        &discovered_projects,
-                        &collection_root,
-                        &project_name,
-                        &env_name,
-                    )? {
-                        newly_collected_plugins.push(plugin_info);
-                    }
+                // Plugin not added yet, collect inputs for it
+                output::blank();
+                output::dimmed(&format!(
+                    "  Installing new plugin: {}/{}",
+                    installed_config.template_pack_name, installed_config.plugin_name
+                ));
+
+                // Reuse collect_plugin_info from create command
+                if let Some(plugin_info) = Self::collect_plugin_info_for_update(
+                    ctx,
+                    installed_config,
+                    &_all_template_packs,
+                    &discovered_projects,
+                    &collection_root,
+                    &project_name,
+                    &env_name,
+                )? {
+                    newly_collected_plugins.push(plugin_info);
                 }
             }
+        }
 
         // Add plugins data for template rendering (including existing and newly collected)
-        let mut all_plugins_for_rendering = if let Some(plugins) = &current_env_resource.spec.plugins {
-            plugins.clone()
-        } else {
-            ProjectPlugins { added: Vec::new() }
-        };
+        let mut all_plugins_for_rendering =
+            if let Some(plugins) = &current_env_resource.spec.plugins {
+                plugins.clone()
+            } else {
+                ProjectPlugins { added: Vec::new() }
+            };
 
         // Render the newly collected plugins to get AddedPlugin structs
         if !newly_collected_plugins.is_empty() {
             // We'll render these plugins after user confirmation, but we need to prepare the data
             new_inputs.insert(
                 "_plugins".to_string(),
-                serde_json::to_value(&all_plugins_for_rendering).context("Failed to serialize plugins")?,
+                serde_json::to_value(&all_plugins_for_rendering)
+                    .context("Failed to serialize plugins")?,
             );
         } else if current_env_resource.spec.plugins.is_some() {
             new_inputs.insert(
                 "_plugins".to_string(),
-                serde_json::to_value(&all_plugins_for_rendering).context("Failed to serialize plugins")?,
+                serde_json::to_value(&all_plugins_for_rendering)
+                    .context("Failed to serialize plugins")?,
             );
         }
 
@@ -422,14 +423,16 @@ impl UpdateCommand {
                     environment: env_name.clone(),
                 };
 
-                let reference_project = plugin_info.reference_env.as_ref().map(|ref_env| {
-                    PluginProjectReference {
-                        api_version: ref_env.api_version.clone(),
-                        kind: ref_env.kind.clone(),
-                        name: ref_env.metadata.name.clone(),
-                        environment: ref_env.metadata.environment_name.clone(),
-                    }
-                });
+                let reference_project =
+                    plugin_info
+                        .reference_env
+                        .as_ref()
+                        .map(|ref_env| PluginProjectReference {
+                            api_version: ref_env.api_version.clone(),
+                            kind: ref_env.kind.clone(),
+                            name: ref_env.metadata.name.clone(),
+                            environment: ref_env.metadata.environment_name.clone(),
+                        });
 
                 newly_added_plugins.push(AddedPlugin {
                     template_pack_name: plugin_info.template_pack_name.clone(),
@@ -444,7 +447,9 @@ impl UpdateCommand {
             }
 
             // Merge newly added plugins with existing plugins
-            all_plugins_for_rendering.added.extend(newly_added_plugins.clone());
+            all_plugins_for_rendering
+                .added
+                .extend(newly_added_plugins.clone());
         }
 
         // Render template into environment directory
@@ -466,8 +471,8 @@ impl UpdateCommand {
             && !executor_config.config.is_empty()
         {
             // Create executor instance based on template's executor
-            let template_executor_name = &matching_template.resource.spec.executor;
-            let executor: Box<dyn crate::executor::Executor> = match template_executor_name.as_str() {
+            let template_executor_name = matching_template.resource.spec.executor.name();
+            let executor: Box<dyn crate::executor::Executor> = match template_executor_name {
                 "opentofu" => Box::new(crate::executor::OpenTofuExecutor::new()),
                 "none" => Box::new(crate::executor::NoneExecutor::new()),
                 _ => anyhow::bail!("Unknown executor: {}", template_executor_name),
@@ -703,6 +708,7 @@ impl UpdateCommand {
                                                     inputs: Vec::new(),
                                                     order: 0,
                                                     raw_module_inputs: None,
+                                                    disable_user_input_override: false,
                                                 });
 
                                             compatible_projects.push(CompatibleProject {
@@ -750,6 +756,7 @@ impl UpdateCommand {
                             inputs: Vec::new(),
                             order: 0,
                             raw_module_inputs: None,
+                            disable_user_input_override: false,
                         });
 
                     // Add plugin with empty compatible projects list (no reference project needed)
@@ -979,6 +986,7 @@ impl UpdateCommand {
                 inputs: Vec::new(),
                 order: 0,
                 raw_module_inputs: None,
+                disable_user_input_override: false,
             };
         }
 
@@ -1248,7 +1256,8 @@ impl UpdateCommand {
             && !executor_config.config.is_empty()
         {
             let project_executor_name = &env_resource.spec.executor.name;
-            let executor: Box<dyn crate::executor::Executor> = match project_executor_name.as_str() {
+            let executor: Box<dyn crate::executor::Executor> = match project_executor_name.as_str()
+            {
                 "opentofu" => Box::new(crate::executor::OpenTofuExecutor::new()),
                 "none" => Box::new(crate::executor::NoneExecutor::new()),
                 _ => anyhow::bail!("Unknown executor: {}", project_executor_name),
@@ -1419,7 +1428,8 @@ impl UpdateCommand {
             && !executor_config.config.is_empty()
         {
             let project_executor_name = &env_resource.spec.executor.name;
-            let executor: Box<dyn crate::executor::Executor> = match project_executor_name.as_str() {
+            let executor: Box<dyn crate::executor::Executor> = match project_executor_name.as_str()
+            {
                 "opentofu" => Box::new(crate::executor::OpenTofuExecutor::new()),
                 "none" => Box::new(crate::executor::NoneExecutor::new()),
                 _ => anyhow::bail!("Unknown executor: {}", project_executor_name),
@@ -1665,7 +1675,8 @@ impl UpdateCommand {
             && !executor_config.config.is_empty()
         {
             let project_executor_name = &env_resource.spec.executor.name;
-            let executor: Box<dyn crate::executor::Executor> = match project_executor_name.as_str() {
+            let executor: Box<dyn crate::executor::Executor> = match project_executor_name.as_str()
+            {
                 "opentofu" => Box::new(crate::executor::OpenTofuExecutor::new()),
                 "none" => Box::new(crate::executor::NoneExecutor::new()),
                 _ => anyhow::bail!("Unknown executor: {}", project_executor_name),
@@ -2200,7 +2211,8 @@ impl UpdateCommand {
                     // Show project name with environment and labels if available
                     let mut parts = vec![format!("{} ({})", p.name, env.metadata.environment_name)];
                     if !p.labels.is_empty() {
-                        let labels_str = p.labels
+                        let labels_str = p
+                            .labels
                             .iter()
                             .map(|(k, v)| format!("{}={}", k, v))
                             .collect::<Vec<_>>()
@@ -2237,18 +2249,25 @@ impl UpdateCommand {
             merged_inputs.push(installed_input.clone());
         }
 
-        // Ask user if they want to customize inputs
-        let customize = ctx
-            .input
-            .confirm("  Do you want to customize inputs for this plugin?", false)?;
-
-        let plugin_inputs = if customize {
-            ctx.output.dimmed("  Collecting plugin inputs...");
-            Self::collect_plugin_inputs(ctx, &merged_inputs, project_name, environment_name)?
-        } else {
-            // Use defaults
+        // Check if user input override is disabled
+        let plugin_inputs = if installed_config.disable_user_input_override {
+            // Use defaults without asking
             ctx.output.dimmed("  Using default values...");
             Self::build_default_plugin_inputs(&merged_inputs, project_name, environment_name)?
+        } else {
+            // Ask user if they want to customize inputs
+            let customize = ctx
+                .input
+                .confirm("  Do you want to customize inputs for this plugin?", false)?;
+
+            if customize {
+                ctx.output.dimmed("  Collecting plugin inputs...");
+                Self::collect_plugin_inputs(ctx, &merged_inputs, project_name, environment_name)?
+            } else {
+                // Use defaults
+                ctx.output.dimmed("  Using default values...");
+                Self::build_default_plugin_inputs(&merged_inputs, project_name, environment_name)?
+            }
         };
 
         Ok(Some(CollectedPluginInfo {
@@ -2357,10 +2376,11 @@ impl UpdateCommand {
                     kind: template.spec.kind.clone(),
                 },
                 executor: crate::template::metadata::ExecutorProjectConfig {
-                    name: template.spec.executor.clone(),
+                    name: template.spec.executor.name().to_string(),
+                    config: template.spec.executor.config().cloned(),
                 },
                 inputs: inputs.clone(),
-                custom: None,  // Templates no longer have custom field
+                custom: None, // Templates no longer have custom field
                 plugins: merged_plugins.cloned(), // Use merged plugins (existing + newly added)
                 template: Some(TemplateReference {
                     template_pack_name: template_pack_name.to_string(),
@@ -2371,8 +2391,12 @@ impl UpdateCommand {
                 }),
                 template_reference_projects: current_env.spec.template_reference_projects.clone(), // Preserve from current env
                 dependencies: current_env.spec.dependencies.clone(), // Preserve from current env
-                projects: current_env.spec.projects.clone(), // Preserve from current env
-                hooks: current_env.spec.hooks.clone().or_else(|| template.spec.hooks.clone()), // Preserve existing hooks, or use template hooks
+                projects: current_env.spec.projects.clone(),         // Preserve from current env
+                hooks: current_env
+                    .spec
+                    .hooks
+                    .clone()
+                    .or_else(|| template.spec.hooks.clone()), // Preserve existing hooks, or use template hooks
             },
         };
 
@@ -2706,7 +2730,11 @@ impl UpdateCommand {
                             .and_then(|v| serde_json::to_string(v).ok())
                             .unwrap_or_default();
                         // Don't pass empty string as default to avoid "()" display
-                        let default = if current_str.is_empty() { None } else { Some(current_str.as_str()) };
+                        let default = if current_str.is_empty() {
+                            None
+                        } else {
+                            Some(current_str.as_str())
+                        };
                         let answer = ctx
                             .input
                             .text(&description, default)

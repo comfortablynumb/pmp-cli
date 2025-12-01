@@ -3,6 +3,75 @@ use serde_json::Value;
 use std::collections::HashMap;
 
 // ============================================================================
+// Executor Configuration
+// ============================================================================
+
+/// Executor configuration for a template
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ExecutorConfig {
+    /// Simple string format (legacy): "opentofu"
+    String(String),
+    /// Full configuration format
+    Full(ExecutorFullConfig),
+}
+
+impl ExecutorConfig {
+    /// Get the executor name
+    pub fn name(&self) -> &str {
+        match self {
+            ExecutorConfig::String(s) => s,
+            ExecutorConfig::Full(config) => &config.name,
+        }
+    }
+
+    /// Get the executor-specific configuration
+    #[allow(dead_code)]
+    pub fn config(&self) -> Option<&ExecutorSpecificConfig> {
+        match self {
+            ExecutorConfig::String(_) => None,
+            ExecutorConfig::Full(config) => config.config.as_ref(),
+        }
+    }
+}
+
+/// Full executor configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExecutorFullConfig {
+    /// Executor name (e.g., "opentofu", "terraform")
+    pub name: String,
+
+    /// Executor-specific configuration (optional)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config: Option<ExecutorSpecificConfig>,
+}
+
+/// Executor-specific configuration
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ExecutorSpecificConfig {
+    /// Command-specific configurations
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub commands: HashMap<String, CommandConfig>,
+}
+
+/// Configuration for a specific command
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct CommandConfig {
+    /// Additional options/flags to append to the command
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub options: Vec<String>,
+}
+
+/// Executor configuration override (used in ProjectGroupProject)
+/// This allows overriding parts of the executor config without specifying the name
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ExecutorConfigOverride {
+    /// Executor-specific configuration to override
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config: Option<ExecutorSpecificConfig>,
+}
+
+// ============================================================================
 // TemplatePack Resource (Kubernetes-style)
 // ============================================================================
 
@@ -85,8 +154,9 @@ pub struct TemplateSpec {
     /// Kind of the generated resource (e.g., "KubernetesWorkload", "Infrastructure")
     pub kind: String,
 
-    /// Executor name (e.g., "opentofu", "terraform") (REQUIRED)
-    pub executor: String,
+    /// Executor configuration (REQUIRED)
+    /// Can be a simple string ("opentofu") or full config with command options
+    pub executor: ExecutorConfig,
 
     /// Inputs applied to all environments (supports both array and object format)
     #[serde(default, deserialize_with = "deserialize_inputs")]
@@ -114,8 +184,7 @@ pub struct TemplateSpec {
     /// These projects will be created when a project from this template is created
     /// and will be added as dependencies to the environment
     #[serde(default)]
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub projects: Vec<ProjectGroupProject>,
+    pub projects: ProjectGroupProjects,
 
     /// Hooks to run before and after commands
     /// These hooks will be added to the generated environment file
@@ -211,6 +280,11 @@ pub struct AllowedPluginConfig {
     /// Key: parameter name, Value: raw HCL expression (e.g., "var.some_value", "local.computed")
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub raw_module_inputs: Option<HashMap<String, String>>,
+
+    /// If true, skip prompting the user to customize plugin inputs during installation
+    /// The plugin will use default values or values defined in the inputs field
+    #[serde(default)]
+    pub disable_user_input_override: bool,
 }
 
 /// Reference to a template that provides the plugin (used for requires_project_with_template)
@@ -293,6 +367,13 @@ pub struct TemplateRemoteStateConfig {
 pub struct TemplateDependency {
     /// Project reference containing apiVersion, kind, and remote_state config
     pub project: TemplateProjectRef,
+
+    /// Optional unique name for this dependency
+    /// Can be used to reference this specific dependency in project group configurations
+    /// Must be unique within the template's dependencies list
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dependency_name: Option<String>,
 }
 
 // ============================================================================
@@ -971,6 +1052,13 @@ pub struct ProjectGroupReferenceProject {
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub data_source_name: Option<String>,
+
+    /// Optional: Dependency name to match against template dependencies
+    /// If specified, the reference project must match the dependency with this name
+    /// from the template's spec.dependencies list
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dependency_name: Option<String>,
 }
 
 /// A project configuration within a project group
@@ -998,6 +1086,87 @@ pub struct ProjectGroupProject {
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub reference_projects: Vec<ProjectGroupReferenceProject>,
+
+    /// Optional: Executor configuration override
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub executor: Option<ExecutorConfigOverride>,
+}
+
+/// Shared configuration applied to all projects in a project group
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ProjectGroupSharedConfig {
+    /// If true, use all default values from templates (don't prompt for any inputs)
+    /// This applies to all projects unless overridden individually
+    #[serde(default)]
+    pub use_all_defaults: bool,
+
+    /// Executor configuration override to apply to all projects
+    /// Individual projects can still override this with their own executor config
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub executor: Option<ExecutorConfigOverride>,
+}
+
+/// Container for project group projects with shared configuration
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ProjectGroupProjects {
+    /// List of projects to create/manage
+    #[serde(default)]
+    pub list: Vec<ProjectGroupProject>,
+
+    /// Shared configuration applied to all projects
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shared_config: Option<ProjectGroupSharedConfig>,
+}
+
+impl ProjectGroupProjects {
+    /// Check if there are any projects
+    pub fn is_empty(&self) -> bool {
+        self.list.is_empty()
+    }
+
+    /// Get the list of projects
+    pub fn projects(&self) -> &[ProjectGroupProject] {
+        &self.list
+    }
+
+    /// Apply shared config to a project, merging with project-specific config
+    pub fn apply_shared_config(&self, project: &ProjectGroupProject) -> ProjectGroupProject {
+        let mut merged = project.clone();
+
+        if let Some(shared) = &self.shared_config {
+            // Apply use_all_defaults if not explicitly set on the project
+            if !project.use_all_defaults && shared.use_all_defaults {
+                merged.use_all_defaults = true;
+            }
+
+            // Merge executor configs
+            if let Some(shared_executor) = &shared.executor {
+                merged.executor = match &project.executor {
+                    Some(project_executor) => {
+                        // Merge project executor with shared executor
+                        let mut merged_executor = shared_executor.clone();
+                        if let Some(project_config) = &project_executor.config {
+                            if let Some(merged_config) = &mut merged_executor.config {
+                                // Merge commands
+                                for (cmd, cmd_config) in &project_config.commands {
+                                    merged_config.commands.insert(cmd.clone(), cmd_config.clone());
+                                }
+                            } else {
+                                merged_executor.config = Some(project_config.clone());
+                            }
+                        }
+                        Some(merged_executor)
+                    }
+                    None => Some(shared_executor.clone()),
+                };
+            }
+        }
+
+        merged
+    }
 }
 
 /// Project specification
@@ -1045,8 +1214,7 @@ pub struct ProjectSpec {
     /// When this field is populated, the project group will create/update these projects
     /// and execute commands on them when apply/preview/destroy is run
     #[serde(default)]
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub projects: Vec<ProjectGroupProject>,
+    pub projects: ProjectGroupProjects,
 
     /// Hooks to run before and after commands
     /// These hooks are copied from the template and can be overridden per environment
@@ -1129,6 +1297,10 @@ pub struct DynamicProjectEnvironmentResource {
 pub struct ExecutorProjectConfig {
     /// Executor name (e.g., "opentofu", "terraform")
     pub name: String,
+
+    /// Optional executor-specific configuration (overrides from template)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config: Option<ExecutorSpecificConfig>,
 }
 
 // ============================================================================
@@ -1567,6 +1739,19 @@ impl TemplateResource {
             }
         }
 
+        // Validate dependency_name uniqueness
+        let mut dependency_names = std::collections::HashSet::new();
+        for dep in &resource.spec.dependencies {
+            if let Some(dep_name) = &dep.dependency_name {
+                if !dependency_names.insert(dep_name.clone()) {
+                    anyhow::bail!(
+                        "Duplicate dependency_name '{}' found in template dependencies. Each dependency_name must be unique.",
+                        dep_name
+                    );
+                }
+            }
+        }
+
         Ok(resource)
     }
 }
@@ -1612,7 +1797,10 @@ impl InfrastructureTemplateResource {
 
         // Validate kind
         if resource.kind != "InfrastructureTemplate" {
-            anyhow::bail!("Expected kind 'InfrastructureTemplate', got '{}'", resource.kind);
+            anyhow::bail!(
+                "Expected kind 'InfrastructureTemplate', got '{}'",
+                resource.kind
+            );
         }
 
         Ok(resource)

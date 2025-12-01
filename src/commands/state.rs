@@ -458,6 +458,7 @@ impl StateCommand {
             apply_command: None,
             destroy_command: None,
             refresh_command: None,
+            ..Default::default()
         };
 
         let result = executor.refresh(&config, env_dir_str, &[]);

@@ -1,4 +1,6 @@
-use super::metadata::{InfrastructureTemplateResource, PluginResource, TemplatePackResource, TemplateResource};
+use super::metadata::{
+    InfrastructureTemplateResource, PluginResource, TemplatePackResource, TemplateResource,
+};
 use anyhow::Result;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -236,7 +238,8 @@ impl TemplateDiscovery {
 
         for entry_path in entries {
             if fs.is_file(&entry_path)
-                && entry_path.file_name() == Some(std::ffi::OsStr::new(".pmp.infrastructure-template.yaml"))
+                && entry_path.file_name()
+                    == Some(std::ffi::OsStr::new(".pmp.infrastructure-template.yaml"))
                 && let Some(infra_template_dir) = entry_path.parent()
             {
                 match InfrastructureTemplateResource::from_file(fs, &entry_path) {

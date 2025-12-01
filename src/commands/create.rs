@@ -32,8 +32,13 @@ enum OptionType {
 /// Represents an input collection item (either template or plugin)
 #[derive(Debug, Clone)]
 enum InputCollectionItem {
-    Template { order: i32 },
-    Plugin { order: i32, config: crate::template::metadata::AllowedPluginConfig },
+    Template {
+        order: i32,
+    },
+    Plugin {
+        order: i32,
+        config: crate::template::metadata::AllowedPluginConfig,
+    },
 }
 
 /// Plugin metadata collected during input collection phase
@@ -187,7 +192,10 @@ impl CreateCommand {
             if let Some(description) = &required_template.description {
                 ctx.output.dimmed(&format!("  {}", description));
             } else {
-                let mut info_parts = vec![format!("Plugin requires a reference to a {} project", required_template.kind)];
+                let mut info_parts = vec![format!(
+                    "Plugin requires a reference to a {} project",
+                    required_template.kind
+                )];
                 if let Some(label_selector) = &required_template.label_selector {
                     let labels_str = label_selector
                         .iter()
@@ -205,7 +213,8 @@ impl CreateCommand {
                     // Show project name with environment and labels if available
                     let mut parts = vec![format!("{} ({})", p.name, env.metadata.environment_name)];
                     if !p.labels.is_empty() {
-                        let labels_str = p.labels
+                        let labels_str = p
+                            .labels
                             .iter()
                             .map(|(k, v)| format!("{}={}", k, v))
                             .collect::<Vec<_>>()
@@ -242,18 +251,25 @@ impl CreateCommand {
             merged_inputs.push(installed_input.clone());
         }
 
-        // Ask user if they want to customize inputs
-        let customize = ctx
-            .input
-            .confirm("  Do you want to customize inputs for this plugin?", false)?;
-
-        let plugin_inputs = if customize {
-            ctx.output.dimmed("  Collecting plugin inputs...");
-            Self::collect_plugin_inputs(ctx, &merged_inputs, project_name, Some(environment_name))?
-        } else {
-            // Use defaults
+        // Check if user input override is disabled
+        let plugin_inputs = if installed_config.disable_user_input_override {
+            // Use defaults without asking
             ctx.output.dimmed("  Using default values...");
             Self::build_default_inputs(&merged_inputs, project_name, Some(environment_name))?
+        } else {
+            // Ask user if they want to customize inputs
+            let customize = ctx
+                .input
+                .confirm("  Do you want to customize inputs for this plugin?", false)?;
+
+            if customize {
+                ctx.output.dimmed("  Collecting plugin inputs...");
+                Self::collect_plugin_inputs(ctx, &merged_inputs, project_name, Some(environment_name))?
+            } else {
+                // Use defaults
+                ctx.output.dimmed("  Using default values...");
+                Self::build_default_inputs(&merged_inputs, project_name, Some(environment_name))?
+            }
         };
 
         Ok(Some(CollectedPluginInfo {
@@ -316,14 +332,16 @@ impl CreateCommand {
                 environment: environment_name.to_string(),
             };
 
-            let reference_project_metadata = plugin_info.reference_env.as_ref().map(|ref_env| {
-                PluginProjectReference {
-                    api_version: ref_env.api_version.clone(),
-                    kind: ref_env.kind.clone(),
-                    name: ref_env.metadata.name.clone(),
-                    environment: ref_env.metadata.environment_name.clone(),
-                }
-            });
+            let reference_project_metadata =
+                plugin_info
+                    .reference_env
+                    .as_ref()
+                    .map(|ref_env| PluginProjectReference {
+                        api_version: ref_env.api_version.clone(),
+                        kind: ref_env.kind.clone(),
+                        name: ref_env.metadata.name.clone(),
+                        environment: ref_env.metadata.environment_name.clone(),
+                    });
 
             added_plugins.push(AddedPlugin {
                 template_pack_name: plugin_info.template_pack_name,
@@ -339,7 +357,6 @@ impl CreateCommand {
 
         Ok(added_plugins)
     }
-
 
     /// Build default inputs from input specs without prompting user
     fn build_default_inputs(
@@ -371,7 +388,8 @@ impl CreateCommand {
 
             if let Some(default) = &input_def.default {
                 // Build variables map for interpolation
-                let vars = Self::get_interpolation_variables(&inputs, project_name, environment_name);
+                let vars =
+                    Self::get_interpolation_variables(&inputs, project_name, environment_name);
 
                 // Interpolate both ${env:...} and ${var:...} patterns in the default value
                 let interpolated_value =
@@ -440,10 +458,12 @@ impl CreateCommand {
                 // Conditions not met, use default value if available
                 if let Some(default) = &input_def.default {
                     // Get variables for interpolation
-                    let vars = Self::get_interpolation_variables(&inputs, project_name, environment_name);
+                    let vars =
+                        Self::get_interpolation_variables(&inputs, project_name, environment_name);
 
                     // Interpolate variables in the default value
-                    let interpolated_value = crate::template::utils::interpolate_value_all(default, &vars)?;
+                    let interpolated_value =
+                        crate::template::utils::interpolate_value_all(default, &vars)?;
                     inputs.insert(input_def.name.clone(), interpolated_value);
                 }
                 continue; // Skip prompting for this input
@@ -461,7 +481,9 @@ impl CreateCommand {
 
             // Interpolate variables in the default value (supports both ${env:...} and ${var:...})
             let interpolated_default = if let Some(default) = &input_def.default {
-                Some(crate::template::utils::interpolate_value_all(default, &vars)?)
+                Some(crate::template::utils::interpolate_value_all(
+                    default, &vars,
+                )?)
             } else {
                 None
             };
@@ -586,6 +608,10 @@ impl CreateCommand {
         output_path: Option<&str>,
         template_packs_paths: Option<&str>,
         inputs_str: Option<&str>,
+        template_spec: Option<&str>,
+        auto_apply: bool,
+        project_name: Option<&str>,
+        environment_name: Option<&str>,
     ) -> Result<()> {
         // Parse pre-defined inputs if provided
         let predefined_inputs: Option<HashMap<String, Value>> = if let Some(inputs) = inputs_str {
@@ -742,19 +768,64 @@ impl CreateCommand {
 
         ctx.output.blank();
 
-        // Step 5: Navigate category tree and select template
-        ctx.output.subsection("Template Selection");
-        ctx.output.dimmed("Browse templates by category");
-        ctx.output.blank();
+        // Step 5: Select template (either from --template flag or via category navigation)
+        let (selected_pack_name, selected_template_name) = if let Some(template_str) = template_spec {
+            // Parse template specification in format: pack-name/template-name
+            let parts: Vec<&str> = template_str.split('/').collect();
+            if parts.len() != 2 {
+                anyhow::bail!(
+                    "Invalid template format: '{}'\n\nExpected format: template-pack-name/template-name\n\nExample: kubernetes-workloads/http-api",
+                    template_str
+                );
+            }
 
-        let selected_template_ref = Self::navigate_categories_and_select_template(
-            ctx,
-            &infrastructure.spec.categories,
-            &filtered_packs_with_templates,
-        )?;
+            let pack_name = parts[0].to_string();
+            let template_name = parts[1].to_string();
 
-        let selected_pack_name = selected_template_ref.0.clone();
-        let selected_template_name = selected_template_ref.1.clone();
+            // Validate that the template exists in filtered packs
+            let mut template_found = false;
+            for (pack, templates) in &filtered_packs_with_templates {
+                if pack.resource.metadata.name == pack_name {
+                    for (template, _config) in templates {
+                        if template.resource.metadata.name == template_name {
+                            template_found = true;
+                            break;
+                        }
+                    }
+                    if template_found {
+                        break;
+                    }
+                }
+            }
+
+            if !template_found {
+                anyhow::bail!(
+                    "Template '{}/{}' not found or not allowed in this infrastructure.\n\nAvailable templates:\n{}",
+                    pack_name,
+                    template_name,
+                    Self::format_available_templates(&filtered_packs_with_templates)
+                );
+            }
+
+            ctx.output.subsection("Template Selection");
+            ctx.output.dimmed(&format!("Using specified template: {}/{}", pack_name, template_name));
+            ctx.output.blank();
+
+            (pack_name, template_name)
+        } else {
+            // Navigate category tree interactively
+            ctx.output.subsection("Template Selection");
+            ctx.output.dimmed("Browse templates by category");
+            ctx.output.blank();
+
+            let selected_template_ref = Self::navigate_categories_and_select_template(
+                ctx,
+                &infrastructure.spec.categories,
+                &filtered_packs_with_templates,
+            )?;
+
+            (selected_template_ref.0.clone(), selected_template_ref.1.clone())
+        };
 
         // Find the selected template and config
         let mut selected_template_info: Option<(
@@ -920,9 +991,7 @@ impl CreateCommand {
                 if let Some(description) = &template_ref.description {
                     ctx.output.dimmed(&format!(
                         "Reference {} of {}: {}",
-                        ref_number,
-                        total_refs,
-                        description
+                        ref_number, total_refs, description
                     ));
                 } else {
                     let mut info_parts = vec![
@@ -931,7 +1000,8 @@ impl CreateCommand {
                     ];
 
                     if !template_ref.label_selector.is_empty() {
-                        let labels_str = template_ref.label_selector
+                        let labels_str = template_ref
+                            .label_selector
                             .iter()
                             .map(|(k, v)| format!("{}={}", k, v))
                             .collect::<Vec<_>>()
@@ -990,7 +1060,8 @@ impl CreateCommand {
                     .map(|(proj, _)| {
                         // Show project name with labels if available
                         if !proj.labels.is_empty() {
-                            let labels_str = proj.labels
+                            let labels_str = proj
+                                .labels
                                 .iter()
                                 .map(|(k, v)| format!("{}={}", k, v))
                                 .collect::<Vec<_>>()
@@ -1003,10 +1074,7 @@ impl CreateCommand {
 
                 let selected_project_display = ctx
                     .input
-                    .select(
-                        "Select reference project:",
-                        project_options.clone(),
-                    )
+                    .select("Select reference project:", project_options.clone())
                     .context("Failed to select reference project")?;
 
                 let project_index = project_options
@@ -1089,7 +1157,31 @@ impl CreateCommand {
         }
 
         // Step 7: Select environment from Infrastructure
-        let selected_environment = if infrastructure.spec.environments.is_empty() {
+        let selected_environment = if let Some(env_id) = environment_name {
+            // Environment specified via --environment flag (using environment ID/key)
+            // Validate that the environment ID exists
+            if !infrastructure.spec.environments.contains_key(env_id) {
+                anyhow::bail!(
+                    "Environment '{}' not found in infrastructure.\n\nAvailable environment IDs: {}",
+                    env_id,
+                    infrastructure
+                        .spec
+                        .environments
+                        .keys()
+                        .map(|k| k.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+            }
+
+            let env = &infrastructure.spec.environments[env_id];
+            ctx.output.subsection("Environment");
+            ctx.output.environment_badge(&env.name);
+            ctx.output.dimmed(&format!("Using environment ID: {}", env_id));
+            ctx.output.blank();
+
+            env_id.to_string()
+        } else if infrastructure.spec.environments.is_empty() {
             anyhow::bail!("Infrastructure must define at least one environment");
         } else if infrastructure.spec.environments.len() == 1 {
             // Only one environment, use it automatically
@@ -1141,7 +1233,7 @@ impl CreateCommand {
 
         // Skip dependency selection if the template has pre-defined projects (ProjectGroup)
         // Those projects will be auto-created with create: true
-        if selected_template.resource.spec.executor == "none"
+        if selected_template.resource.spec.executor.name() == "none"
             && selected_template.resource.spec.projects.is_empty()
         {
             ctx.output.subsection("Project Dependencies");
@@ -1253,14 +1345,14 @@ impl CreateCommand {
                     output::blank();
                 }
             }
-        } else if selected_template.resource.spec.executor == "none"
+        } else if selected_template.resource.spec.executor.name() == "none"
             && !selected_template.resource.spec.projects.is_empty()
         {
             // ProjectGroup with pre-defined projects - inform user about auto-creation
             ctx.output.subsection("Project Dependencies");
             ctx.output.info(&format!(
                 "This project group has {} pre-defined project(s) that will be created automatically.",
-                selected_template.resource.spec.projects.len()
+                selected_template.resource.spec.projects.projects().len()
             ));
             output::blank();
         }
@@ -1275,10 +1367,23 @@ impl CreateCommand {
             );
         }
 
-        // Step 9: Prompt for project name
+        // Step 9: Get project name (from flag or prompt)
         ctx.output.subsection("Project Configuration");
-        let mut project_name =
-            SchemaValidator::prompt_for_project_name(ctx).context("Failed to get project name")?;
+        let mut project_name = if let Some(name) = project_name {
+            // Project name specified via --name flag
+            ctx.output.dimmed(&format!("Using specified project name: {}", name));
+            ctx.output.blank();
+
+            // Validate the provided name
+            if let Err(e) = SchemaValidator::validate_project_name(name) {
+                anyhow::bail!("Invalid project name '{}': {}", name, e);
+            }
+
+            name.to_string()
+        } else {
+            // Prompt for project name
+            SchemaValidator::prompt_for_project_name(ctx).context("Failed to get project name")?
+        };
 
         // Validate the project name doesn't already exist anywhere in the collection
         loop {
@@ -1320,14 +1425,12 @@ impl CreateCommand {
         }
 
         // Step 10: Build ordered list of input collection items (template + plugins)
-        let input_collection_order = Self::build_input_collection_order(&selected_template.resource.spec);
+        let input_collection_order =
+            Self::build_input_collection_order(&selected_template.resource.spec);
 
         // Discover projects early (needed for plugins that require reference projects)
-        let discovered_projects = CollectionDiscovery::discover_projects(
-            &*ctx.fs,
-            &*ctx.output,
-            &infrastructure_root,
-        )?;
+        let discovered_projects =
+            CollectionDiscovery::discover_projects(&*ctx.fs, &*ctx.output, &infrastructure_root)?;
 
         // Step 11: Collect inputs in order (template + plugins)
         let mut inputs = HashMap::new();
@@ -1381,8 +1484,7 @@ impl CreateCommand {
                     ctx.output.blank();
                     ctx.output.dimmed(&format!(
                         "Installing plugin: {}/{}",
-                        config.template_pack_name,
-                        config.plugin_name
+                        config.template_pack_name, config.plugin_name
                     ));
 
                     if let Some(plugin_info) = Self::collect_plugin_info(
@@ -1483,12 +1585,12 @@ impl CreateCommand {
 
         // Step 15.5: Generate common file (e.g., _common.tf) if executor config is present
         // The executor itself decides whether to generate anything (only opentofu does)
-        let template_executor_name = &selected_template.resource.spec.executor;
+        let template_executor_name = selected_template.resource.spec.executor.name();
         if let Some(executor_config) = &infrastructure.spec.executor
             && !executor_config.config.is_empty()
         {
             // Create executor instance based on template's executor
-            let executor: Box<dyn crate::executor::Executor> = match template_executor_name.as_str() {
+            let executor: Box<dyn crate::executor::Executor> = match template_executor_name {
                 "opentofu" => Box::new(crate::executor::OpenTofuExecutor::new()),
                 "none" => Box::new(crate::executor::NoneExecutor::new()),
                 _ => anyhow::bail!("Unknown executor: {}", template_executor_name),
@@ -1546,6 +1648,7 @@ impl CreateCommand {
             &template_reference_projects,
             &added_plugins,
             &project_dependencies,
+            None, // No executor override in interactive mode
         )
         .context("Failed to generate .pmp.environment.yaml file")?;
 
@@ -1564,12 +1667,17 @@ impl CreateCommand {
         ctx.output
             .key_value("Environment path", &environment_path.display().to_string());
 
-        // Ask if user wants to execute apply
+        // Execute apply if --apply flag is set, otherwise ask user
         ctx.output.blank();
-        let should_apply = ctx
-            .input
-            .confirm("Do you want to execute 'apply' now?", false)
-            .context("Failed to get confirmation")?;
+        let should_apply = if auto_apply {
+            ctx.output.dimmed("Auto-applying infrastructure (--apply flag set)...");
+            true
+        } else {
+            ctx
+                .input
+                .confirm("Do you want to execute 'apply' now?", false)
+                .context("Failed to get confirmation")?
+        };
 
         if should_apply {
             ctx.output.blank();
@@ -1623,7 +1731,8 @@ impl CreateCommand {
             // Check if there's a predefined value for this input
             if let Some(predefined) = predefined_inputs.and_then(|p| p.get(&input_def.name)) {
                 // Use the predefined value directly (with variable interpolation)
-                let vars = Self::get_interpolation_variables(&inputs, project_name, environment_name);
+                let vars =
+                    Self::get_interpolation_variables(&inputs, project_name, environment_name);
                 let value = crate::template::utils::interpolate_value_all(predefined, &vars)?;
                 inputs.insert(input_def.name.clone(), value);
                 continue;
@@ -1634,10 +1743,12 @@ impl CreateCommand {
                 // Conditions not met, use default value if available
                 if let Some(default) = &input_def.default {
                     // Get variables for interpolation
-                    let vars = Self::get_interpolation_variables(&inputs, project_name, environment_name);
+                    let vars =
+                        Self::get_interpolation_variables(&inputs, project_name, environment_name);
 
                     // Interpolate variables in the default value
-                    let interpolated_value = crate::template::utils::interpolate_value_all(default, &vars)?;
+                    let interpolated_value =
+                        crate::template::utils::interpolate_value_all(default, &vars)?;
                     inputs.insert(input_def.name.clone(), interpolated_value);
                 }
                 continue; // Skip prompting for this input
@@ -1651,7 +1762,8 @@ impl CreateCommand {
                 if !override_cfg.show_as_default {
                     // Use the override value directly without prompting the user
                     // Still need to interpolate variables in the override value (supports ${env:...} and ${var:...})
-                    let vars = Self::get_interpolation_variables(&inputs, project_name, environment_name);
+                    let vars =
+                        Self::get_interpolation_variables(&inputs, project_name, environment_name);
                     crate::template::utils::interpolate_value_all(&override_cfg.value, &vars)?
                 } else {
                     // Show the override value as the default and let user override
@@ -1731,7 +1843,8 @@ impl CreateCommand {
         environment_name: Option<&str>,
     ) -> Result<serde_json::Value> {
         // Get variables for interpolation
-        let vars = Self::get_interpolation_variables(current_inputs, project_name, environment_name);
+        let vars =
+            Self::get_interpolation_variables(current_inputs, project_name, environment_name);
 
         // Interpolate variables in the description (supports both ${env:...} and ${var:...})
         let description = if let Some(desc) = &input_spec.description {
@@ -2853,6 +2966,25 @@ impl CreateCommand {
         }
     }
 
+    /// Format available templates for display in error messages
+    fn format_available_templates(packs_with_templates: &[PackWithTemplates]) -> String {
+        let mut result = Vec::new();
+        for (pack, templates) in packs_with_templates {
+            for (template, _config) in templates {
+                result.push(format!(
+                    "  - {}/{}",
+                    pack.resource.metadata.name, template.resource.metadata.name
+                ));
+            }
+        }
+
+        if result.is_empty() {
+            "(none)".to_string()
+        } else {
+            result.join("\n")
+        }
+    }
+
     /// Clear previous lines from terminal output
     /// Uses ANSI escape codes to move cursor up and clear lines
     fn clear_previous_lines(count: usize) {
@@ -3045,6 +3177,7 @@ impl CreateCommand {
         use_all_defaults: bool,
         reference_projects: &[crate::template::metadata::TemplateReferenceProject],
         template_packs_paths: Option<&str>,
+        executor_override: Option<&crate::template::metadata::ExecutorConfigOverride>,
     ) -> Result<()> {
         use crate::template::renderer::TemplateRenderer;
 
@@ -3078,23 +3211,19 @@ impl CreateCommand {
         let template_pack = all_template_packs
             .iter()
             .find(|pack| {
-                let pack_name = pack
-                    .resource
-                    .metadata
-                    .name
-                    .to_lowercase()
-                    .replace(' ', "-");
+                let pack_name = pack.resource.metadata.name.to_lowercase().replace(' ', "-");
                 pack_name == template_pack_name.to_lowercase()
-                    || pack.resource.metadata.name.to_lowercase() == template_pack_name.to_lowercase()
+                    || pack.resource.metadata.name.to_lowercase()
+                        == template_pack_name.to_lowercase()
             })
-            .context(format!(
-                "Template pack '{}' not found",
-                template_pack_name
-            ))?;
+            .context(format!("Template pack '{}' not found", template_pack_name))?;
 
         // Step 4: Discover templates in the pack and find the template
-        let templates =
-            TemplateDiscovery::discover_templates_in_pack(&*ctx.fs, &*ctx.output, &template_pack.path)?;
+        let templates = TemplateDiscovery::discover_templates_in_pack(
+            &*ctx.fs,
+            &*ctx.output,
+            &template_pack.path,
+        )?;
 
         let template = templates
             .iter()
@@ -3151,12 +3280,8 @@ impl CreateCommand {
 
         // Step 6: Determine project paths
         // Project folder uses the original project name (preserving hyphens)
-        let project_root = infrastructure_root
-            .join("projects")
-            .join(project_name);
-        let environment_path = project_root
-            .join("environments")
-            .join(environment_name);
+        let project_root = infrastructure_root.join("projects").join(project_name);
+        let environment_path = project_root.join("environments").join(environment_name);
 
         // Step 7: Create directory structure
         ctx.fs.create_dir_all(&environment_path)?;
@@ -3165,15 +3290,21 @@ impl CreateCommand {
         let template_src = &template.path;
         let renderer = TemplateRenderer::new();
         renderer
-            .render_template(ctx, template_src, environment_path.as_path(), &final_inputs, None)
+            .render_template(
+                ctx,
+                template_src,
+                environment_path.as_path(),
+                &final_inputs,
+                None,
+            )
             .context("Failed to render template")?;
 
         // Step 9: Generate _common.tf if needed (only opentofu executor does this)
-        let template_executor_name = &template.resource.spec.executor;
+        let template_executor_name = template.resource.spec.executor.name();
         if let Some(executor_config) = &infrastructure.spec.executor
             && !executor_config.config.is_empty()
         {
-            let executor: Box<dyn crate::executor::Executor> = match template_executor_name.as_str() {
+            let executor: Box<dyn crate::executor::Executor> = match template_executor_name {
                 "opentofu" => Box::new(crate::executor::OpenTofuExecutor::new()),
                 _ => Box::new(crate::executor::NoneExecutor::new()),
             };
@@ -3219,6 +3350,7 @@ impl CreateCommand {
             reference_projects,
             &[], // No added plugins
             &[], // No project dependencies (the caller handles this)
+            executor_override,
         )?;
 
         ctx.output.success(&format!(
@@ -3286,11 +3418,12 @@ impl CreateCommand {
         template_reference_projects: &[crate::template::metadata::TemplateReferenceProject],
         added_plugins: &[crate::template::metadata::AddedPlugin],
         project_dependencies: &[crate::template::metadata::ProjectDependency],
+        executor_override: Option<&crate::template::metadata::ExecutorConfigOverride>,
     ) -> Result<()> {
         use crate::template::metadata::{
-            DependencyProject, DynamicProjectEnvironmentMetadata, DynamicProjectEnvironmentResource,
-            EnvironmentReference, ProjectDependency, ProjectPlugins, ProjectSpec, ResourceDefinition,
-            TemplateReference,
+            DependencyProject, DynamicProjectEnvironmentMetadata,
+            DynamicProjectEnvironmentResource, EnvironmentReference, ProjectDependency,
+            ProjectPlugins, ProjectSpec, ResourceDefinition, TemplateReference,
         };
 
         // Copy projects from template spec
@@ -3299,7 +3432,7 @@ impl CreateCommand {
         // Generate dependencies from template projects (if any)
         // Each project in spec.projects becomes a dependency
         let mut all_dependencies = project_dependencies.to_vec();
-        for project_config in &template_projects {
+        for project_config in template_projects.projects() {
             // Add each project as a dependency with the current environment
             // Set create: true because ProjectGroup dependencies should be auto-created
             all_dependencies.push(ProjectDependency {
@@ -3310,6 +3443,40 @@ impl CreateCommand {
                 },
             });
         }
+
+        // Merge executor configuration with override if provided
+        let base_name = template.spec.executor.name().to_string();
+        let base_config = template.spec.executor.config().cloned();
+
+        // Merge executor override if provided
+        let merged_config = if let Some(override_cfg) = executor_override {
+            if let Some(override_specific) = &override_cfg.config {
+                // Merge commands from base and override
+                let mut merged_commands = if let Some(base_cfg) = base_config {
+                    base_cfg.commands.clone()
+                } else {
+                    std::collections::HashMap::new()
+                };
+
+                // Override/add commands from the executor override
+                for (cmd_name, cmd_config) in &override_specific.commands {
+                    merged_commands.insert(cmd_name.clone(), cmd_config.clone());
+                }
+
+                Some(crate::template::metadata::ExecutorSpecificConfig {
+                    commands: merged_commands,
+                })
+            } else {
+                base_config
+            }
+        } else {
+            base_config
+        };
+
+        let merged_executor_config = crate::template::metadata::ExecutorProjectConfig {
+            name: base_name,
+            config: merged_config,
+        };
 
         // Create DynamicProjectEnvironmentResource structure with apiVersion/kind from template
         let project_env = DynamicProjectEnvironmentResource {
@@ -3328,9 +3495,7 @@ impl CreateCommand {
                     api_version: template.spec.api_version.clone(),
                     kind: template.spec.kind.clone(),
                 },
-                executor: crate::template::metadata::ExecutorProjectConfig {
-                    name: template.spec.executor.clone(),
-                },
+                executor: merged_executor_config,
                 inputs: inputs.clone(),
                 custom: None, // Templates no longer have custom field
                 plugins: if !added_plugins.is_empty() {
@@ -3875,8 +4040,8 @@ spec:
 
         // Verify the environment file was created with user's input (3, not the collection default 5)
         let current_dir = std::env::current_dir().unwrap();
-        let env_file_path = current_dir
-            .join("projects/test-project/environments/dev/.pmp.environment.yaml");
+        let env_file_path =
+            current_dir.join("projects/test-project/environments/dev/.pmp.environment.yaml");
         assert!(
             fs.has_file(&env_file_path),
             "Environment file should be created"
@@ -3950,8 +4115,8 @@ spec:
 
         // Verify the environment file was created with collection's fixed value
         let current_dir = std::env::current_dir().unwrap();
-        let env_file_path = current_dir
-            .join("projects/test-project/environments/dev/.pmp.environment.yaml");
+        let env_file_path =
+            current_dir.join("projects/test-project/environments/dev/.pmp.environment.yaml");
         assert!(
             fs.has_file(&env_file_path),
             "Environment file should be created"
@@ -4016,8 +4181,8 @@ spec:
 
         // Verify project was created
         let current_dir = std::env::current_dir().unwrap();
-        let env_file_path = current_dir
-            .join("projects/test-project/environments/dev/.pmp.environment.yaml");
+        let env_file_path =
+            current_dir.join("projects/test-project/environments/dev/.pmp.environment.yaml");
         assert!(
             fs.has_file(&env_file_path),
             "Environment file should be created"
@@ -4106,8 +4271,8 @@ spec:
 
         // Verify the environment file was created with template-a's configuration
         let current_dir = std::env::current_dir().unwrap();
-        let env_file_path = current_dir
-            .join("projects/test-project/environments/dev/.pmp.environment.yaml");
+        let env_file_path =
+            current_dir.join("projects/test-project/environments/dev/.pmp.environment.yaml");
         assert!(
             fs.has_file(&env_file_path),
             "Environment file should be created"
@@ -4171,8 +4336,8 @@ spec:
 
         // Verify the environment file was created
         let current_dir = std::env::current_dir().unwrap();
-        let env_file_path = current_dir
-            .join("projects/my-project/environments/dev/.pmp.environment.yaml");
+        let env_file_path =
+            current_dir.join("projects/my-project/environments/dev/.pmp.environment.yaml");
         assert!(
             fs.has_file(&env_file_path),
             "Environment file should be created"
@@ -4306,8 +4471,8 @@ spec:
 
         // Verify infrastructure override interpolation
         let current_dir = std::env::current_dir().unwrap();
-        let env_file_path = current_dir
-            .join("projects/my-service/environments/dev/.pmp.environment.yaml");
+        let env_file_path =
+            current_dir.join("projects/my-service/environments/dev/.pmp.environment.yaml");
         assert!(
             fs.has_file(&env_file_path),
             "Environment file should be created"
@@ -4367,8 +4532,8 @@ spec:
 
         // Verify the interpolated default was used with environment name
         let current_dir = std::env::current_dir().unwrap();
-        let env_file_path = current_dir
-            .join("projects/myapp/environments/dev/.pmp.environment.yaml");
+        let env_file_path =
+            current_dir.join("projects/myapp/environments/dev/.pmp.environment.yaml");
         assert!(
             fs.has_file(&env_file_path),
             "Environment file should be created"
@@ -4435,8 +4600,8 @@ spec:
 
         // Verify select input was processed
         let current_dir = std::env::current_dir().unwrap();
-        let env_file_path = current_dir
-            .join("projects/test-project/environments/dev/.pmp.environment.yaml");
+        let env_file_path =
+            current_dir.join("projects/test-project/environments/dev/.pmp.environment.yaml");
         assert!(
             fs.has_file(&env_file_path),
             "Environment file should be created"
@@ -4499,8 +4664,8 @@ spec:
 
         // Verify number input was processed
         let current_dir = std::env::current_dir().unwrap();
-        let env_file_path = current_dir
-            .join("projects/test-project/environments/dev/.pmp.environment.yaml");
+        let env_file_path =
+            current_dir.join("projects/test-project/environments/dev/.pmp.environment.yaml");
         assert!(
             fs.has_file(&env_file_path),
             "Environment file should be created"
@@ -4561,8 +4726,8 @@ spec:
 
         // Verify boolean input was processed
         let current_dir = std::env::current_dir().unwrap();
-        let env_file_path = current_dir
-            .join("projects/test-project/environments/dev/.pmp.environment.yaml");
+        let env_file_path =
+            current_dir.join("projects/test-project/environments/dev/.pmp.environment.yaml");
         assert!(
             fs.has_file(&env_file_path),
             "Environment file should be created"
@@ -4680,9 +4845,8 @@ spec:
         );
 
         // Verify environment-specific default was used
-        let env_file_path = current_dir.join(
-            "projects/test-project/environments/production/.pmp.environment.yaml",
-        );
+        let env_file_path =
+            current_dir.join("projects/test-project/environments/production/.pmp.environment.yaml");
         assert!(
             fs.has_file(&env_file_path),
             "Environment file should be created in production directory"
@@ -4742,10 +4906,9 @@ spec:
 
         // Verify project files were created
         let current_dir = std::env::current_dir().unwrap();
-        let project_yaml_path =
-            current_dir.join("projects/test-project/.pmp.project.yaml");
-        let env_yaml_path = current_dir
-            .join("projects/test-project/environments/dev/.pmp.environment.yaml");
+        let project_yaml_path = current_dir.join("projects/test-project/.pmp.project.yaml");
+        let env_yaml_path =
+            current_dir.join("projects/test-project/environments/dev/.pmp.environment.yaml");
 
         assert!(
             fs.has_file(&project_yaml_path),

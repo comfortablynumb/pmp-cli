@@ -4,7 +4,7 @@ use std::path::Path;
 use std::process::Output;
 
 /// Configuration for executor execution, typically loaded from .pmp.yaml
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ExecutorConfig {
     /// Optional custom plan command (overrides default)
     pub plan_command: Option<String>,
@@ -14,6 +14,8 @@ pub struct ExecutorConfig {
     pub destroy_command: Option<String>,
     /// Optional custom refresh command (overrides default)
     pub refresh_command: Option<String>,
+    /// Command-specific options from template configuration
+    pub command_options: std::collections::HashMap<String, Vec<String>>,
 }
 
 /// Project metadata for backend table name generation

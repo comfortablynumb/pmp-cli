@@ -414,15 +414,16 @@ impl SearchCommand {
                         let res_name = captures.get(2).map(|m| m.as_str()).unwrap_or("");
 
                         // Check if type matches (if specified)
-                        let type_matches = resource_type.is_none() ||
-                            resource_type == Some(res_type);
+                        let type_matches =
+                            resource_type.is_none() || resource_type == Some(res_type);
 
                         // Check if name matches (if specified)
-                        let name_matches = resource_name.is_none() ||
-                            resource_name.map(|n| res_name.contains(n)).unwrap_or(false);
+                        let name_matches = resource_name.is_none()
+                            || resource_name.map(|n| res_name.contains(n)).unwrap_or(false);
 
                         if type_matches && name_matches {
-                            let file_name = path.file_name()
+                            let file_name = path
+                                .file_name()
                                 .and_then(|n| n.to_str())
                                 .unwrap_or("unknown");
 
@@ -469,7 +470,8 @@ impl SearchCommand {
 
                         // Check if output name matches (exact or contains)
                         if out_name == output_name || out_name.contains(output_name) {
-                            let file_name = path.file_name()
+                            let file_name = path
+                                .file_name()
                                 .and_then(|n| n.to_str())
                                 .unwrap_or("unknown");
 

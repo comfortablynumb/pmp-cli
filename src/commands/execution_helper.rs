@@ -1,8 +1,8 @@
 use crate::collection::{DependencyGraph, DependencyNode};
 use crate::executor::{Executor, ExecutorConfig, NoneExecutor, OpenTofuExecutor};
 use crate::hooks::{HookOutcome, HooksRunner};
-use crate::template::metadata::InfrastructureResource;
 use crate::template::DynamicProjectEnvironmentResource;
+use crate::template::metadata::InfrastructureResource;
 use anyhow::{Context, Result};
 use std::path::Path;
 use std::process::Command;
@@ -56,22 +56,24 @@ impl ExecutionHelper {
         if let Some(executor_config) = &infrastructure.spec.executor
             && let Some(helm_provider_config) = executor_config.config.get("helm_provider")
             && let Some(auto_update) = helm_provider_config.get("auto_repo_update")
-            && auto_update.as_bool().unwrap_or(false) {
-                ctx.output.dimmed("Running helm repo update (auto_repo_update enabled)...");
+            && auto_update.as_bool().unwrap_or(false)
+        {
+            ctx.output
+                .dimmed("Running helm repo update (auto_repo_update enabled)...");
 
-                let output = Command::new("helm")
-                    .arg("repo")
-                    .arg("update")
-                    .output()
-                    .context("Failed to execute helm repo update. Is helm installed?")?;
+            let output = Command::new("helm")
+                .arg("repo")
+                .arg("update")
+                .output()
+                .context("Failed to execute helm repo update. Is helm installed?")?;
 
-                if !output.status.success() {
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    anyhow::bail!("helm repo update failed: {}", stderr);
-                }
-
-                ctx.output.success("Helm repositories updated");
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                anyhow::bail!("helm repo update failed: {}", stderr);
             }
+
+            ctx.output.success("Helm repositories updated");
+        }
 
         Ok(())
     }
@@ -193,11 +195,19 @@ impl ExecutionHelper {
             let executor = Self::get_executor(&executor_config.name)?;
 
             // Build executor config
+            let mut command_options = std::collections::HashMap::new();
+            if let Some(config) = &executor_config.config {
+                for (cmd_name, cmd_config) in &config.commands {
+                    command_options.insert(cmd_name.clone(), cmd_config.options.clone());
+                }
+            }
+
             let execution_config = ExecutorConfig {
                 plan_command: None,
                 apply_command: None,
                 destroy_command: None,
                 refresh_command: None,
+                command_options,
             };
 
             // Execute the command on this node

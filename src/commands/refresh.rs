@@ -142,11 +142,19 @@ impl RefreshCommand {
         ctx.output.success("Initialization completed");
 
         // Build executor config
+        let mut command_options = std::collections::HashMap::new();
+        if let Some(config) = &executor_config.config {
+            for (cmd_name, cmd_config) in &config.commands {
+                command_options.insert(cmd_name.clone(), cmd_config.options.clone());
+            }
+        }
+
         let execution_config = ExecutorConfig {
             plan_command: None,
             apply_command: None,
             destroy_command: None,
             refresh_command: None,
+            command_options,
         };
 
         // Run refresh
@@ -161,7 +169,8 @@ impl RefreshCommand {
                 == HookOutcome::Cancel
             {
                 ctx.output.blank();
-                ctx.output.warning("Post-refresh hooks cancelled further execution");
+                ctx.output
+                    .warning("Post-refresh hooks cancelled further execution");
                 return Ok(());
             }
         }

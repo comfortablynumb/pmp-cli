@@ -2,7 +2,9 @@ use anyhow::{Context, Result};
 use inquire::{Confirm, Password, Text};
 use std::process::Command;
 
-use crate::template::metadata::{CommandHookConfig, ConfirmHookConfig, Hook, SetEnvironmentHookConfig};
+use crate::template::metadata::{
+    CommandHookConfig, ConfirmHookConfig, Hook, SetEnvironmentHookConfig,
+};
 
 /// Outcome of running hooks - determines if the command should continue
 #[derive(Debug, Clone, PartialEq)]
@@ -66,9 +68,8 @@ impl HooksRunner {
     ) -> Result<HookOutcome> {
         println!("  [{}] Executing: {}", index + 1, config.command);
 
-        let output = Self::execute_command(&config.command, working_dir).with_context(|| {
-            format!("Failed to execute {} hook: {}", hook_type, config.command)
-        })?;
+        let output = Self::execute_command(&config.command, working_dir)
+            .with_context(|| format!("Failed to execute {} hook: {}", hook_type, config.command))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -97,7 +98,7 @@ impl HooksRunner {
         index: usize,
     ) -> Result<HookOutcome> {
         println!("  [{}] Confirmation required", index + 1);
-        println!();  // Add blank line for better readability
+        println!(); // Add blank line for better readability
 
         // Prompt user with the question from config
         let confirmed = Confirm::new(&config.question)
@@ -110,7 +111,7 @@ impl HooksRunner {
                 )
             })?;
 
-        println!();  // Add blank line after confirmation
+        println!(); // Add blank line after confirmation
 
         if confirmed {
             // User confirmed
@@ -137,7 +138,11 @@ impl HooksRunner {
         hook_type: &str,
         index: usize,
     ) -> Result<HookOutcome> {
-        println!("  [{}] Setting environment variable: {}", index + 1, config.name);
+        println!(
+            "  [{}] Setting environment variable: {}",
+            index + 1,
+            config.name
+        );
 
         // Check if the environment variable already exists
         let current_value = std::env::var(&config.name).ok();
@@ -178,7 +183,10 @@ impl HooksRunner {
         }
 
         if config.sensitive {
-            println!("  Environment variable {} set (sensitive value hidden)", config.name);
+            println!(
+                "  Environment variable {} set (sensitive value hidden)",
+                config.name
+            );
         } else {
             println!("  Environment variable {} set to: {}", config.name, value);
         }
@@ -337,17 +345,17 @@ config:
 
         // Verify that all hook variants can be created
         match command_hook {
-            Hook::Command(_) => {},
+            Hook::Command(_) => {}
             _ => panic!("Expected Command variant"),
         }
 
         match confirm_hook {
-            Hook::Confirm(_) => {},
+            Hook::Confirm(_) => {}
             _ => panic!("Expected Confirm variant"),
         }
 
         match set_env_hook {
-            Hook::SetEnvironment(_) => {},
+            Hook::SetEnvironment(_) => {}
             _ => panic!("Expected SetEnvironment variant"),
         }
     }
@@ -467,7 +475,7 @@ config:
 
         // Verify each hook type
         match &hooks[0] {
-            Hook::Command(_) => {},
+            Hook::Command(_) => {}
             _ => panic!("Expected Command hook at index 0"),
         }
 

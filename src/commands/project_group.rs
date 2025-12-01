@@ -3,7 +3,9 @@
 use crate::collection::CollectionDiscovery;
 use crate::executor::{Executor, ExecutorConfig, OpenTofuExecutor};
 use crate::hooks::{HookOutcome, HooksRunner};
-use crate::template::metadata::{ProjectGroupProject, ProjectGroupReferenceProject, ProjectReference, TemplateReferenceProject};
+use crate::template::metadata::{
+    ProjectGroupProject, ProjectGroupReferenceProject, ProjectReference, TemplateReferenceProject,
+};
 use crate::template::{DynamicProjectEnvironmentResource, TemplateDiscovery};
 use anyhow::{Context, Result};
 use serde_json::Value;
@@ -32,17 +34,25 @@ impl ProjectGroupHandler {
         ctx.output.subsection("Processing Project Group Projects");
         ctx.output.dimmed(&format!(
             "Found {} project(s) to process...",
-            projects.len()
+            projects.projects().len()
         ));
 
-        for project_config in projects {
-            Self::process_single_project(ctx, project_config, environment_name, template_packs_paths)?;
+        for project_config in projects.projects() {
+            // Apply shared config to the project
+            let merged_config = projects.apply_shared_config(project_config);
+
+            Self::process_single_project(
+                ctx,
+                &merged_config,
+                environment_name,
+                template_packs_paths,
+            )?;
         }
 
         ctx.output.blank();
         ctx.output.success(&format!(
             "Processed {} project(s) from project group",
-            projects.len()
+            projects.projects().len()
         ));
 
         Ok(())
@@ -64,23 +74,32 @@ impl ProjectGroupHandler {
         }
 
         ctx.output.blank();
-        ctx.output.subsection(&format!(
-            "Executing {} on Project Group Projects",
-            command
-        ));
+        ctx.output
+            .subsection(&format!("Executing {} on Project Group Projects", command));
+
+        // Apply shared config and collect merged configs
+        let merged_projects: Vec<_> = projects
+            .projects()
+            .iter()
+            .map(|p| projects.apply_shared_config(p))
+            .collect();
 
         // For destroy, execute in reverse order
         let projects_to_execute: Vec<_> = if command == "destroy" {
-            projects.iter().rev().collect()
+            merged_projects.iter().rev().collect()
         } else {
-            projects.iter().collect()
+            merged_projects.iter().collect()
         };
 
         ctx.output.dimmed(&format!(
             "Executing {} on {} project(s){}...",
             command,
             projects_to_execute.len(),
-            if command == "destroy" { " (reverse order)" } else { "" }
+            if command == "destroy" {
+                " (reverse order)"
+            } else {
+                ""
+            }
         ));
 
         for (i, project_config) in projects_to_execute.iter().enumerate() {
@@ -121,14 +140,12 @@ impl ProjectGroupHandler {
         extra_args: &[String],
     ) -> Result<()> {
         // Find the project
-        let (_infrastructure, infrastructure_root) = CollectionDiscovery::find_collection(&*ctx.fs)?
-            .context("Infrastructure is required")?;
+        let (_infrastructure, infrastructure_root) =
+            CollectionDiscovery::find_collection(&*ctx.fs)?
+                .context("Infrastructure is required")?;
 
-        let existing_projects = CollectionDiscovery::discover_projects(
-            &*ctx.fs,
-            &*ctx.output,
-            &infrastructure_root,
-        )?;
+        let existing_projects =
+            CollectionDiscovery::discover_projects(&*ctx.fs, &*ctx.output, &infrastructure_root)?;
 
         let project_info = existing_projects
             .iter()
@@ -144,9 +161,7 @@ impl ProjectGroupHandler {
 
         // project_info.path is relative to infrastructure_root (e.g., "projects/vault")
         let project_path = infrastructure_root.join(&project_info.path);
-        let env_path = project_path
-            .join("environments")
-            .join(environment_name);
+        let env_path = project_path.join("environments").join(environment_name);
 
         if !ctx.fs.exists(&env_path) {
             ctx.output.warning(&format!(
@@ -177,13 +192,7 @@ impl ProjectGroupHandler {
         let executor = Self::get_executor(&executor_config.name)?;
 
         // Execute the command
-        Self::execute_with_executor(
-            ctx,
-            &env_path,
-            executor.as_ref(),
-            command,
-            extra_args,
-        )
+        Self::execute_with_executor(ctx, &env_path, executor.as_ref(), command, extra_args)
     }
 
     /// Execute a command using the executor
@@ -206,8 +215,9 @@ impl ProjectGroupHandler {
 
         // Load environment resource to get environment-level hooks
         let env_file = env_path.join(".pmp.environment.yaml");
-        let env_resource = crate::template::DynamicProjectEnvironmentResource::from_file(&*ctx.fs, &env_file)
-            .context("Failed to load environment resource")?;
+        let env_resource =
+            crate::template::DynamicProjectEnvironmentResource::from_file(&*ctx.fs, &env_file)
+                .context("Failed to load environment resource")?;
 
         // Merge infrastructure hooks with environment hooks
         let hooks = crate::commands::ExecutionHelper::merge_hooks(
@@ -227,13 +237,15 @@ impl ProjectGroupHandler {
             if HooksRunner::run_hooks(pre_hooks, env_dir_str, &format!("pre-{}", command))?
                 == HookOutcome::Cancel
             {
-                ctx.output.warning(&format!("{} cancelled by pre-{} hook", command, command));
+                ctx.output
+                    .warning(&format!("{} cancelled by pre-{} hook", command, command));
                 return Ok(());
             }
         }
 
         // Initialize executor
-        ctx.output.dimmed(&format!("Initializing {}...", executor.get_name()));
+        ctx.output
+            .dimmed(&format!("Initializing {}...", executor.get_name()));
         let init_output = executor.init(env_dir_str)?;
 
         if !init_output.status.success() {
@@ -254,25 +266,37 @@ impl ProjectGroupHandler {
         }
 
         // Build executor config
+        let executor_config = env_resource.get_executor_config();
+        let mut command_options = std::collections::HashMap::new();
+        if let Some(config) = &executor_config.config {
+            for (cmd_name, cmd_config) in &config.commands {
+                command_options.insert(cmd_name.clone(), cmd_config.options.clone());
+            }
+        }
+
         let execution_config = ExecutorConfig {
             plan_command: None,
             apply_command: None,
             destroy_command: None,
             refresh_command: None,
+            command_options,
         };
 
         // Execute the command
         match command {
             "preview" => {
-                ctx.output.dimmed(&format!("Executing {} plan...", executor.get_name()));
+                ctx.output
+                    .dimmed(&format!("Executing {} plan...", executor.get_name()));
                 executor.plan(&execution_config, env_dir_str, extra_args)?;
             }
             "apply" => {
-                ctx.output.dimmed(&format!("Executing {} apply...", executor.get_name()));
+                ctx.output
+                    .dimmed(&format!("Executing {} apply...", executor.get_name()));
                 executor.apply(&execution_config, env_dir_str, extra_args)?;
             }
             "destroy" => {
-                ctx.output.dimmed(&format!("Executing {} destroy...", executor.get_name()));
+                ctx.output
+                    .dimmed(&format!("Executing {} destroy...", executor.get_name()));
                 executor.destroy(&execution_config, env_dir_str, extra_args)?;
             }
             _ => return Err(anyhow::anyhow!("Unknown command: {}", command)),
@@ -290,7 +314,10 @@ impl ProjectGroupHandler {
             if HooksRunner::run_hooks(post_hooks, env_dir_str, &format!("post-{}", command))?
                 == HookOutcome::Cancel
             {
-                ctx.output.warning(&format!("Post-{} hooks cancelled further execution", command));
+                ctx.output.warning(&format!(
+                    "Post-{} hooks cancelled further execution",
+                    command
+                ));
                 return Ok(());
             }
         }
@@ -321,14 +348,12 @@ impl ProjectGroupHandler {
         ));
 
         // Check if project already exists
-        let (_infrastructure, infrastructure_root) = CollectionDiscovery::find_collection(&*ctx.fs)?
-            .context("Infrastructure is required")?;
+        let (_infrastructure, infrastructure_root) =
+            CollectionDiscovery::find_collection(&*ctx.fs)?
+                .context("Infrastructure is required")?;
 
-        let existing_projects = CollectionDiscovery::discover_projects(
-            &*ctx.fs,
-            &*ctx.output,
-            &infrastructure_root,
-        )?;
+        let existing_projects =
+            CollectionDiscovery::discover_projects(&*ctx.fs, &*ctx.output, &infrastructure_root)?;
 
         let project_exists = existing_projects
             .iter()
@@ -343,11 +368,7 @@ impl ProjectGroupHandler {
         )?;
 
         // Build inputs for the project
-        let inputs = Self::build_project_inputs(
-            ctx,
-            project_config,
-            template_packs_paths,
-        )?;
+        let inputs = Self::build_project_inputs(ctx, project_config, template_packs_paths)?;
 
         // Convert inputs to JSON string for passing to create/update command
         let inputs_json = if !inputs.is_empty() {
@@ -385,9 +406,7 @@ impl ProjectGroupHandler {
 
             // project_info.path is relative to infrastructure_root (e.g., "projects/vault")
             let project_path = infrastructure_root.join(&project_info.path);
-            let env_path = project_path
-                .join("environments")
-                .join(environment_name);
+            let env_path = project_path.join("environments").join(environment_name);
 
             if ctx.fs.exists(&env_path) {
                 // Update reference projects in environment file if configured
@@ -430,10 +449,8 @@ impl ProjectGroupHandler {
             )?;
         }
 
-        ctx.output.success(&format!(
-            "  Processed project: {}",
-            project_config.name
-        ));
+        ctx.output
+            .success(&format!("  Processed project: {}", project_config.name));
 
         Ok(())
     }
@@ -469,9 +486,7 @@ impl ProjectGroupHandler {
                 .as_deref()
                 .unwrap_or(default_environment);
 
-            let env_path = project_path
-                .join("environments")
-                .join(ref_env_name);
+            let env_path = project_path.join("environments").join(ref_env_name);
 
             let env_file = env_path.join(".pmp.environment.yaml");
 
@@ -491,13 +506,34 @@ impl ProjectGroupHandler {
                 ))?;
 
             // Get data_source_name from the template's dependency configuration
-            // Match by api_version and kind to find the corresponding dependency
-            let data_source_name = template_dependencies
-                .iter()
-                .find(|dep| {
-                    dep.project.api_version == ref_resource.api_version
-                        && dep.project.kind == ref_resource.kind
-                })
+            // First try to match by dependency_name if specified, otherwise match by api_version and kind
+            let matched_dependency = if let Some(dep_name) = &ref_config.dependency_name {
+                // Match by dependency_name
+                template_dependencies
+                    .iter()
+                    .find(|dep| {
+                        dep.dependency_name.as_ref() == Some(dep_name)
+                    })
+            } else {
+                // Match by api_version and kind (legacy behavior)
+                template_dependencies
+                    .iter()
+                    .find(|dep| {
+                        dep.project.api_version == ref_resource.api_version
+                            && dep.project.kind == ref_resource.kind
+                    })
+            };
+
+            // Validate that if dependency_name was specified, we found a matching dependency
+            if ref_config.dependency_name.is_some() && matched_dependency.is_none() {
+                anyhow::bail!(
+                    "Dependency with name '{}' not found in template dependencies for reference project '{}'",
+                    ref_config.dependency_name.as_ref().unwrap(),
+                    ref_config.name
+                );
+            }
+
+            let data_source_name = matched_dependency
                 .and_then(|dep| {
                     dep.project
                         .remote_state
@@ -544,7 +580,8 @@ impl ProjectGroupHandler {
         let yaml_content = serde_yaml::to_string(&env_resource)
             .context("Failed to serialize environment resource")?;
 
-        ctx.fs.write(&env_file, &yaml_content)
+        ctx.fs
+            .write(&env_file, &yaml_content)
             .context("Failed to write environment file")?;
 
         ctx.output.dimmed(&format!(
@@ -590,26 +627,17 @@ impl ProjectGroupHandler {
         )?;
 
         // Find the template pack and template
-        let template_pack = all_template_packs
-            .iter()
-            .find(|pack| {
-                pack.resource
-                    .metadata
-                    .name
-                    .to_lowercase()
-                    .replace(' ', "-")
+        let template_pack = all_template_packs.iter().find(|pack| {
+            pack.resource.metadata.name.to_lowercase().replace(' ', "-")
+                == project_config.template_pack.to_lowercase()
+                || pack.resource.metadata.name.to_lowercase()
                     == project_config.template_pack.to_lowercase()
-                    || pack.resource.metadata.name.to_lowercase()
-                        == project_config.template_pack.to_lowercase()
-            });
+        });
 
         if let Some(pack) = template_pack {
             // Discover templates in the pack
-            let templates = TemplateDiscovery::discover_templates_in_pack(
-                &*ctx.fs,
-                &*ctx.output,
-                &pack.path,
-            )?;
+            let templates =
+                TemplateDiscovery::discover_templates_in_pack(&*ctx.fs, &*ctx.output, &pack.path)?;
 
             let template = templates.iter().find(|t| {
                 t.resource.metadata.name.to_lowercase() == project_config.template.to_lowercase()
@@ -668,30 +696,20 @@ impl ProjectGroupHandler {
         )?;
 
         // Find the template pack
-        let template_pack = all_template_packs
-            .iter()
-            .find(|pack| {
-                pack.resource
-                    .metadata
-                    .name
-                    .to_lowercase()
-                    .replace(' ', "-")
-                    == template_pack_name.to_lowercase()
-                    || pack.resource.metadata.name.to_lowercase()
-                        == template_pack_name.to_lowercase()
-            });
+        let template_pack = all_template_packs.iter().find(|pack| {
+            pack.resource.metadata.name.to_lowercase().replace(' ', "-")
+                == template_pack_name.to_lowercase()
+                || pack.resource.metadata.name.to_lowercase() == template_pack_name.to_lowercase()
+        });
 
         if let Some(pack) = template_pack {
             // Discover templates in the pack
-            let templates = TemplateDiscovery::discover_templates_in_pack(
-                &*ctx.fs,
-                &*ctx.output,
-                &pack.path,
-            )?;
+            let templates =
+                TemplateDiscovery::discover_templates_in_pack(&*ctx.fs, &*ctx.output, &pack.path)?;
 
-            let template = templates.iter().find(|t| {
-                t.resource.metadata.name.to_lowercase() == template_name.to_lowercase()
-            });
+            let template = templates
+                .iter()
+                .find(|t| t.resource.metadata.name.to_lowercase() == template_name.to_lowercase());
 
             if let Some(tmpl) = template {
                 return Ok(tmpl.resource.spec.dependencies.clone());
@@ -722,6 +740,7 @@ impl ProjectGroupHandler {
             project_config.use_all_defaults,
             reference_projects,
             template_packs_paths,
+            project_config.executor.as_ref(),
         )
     }
 }

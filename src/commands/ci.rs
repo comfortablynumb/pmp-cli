@@ -56,8 +56,14 @@ impl CiCommand {
             .key_value("Infrastructure", &infrastructure.metadata.name);
         ctx.output
             .key_value("Pipeline Type", &format!("{:?}", pipeline));
-        ctx.output
-            .key_value("Mode", if static_mode { "Static (all projects)" } else { "Dynamic (changed projects)" });
+        ctx.output.key_value(
+            "Mode",
+            if static_mode {
+                "Static (all projects)"
+            } else {
+                "Dynamic (changed projects)"
+            },
+        );
         output::blank();
 
         // Discover all projects
@@ -80,8 +86,12 @@ impl CiCommand {
                 PipelineType::GitHubActions => {
                     Self::generate_github_actions_static(&project_infos, environment)?
                 }
-                PipelineType::GitLabCI => Self::generate_gitlab_ci_static(&project_infos, environment)?,
-                PipelineType::Jenkins => Self::generate_jenkins_static(&project_infos, environment)?,
+                PipelineType::GitLabCI => {
+                    Self::generate_gitlab_ci_static(&project_infos, environment)?
+                }
+                PipelineType::Jenkins => {
+                    Self::generate_jenkins_static(&project_infos, environment)?
+                }
             }
         } else {
             // Dynamic mode: Generate pipeline with change detection
@@ -89,10 +99,14 @@ impl CiCommand {
                 PipelineType::GitHubActions => {
                     Self::generate_github_actions_dynamic(&project_infos, environment)?
                 }
-                PipelineType::GitLabCI => Self::generate_gitlab_ci_dynamic(&project_infos, environment)?,
+                PipelineType::GitLabCI => {
+                    Self::generate_gitlab_ci_dynamic(&project_infos, environment)?
+                }
                 PipelineType::Jenkins => {
                     // Jenkins doesn't support dynamic mode yet, fall back to static
-                    ctx.output.warning("Jenkins does not support dynamic mode yet. Generating static pipeline.");
+                    ctx.output.warning(
+                        "Jenkins does not support dynamic mode yet. Generating static pipeline.",
+                    );
                     Self::generate_jenkins_static(&project_infos, environment)?
                 }
             }
@@ -296,7 +310,9 @@ impl CiCommand {
         yaml.push_str("        run: |\n");
         yaml.push_str("          # Determine base ref based on event type\n");
         yaml.push_str("          if [ \"${{ github.event_name }}\" = \"pull_request\" ]; then\n");
-        yaml.push_str("            BASE_REF=\"origin/${{ github.event.pull_request.base.ref }}\"\n");
+        yaml.push_str(
+            "            BASE_REF=\"origin/${{ github.event.pull_request.base.ref }}\"\n",
+        );
         yaml.push_str("          else\n");
         yaml.push_str("            BASE_REF=\"origin/main\"\n");
         yaml.push_str("          fi\n");
@@ -308,7 +324,9 @@ impl CiCommand {
         yaml.push_str("          \n");
         yaml.push_str("          # Check exit code\n");
         yaml.push_str("          if [ \"${EXIT_CODE:-0}\" -eq 2 ]; then\n");
-        yaml.push_str("            echo \"Infrastructure configuration changed - skipping project CI\"\n");
+        yaml.push_str(
+            "            echo \"Infrastructure configuration changed - skipping project CI\"\n",
+        );
         yaml.push_str("            echo \"has_changes=false\" >> $GITHUB_OUTPUT\n");
         yaml.push_str("            echo \"projects=[]\" >> $GITHUB_OUTPUT\n");
         yaml.push_str("            exit 0\n");
@@ -382,7 +400,10 @@ impl CiCommand {
     }
 
     /// Generate static GitLab CI configuration (runs all projects)
-    fn generate_gitlab_ci_static(projects: &[ProjectInfo], _environment: Option<&str>) -> Result<String> {
+    fn generate_gitlab_ci_static(
+        projects: &[ProjectInfo],
+        _environment: Option<&str>,
+    ) -> Result<String> {
         let mut yaml = String::new();
 
         yaml.push_str("# GitLab CI/CD Pipeline for PMP Infrastructure\n\n");
@@ -423,7 +444,9 @@ impl CiCommand {
                 ));
                 yaml.push_str("    - |\n");
                 yaml.push_str("      # Run preview on MR, apply on main branch\n");
-                yaml.push_str("      if [ \"$CI_PIPELINE_SOURCE\" == \"merge_request_event\" ]; then\n");
+                yaml.push_str(
+                    "      if [ \"$CI_PIPELINE_SOURCE\" == \"merge_request_event\" ]; then\n",
+                );
                 yaml.push_str("        pmp project preview\n");
                 yaml.push_str("      elif [ \"$CI_COMMIT_BRANCH\" == \"main\" ]; then\n");
                 yaml.push_str("        pmp project apply\n");
@@ -444,7 +467,9 @@ impl CiCommand {
     ) -> Result<String> {
         let mut yaml = String::new();
 
-        yaml.push_str("# GitLab CI/CD Pipeline for PMP Infrastructure (Dynamic - Change Detection)\n\n");
+        yaml.push_str(
+            "# GitLab CI/CD Pipeline for PMP Infrastructure (Dynamic - Change Detection)\n\n",
+        );
 
         yaml.push_str("stages:\n");
         yaml.push_str("  - detect\n");
@@ -539,7 +564,9 @@ impl CiCommand {
         yaml.push_str("        cd -\n");
         yaml.push_str("      done\n\n");
 
-        yaml.push_str("# NOTE: This implementation uses jq to parse the JSON array of changed projects\n");
+        yaml.push_str(
+            "# NOTE: This implementation uses jq to parse the JSON array of changed projects\n",
+        );
         yaml.push_str("# and runs pmp project preview/apply for each project in sequence.\n");
         yaml.push_str("# For parallel execution, consider using GitLab dynamic child pipelines.\n");
 
@@ -547,7 +574,10 @@ impl CiCommand {
     }
 
     /// Generate static Jenkins pipeline (runs all projects)
-    fn generate_jenkins_static(projects: &[ProjectInfo], _environment: Option<&str>) -> Result<String> {
+    fn generate_jenkins_static(
+        projects: &[ProjectInfo],
+        _environment: Option<&str>,
+    ) -> Result<String> {
         let mut groovy = String::new();
 
         groovy.push_str("// Jenkinsfile for PMP Infrastructure\n\n");
@@ -579,11 +609,15 @@ impl CiCommand {
                     proj.path.display().to_string().replace('\\', "/")
                 ));
                 groovy.push_str("                            script {\n");
-                groovy.push_str("                                // Run preview on PR, apply on main branch\n");
+                groovy.push_str(
+                    "                                // Run preview on PR, apply on main branch\n",
+                );
                 groovy.push_str("                                if (env.CHANGE_ID) {\n");
                 groovy.push_str("                                    // Pull request\n");
                 groovy.push_str("                                    sh 'pmp project preview'\n");
-                groovy.push_str("                                } else if (env.BRANCH_NAME == 'main') {\n");
+                groovy.push_str(
+                    "                                } else if (env.BRANCH_NAME == 'main') {\n",
+                );
                 groovy.push_str("                                    // Main branch\n");
                 groovy.push_str("                                    sh 'pmp project apply'\n");
                 groovy.push_str("                                }\n");

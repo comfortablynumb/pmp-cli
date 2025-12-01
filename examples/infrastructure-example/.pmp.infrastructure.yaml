@@ -69,7 +69,7 @@ spec:
       description: This category contains specific examples of several use cases
       templates:
         - template_pack: examples
-          template: basic-infrastructure
+          template: minikube-basic-infrastructure
   template_packs:
     postgres:
       templates:

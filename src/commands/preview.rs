@@ -103,9 +103,9 @@ impl PreviewCommand {
             ctx.output.subsection("Project Group Projects");
             ctx.output.dimmed(&format!(
                 "This project group has {} configured project(s):",
-                resource.spec.projects.len()
+                resource.spec.projects.projects().len()
             ));
-            for project in &resource.spec.projects {
+            for project in resource.spec.projects.projects() {
                 ctx.output.dimmed(&format!(
                     "  - {} (template: {}/{})",
                     project.name, project.template_pack, project.template
@@ -114,11 +114,7 @@ impl PreviewCommand {
 
             // Execute preview on all configured projects
             ProjectGroupHandler::execute_command_on_projects(
-                ctx,
-                &resource,
-                &env_name,
-                "preview",
-                extra_args,
+                ctx, &resource, &env_name, "preview", extra_args,
             )?;
 
             // Run post-preview hooks
@@ -127,7 +123,8 @@ impl PreviewCommand {
                     == HookOutcome::Cancel
                 {
                     ctx.output.blank();
-                    ctx.output.warning("Post-preview hooks cancelled further execution");
+                    ctx.output
+                        .warning("Post-preview hooks cancelled further execution");
                     return Ok(());
                 }
             }
@@ -244,11 +241,19 @@ impl PreviewCommand {
         ctx.output.success("Initialization completed");
 
         // Build executor config
+        let mut command_options = std::collections::HashMap::new();
+        if let Some(config) = &executor_config.config {
+            for (cmd_name, cmd_config) in &config.commands {
+                command_options.insert(cmd_name.clone(), cmd_config.options.clone());
+            }
+        }
+
         let execution_config = ExecutorConfig {
             plan_command: None,
             apply_command: None,
             destroy_command: None,
             refresh_command: None,
+            command_options,
         };
 
         // Run plan
@@ -263,7 +268,8 @@ impl PreviewCommand {
                 == HookOutcome::Cancel
             {
                 ctx.output.blank();
-                ctx.output.warning("Post-preview hooks cancelled further execution");
+                ctx.output
+                    .warning("Post-preview hooks cancelled further execution");
                 return Ok(());
             }
         }

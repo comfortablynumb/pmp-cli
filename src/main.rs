@@ -11,26 +11,24 @@ mod traits;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use commands::{
-    ApplyCommand, CiCommand, CiDetectChangesCommand, CloneCommand,
-    CreateCommand, DepsCommand, DestroyCommand,
-    DriftCommand, EnvCommand, FindCommand, GenerateCommand, GraphCommand, InfrastructureCommand,
-    PolicyCommand, PreviewCommand, RefreshCommand,
-    SearchCommand, StateCommand, TemplateCommand,
-    UiCommand, UpdateCommand,
+    ApplyCommand, CiCommand, CiDetectChangesCommand, CloneCommand, CreateCommand, DepsCommand,
+    DestroyCommand, DriftCommand, EnvCommand, FindCommand, GenerateCommand, GraphCommand,
+    InfrastructureCommand, PolicyCommand, PreviewCommand, RefreshCommand, SearchCommand,
+    StateCommand, TemplateCommand, UiCommand, UpdateCommand,
 };
 
 #[derive(Parser)]
 #[command(name = "pmp")]
 #[command(about = "Poor Man's Platform - A CLI for managing Infrastructure as Code projects", long_about = None)]
 #[command(version)]
-#[command(next_display_order = None)]  // Sort subcommands alphabetically
+#[command(next_display_order = None)] // Sort subcommands alphabetically
 struct Cli {
     #[command(subcommand)]
     command: Commands,
 }
 
 #[derive(Subcommand)]
-#[command(next_display_order = None)]  // Sort subcommands alphabetically
+#[command(next_display_order = None)] // Sort subcommands alphabetically
 enum InfrastructureSubcommands {
     /// Initialize a new infrastructure from template
     #[command(
@@ -48,11 +46,11 @@ enum InfrastructureSubcommands {
 }
 
 #[derive(Subcommand)]
-#[command(next_display_order = None)]  // Sort subcommands alphabetically
+#[command(next_display_order = None)] // Sort subcommands alphabetically
 enum ProjectSubcommands {
     /// Create a new project
     #[command(
-        long_about = "Create a new project from a template\n\nExamples:\n  pmp project create\n  pmp project create --output ./my-project\n  pmp project create --template-packs-paths /custom/packs\n  pmp project create --inputs '{\"replicas\": 3, \"namespace\": \"prod\"}'"
+        long_about = "Create a new project from a template\n\nExamples:\n  pmp project create\n  pmp project create --output ./my-project\n  pmp project create --template-packs-paths /custom/packs\n  pmp project create --inputs '{\"replicas\": 3, \"namespace\": \"prod\"}'\n  pmp project create --template my-pack/my-template\n  pmp project create --template my-pack/my-template --apply\n  pmp project create --name my-api --environment dev\n  pmp project create --template my-pack/my-template --name my-api --environment dev --apply"
     )]
     Create {
         /// Output directory for the project (optional)
@@ -66,6 +64,22 @@ enum ProjectSubcommands {
         /// Pre-defined input values as JSON or YAML string (skips prompting for these inputs)
         #[arg(long)]
         inputs: Option<String>,
+
+        /// Template to use in format: template-pack-name/template-name
+        #[arg(short, long)]
+        template: Option<String>,
+
+        /// Automatically run apply after creating the project
+        #[arg(long)]
+        apply: bool,
+
+        /// Project name
+        #[arg(short, long)]
+        name: Option<String>,
+
+        /// Environment name
+        #[arg(short, long)]
+        environment: Option<String>,
     },
 
     /// Find projects in an Infrastructure
@@ -245,7 +259,7 @@ enum ProjectSubcommands {
 }
 
 #[derive(Subcommand)]
-#[command(next_display_order = None)]  // Sort commands alphabetically
+#[command(next_display_order = None)] // Sort commands alphabetically
 enum Commands {
     /// Infrastructure management commands
     #[command(
@@ -330,7 +344,7 @@ enum Commands {
 }
 
 #[derive(Subcommand)]
-#[command(next_display_order = None)]  // Sort subcommands alphabetically
+#[command(next_display_order = None)] // Sort subcommands alphabetically
 enum DepsSubcommands {
     /// Analyze dependencies across all projects
     #[command(
@@ -370,7 +384,7 @@ enum DepsSubcommands {
 }
 
 #[derive(Subcommand)]
-#[command(next_display_order = None)]  // Sort subcommands alphabetically
+#[command(next_display_order = None)] // Sort subcommands alphabetically
 enum StateSubcommands {
     /// List state across all projects
     #[command(
@@ -467,7 +481,7 @@ enum StateSubcommands {
 }
 
 #[derive(Subcommand)]
-#[command(next_display_order = None)]  // Sort subcommands alphabetically
+#[command(next_display_order = None)] // Sort subcommands alphabetically
 enum DriftSubcommands {
     /// Detect drift in infrastructure
     #[command(
@@ -517,7 +531,7 @@ enum DriftSubcommands {
 }
 
 #[derive(Subcommand)]
-#[command(next_display_order = None)]  // Sort subcommands alphabetically
+#[command(next_display_order = None)] // Sort subcommands alphabetically
 enum PolicySubcommands {
     /// Validate against organizational policies
     #[command(
@@ -549,7 +563,7 @@ enum PolicySubcommands {
 }
 
 #[derive(Subcommand)]
-#[command(next_display_order = None)]  // Sort subcommands alphabetically
+#[command(next_display_order = None)] // Sort subcommands alphabetically
 enum CiSubcommands {
     /// Generate CI/CD pipeline configuration
     #[command(
@@ -596,7 +610,7 @@ enum CiSubcommands {
 }
 
 #[derive(Subcommand)]
-#[command(next_display_order = None)]  // Sort subcommands alphabetically
+#[command(next_display_order = None)] // Sort subcommands alphabetically
 enum TemplateSubcommands {
     /// Scaffold a new template pack interactively
     #[command(
@@ -610,7 +624,7 @@ enum TemplateSubcommands {
 }
 
 #[derive(Subcommand)]
-#[command(next_display_order = None)]  // Sort subcommands alphabetically
+#[command(next_display_order = None)] // Sort subcommands alphabetically
 enum EnvSubcommands {
     /// Compare two environments
     #[command(
@@ -666,7 +680,7 @@ enum EnvSubcommands {
 }
 
 #[derive(Subcommand)]
-#[command(next_display_order = None)]  // Sort subcommands alphabetically
+#[command(next_display_order = None)] // Sort subcommands alphabetically
 #[allow(clippy::enum_variant_names)]
 enum SearchSubcommands {
     /// Search by tags
@@ -744,12 +758,20 @@ fn main() -> Result<()> {
                 output,
                 template_packs_paths,
                 inputs,
+                template,
+                apply,
+                name,
+                environment,
             } => {
                 CreateCommand::execute(
                     &ctx,
                     output.as_deref(),
                     template_packs_paths.as_deref(),
                     inputs.as_deref(),
+                    template.as_deref(),
+                    apply,
+                    name.as_deref(),
+                    environment.as_deref(),
                 )?;
             }
             ProjectSubcommands::Find { name, kind } => {

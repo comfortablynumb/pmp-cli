@@ -172,5 +172,4 @@ mod tests {
         assert_eq!(executor.default_destroy_command(), "");
         assert_eq!(executor.default_refresh_command(), "");
     }
-
 }

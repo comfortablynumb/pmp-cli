@@ -1,13 +1,19 @@
 use crate::context::Context;
 use crate::output;
-use crate::template::metadata::{Category, CategoryTemplate, Environment, ExecutorCollectionConfig, InfrastructureMetadata, InfrastructureResource, InfrastructureSpec, TemplatePackConfig};
+use crate::template::metadata::{
+    Category, CategoryTemplate, Environment, ExecutorCollectionConfig, InfrastructureMetadata,
+    InfrastructureResource, InfrastructureSpec, TemplatePackConfig,
+};
 use crate::template::{InfrastructureTemplateInfo, TemplateDiscovery, TemplatePackInfo};
 use anyhow::{Context as _, Result};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
 // Type alias for template selection result
-type TemplateSelectionResult = (Vec<String>, HashMap<String, (String, String, String, String)>);
+type TemplateSelectionResult = (
+    Vec<String>,
+    HashMap<String, (String, String, String, String)>,
+);
 
 pub struct InfrastructureCommand;
 
@@ -68,10 +74,15 @@ impl InfrastructureCommand {
         }
 
         if all_infra_templates.is_empty() {
-            anyhow::bail!("No infrastructure templates found. Please install a template pack with infrastructure templates.");
+            anyhow::bail!(
+                "No infrastructure templates found. Please install a template pack with infrastructure templates."
+            );
         }
 
-        output::success(&format!("Found {} infrastructure template(s)", all_infra_templates.len()));
+        output::success(&format!(
+            "Found {} infrastructure template(s)",
+            all_infra_templates.len()
+        ));
         output::blank();
 
         // Step 4: Select infrastructure template
@@ -96,7 +107,10 @@ impl InfrastructureCommand {
                 .select("Select infrastructure template:", template_options.clone())?;
 
             // Find the index
-            let selected_idx = template_options.iter().position(|o| o == &selected_option).unwrap();
+            let selected_idx = template_options
+                .iter()
+                .position(|o| o == &selected_option)
+                .unwrap();
 
             &all_infra_templates[selected_idx].1
         };
@@ -144,7 +158,8 @@ impl InfrastructureCommand {
         output::dimmed("Select which project templates will be available in this infrastructure.");
         output::blank();
 
-        let (selected_templates, template_map) = Self::select_allowed_templates(ctx, &template_packs)?;
+        let (selected_templates, template_map) =
+            Self::select_allowed_templates(ctx, &template_packs)?;
         output::blank();
 
         // Step 9: Configure categories (optional)
@@ -156,7 +171,8 @@ impl InfrastructureCommand {
         let (categories, template_packs_config) = if configure_categories {
             output::subsection("Configure Categories");
             let mut available_templates = selected_templates.clone();
-            let categories = Self::collect_categories(ctx, &mut available_templates, &template_map)?;
+            let categories =
+                Self::collect_categories(ctx, &mut available_templates, &template_map)?;
 
             // Build template_packs_config from categories
             let template_packs_config = Self::build_template_packs_config(&categories);
@@ -164,10 +180,7 @@ impl InfrastructureCommand {
             (categories, template_packs_config)
         } else {
             // Use simple auto-generated categories
-            Self::build_categories_from_selections(
-                &selected_templates,
-                &template_map,
-            )
+            Self::build_categories_from_selections(&selected_templates, &template_map)
         };
 
         // Step 10: Configure executor backend (optional)
@@ -232,8 +245,14 @@ impl InfrastructureCommand {
         output::section("Infrastructure Created Successfully");
         output::key_value("Name", &collection_name);
         output::key_value("Location", &format!("{:?}", infrastructure_file));
-        output::key_value("Environments", &format!("{}", infrastructure.spec.environments.len()));
-        output::key_value("Categories", &format!("{}", infrastructure.spec.categories.len()));
+        output::key_value(
+            "Environments",
+            &format!("{}", infrastructure.spec.environments.len()),
+        );
+        output::key_value(
+            "Categories",
+            &format!("{}", infrastructure.spec.categories.len()),
+        );
         output::blank();
 
         // Step 15: Ask if user wants to generate CI job files
@@ -253,9 +272,7 @@ impl InfrastructureCommand {
                 "jenkins".to_string(),
             ];
 
-            let ci_provider = ctx
-                .input
-                .select("Select CI provider:", ci_providers)?;
+            let ci_provider = ctx.input.select("Select CI provider:", ci_providers)?;
 
             output::blank();
             output::info(&format!("Generating {} pipeline...", ci_provider));
@@ -375,11 +392,8 @@ impl InfrastructureCommand {
         // Discover all templates across all packs
         let mut all_templates: Vec<(String, crate::template::TemplateInfo)> = Vec::new();
         for pack in template_packs {
-            let templates = TemplateDiscovery::discover_templates_in_pack(
-                &*ctx.fs,
-                &*ctx.output,
-                &pack.path,
-            )?;
+            let templates =
+                TemplateDiscovery::discover_templates_in_pack(&*ctx.fs, &*ctx.output, &pack.path)?;
 
             for template in templates {
                 all_templates.push((pack.resource.metadata.name.clone(), template));
@@ -428,7 +442,10 @@ impl InfrastructureCommand {
             break templates;
         };
 
-        output::success(&format!("Selected {} template(s)", selected_templates.len()));
+        output::success(&format!(
+            "Selected {} template(s)",
+            selected_templates.len()
+        ));
 
         Ok((selected_templates, template_map))
     }
@@ -540,9 +557,10 @@ impl InfrastructureCommand {
             }
 
             // Ask if they want to add another category at this level
-            let add_another = ctx
-                .input
-                .confirm(&format!("{}Add another category at this level?", indent), false)?;
+            let add_another = ctx.input.confirm(
+                &format!("{}Add another category at this level?", indent),
+                false,
+            )?;
 
             if !add_another {
                 break;
@@ -578,33 +596,50 @@ impl InfrastructureCommand {
         match backend_type.as_str() {
             "s3" => {
                 let bucket = ctx.input.text("S3 bucket name:", None)?;
-                let key = ctx.input.text("State file key:", Some("terraform.tfstate"))?;
+                let key = ctx
+                    .input
+                    .text("State file key:", Some("terraform.tfstate"))?;
                 let region = ctx.input.text("AWS region:", Some("us-east-1"))?;
                 let encrypt = ctx.input.confirm("Enable encryption?", true)?;
-                let dynamodb_table = ctx.input.text("DynamoDB table for locking (optional):", None)?;
+                let dynamodb_table = ctx
+                    .input
+                    .text("DynamoDB table for locking (optional):", None)?;
 
                 backend_config.insert("bucket".to_string(), serde_json::json!(bucket));
                 backend_config.insert("key".to_string(), serde_json::json!(key));
                 backend_config.insert("region".to_string(), serde_json::json!(region));
                 backend_config.insert("encrypt".to_string(), serde_json::json!(encrypt));
                 if !dynamodb_table.is_empty() {
-                    backend_config.insert("dynamodb_table".to_string(), serde_json::json!(dynamodb_table));
+                    backend_config.insert(
+                        "dynamodb_table".to_string(),
+                        serde_json::json!(dynamodb_table),
+                    );
                 }
             }
             "azurerm" => {
                 let storage_account = ctx.input.text("Storage account name:", None)?;
                 let container = ctx.input.text("Container name:", Some("tfstate"))?;
-                let key = ctx.input.text("State file key:", Some("terraform.tfstate"))?;
+                let key = ctx
+                    .input
+                    .text("State file key:", Some("terraform.tfstate"))?;
                 let resource_group = ctx.input.text("Resource group name:", None)?;
 
-                backend_config.insert("storage_account_name".to_string(), serde_json::json!(storage_account));
+                backend_config.insert(
+                    "storage_account_name".to_string(),
+                    serde_json::json!(storage_account),
+                );
                 backend_config.insert("container_name".to_string(), serde_json::json!(container));
                 backend_config.insert("key".to_string(), serde_json::json!(key));
-                backend_config.insert("resource_group_name".to_string(), serde_json::json!(resource_group));
+                backend_config.insert(
+                    "resource_group_name".to_string(),
+                    serde_json::json!(resource_group),
+                );
             }
             "gcs" => {
                 let bucket = ctx.input.text("GCS bucket name:", None)?;
-                let prefix = ctx.input.text("State file prefix:", Some("terraform/state"))?;
+                let prefix = ctx
+                    .input
+                    .text("State file prefix:", Some("terraform/state"))?;
 
                 backend_config.insert("bucket".to_string(), serde_json::json!(bucket));
                 backend_config.insert("prefix".to_string(), serde_json::json!(prefix));
@@ -613,12 +648,17 @@ impl InfrastructureCommand {
                 let secret_suffix = ctx.input.text("Secret suffix:", Some("state"))?;
                 let namespace = ctx.input.text("Namespace:", Some("default"))?;
 
-                backend_config.insert("secret_suffix".to_string(), serde_json::json!(secret_suffix));
+                backend_config.insert(
+                    "secret_suffix".to_string(),
+                    serde_json::json!(secret_suffix),
+                );
                 backend_config.insert("namespace".to_string(), serde_json::json!(namespace));
             }
             "pg" => {
                 let conn_str = ctx.input.text("PostgreSQL connection string:", None)?;
-                let schema_name = ctx.input.text("Schema name:", Some("terraform_remote_state"))?;
+                let schema_name = ctx
+                    .input
+                    .text("Schema name:", Some("terraform_remote_state"))?;
 
                 backend_config.insert("conn_str".to_string(), serde_json::json!(conn_str));
                 backend_config.insert("schema_name".to_string(), serde_json::json!(schema_name));
@@ -633,18 +673,26 @@ impl InfrastructureCommand {
             "http" => {
                 let address = ctx.input.text("HTTP endpoint address:", None)?;
                 let lock_address = ctx.input.text("Lock endpoint address (optional):", None)?;
-                let unlock_address = ctx.input.text("Unlock endpoint address (optional):", None)?;
+                let unlock_address = ctx
+                    .input
+                    .text("Unlock endpoint address (optional):", None)?;
 
                 backend_config.insert("address".to_string(), serde_json::json!(address));
                 if !lock_address.is_empty() {
-                    backend_config.insert("lock_address".to_string(), serde_json::json!(lock_address));
+                    backend_config
+                        .insert("lock_address".to_string(), serde_json::json!(lock_address));
                 }
                 if !unlock_address.is_empty() {
-                    backend_config.insert("unlock_address".to_string(), serde_json::json!(unlock_address));
+                    backend_config.insert(
+                        "unlock_address".to_string(),
+                        serde_json::json!(unlock_address),
+                    );
                 }
             }
             "local" => {
-                let path = ctx.input.text("Local state file path:", Some("terraform.tfstate"))?;
+                let path = ctx
+                    .input
+                    .text("Local state file path:", Some("terraform.tfstate"))?;
                 backend_config.insert("path".to_string(), serde_json::json!(path));
             }
             _ => {}
@@ -659,7 +707,10 @@ impl InfrastructureCommand {
 
         // Build final config HashMap
         let mut config_map: HashMap<String, serde_json::Value> = HashMap::new();
-        config_map.insert("backend".to_string(), serde_json::Value::Object(backend_json));
+        config_map.insert(
+            "backend".to_string(),
+            serde_json::Value::Object(backend_json),
+        );
 
         Ok(ExecutorCollectionConfig {
             name: "opentofu".to_string(),
@@ -719,7 +770,9 @@ impl InfrastructureCommand {
             config: &mut HashMap<String, TemplatePackConfig>,
         ) {
             for template_ref in &category.templates {
-                let pack_config = config.entry(template_ref.template_pack.clone()).or_default();
+                let pack_config = config
+                    .entry(template_ref.template_pack.clone())
+                    .or_default();
                 pack_config
                     .templates
                     .entry(template_ref.template.clone())

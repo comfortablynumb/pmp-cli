@@ -187,19 +187,30 @@ mod tests {
     #[test]
     fn test_interpolate_simple_variable() {
         let mut vars = HashMap::new();
-        vars.insert("_project_name_underscores".to_string(), Value::String("myapp".to_string()));
+        vars.insert(
+            "_project_name_underscores".to_string(),
+            Value::String("myapp".to_string()),
+        );
 
-        let result = interpolate_variables("project-${var:_project_name_underscores}", &vars).unwrap();
+        let result =
+            interpolate_variables("project-${var:_project_name_underscores}", &vars).unwrap();
         assert_eq!(result, "project-myapp");
     }
 
     #[test]
     fn test_interpolate_multiple_variables() {
         let mut vars = HashMap::new();
-        vars.insert("_project_name_underscores".to_string(), Value::String("myapp".to_string()));
+        vars.insert(
+            "_project_name_underscores".to_string(),
+            Value::String("myapp".to_string()),
+        );
         vars.insert("_environment".to_string(), Value::String("dev".to_string()));
 
-        let result = interpolate_variables("${var:_project_name_underscores}-${var:_environment}", &vars).unwrap();
+        let result = interpolate_variables(
+            "${var:_project_name_underscores}-${var:_environment}",
+            &vars,
+        )
+        .unwrap();
         assert_eq!(result, "myapp-dev");
     }
 
@@ -237,7 +248,10 @@ mod tests {
     #[test]
     fn test_interpolate_value_object() {
         let mut vars = HashMap::new();
-        vars.insert("_project_name_underscores".to_string(), Value::String("myapp".to_string()));
+        vars.insert(
+            "_project_name_underscores".to_string(),
+            Value::String("myapp".to_string()),
+        );
 
         let input = serde_json::json!({
             "project_name": "${var:_project_name_underscores}",
@@ -295,7 +309,8 @@ mod tests {
 
     #[test]
     fn test_interpolate_env_with_default() {
-        let result = interpolate_env_variables("namespace-${env:NONEXISTENT_VAR:default-ns}").unwrap();
+        let result =
+            interpolate_env_variables("namespace-${env:NONEXISTENT_VAR:default-ns}").unwrap();
         assert_eq!(result, "namespace-default-ns");
     }
 
@@ -311,7 +326,8 @@ mod tests {
             std::env::set_var("TEST_WITH_DEFAULT", "actual-value");
         }
 
-        let result = interpolate_env_variables("namespace-${env:TEST_WITH_DEFAULT:default-value}").unwrap();
+        let result =
+            interpolate_env_variables("namespace-${env:TEST_WITH_DEFAULT:default-value}").unwrap();
         assert_eq!(result, "namespace-actual-value");
 
         unsafe {
@@ -331,9 +347,16 @@ mod tests {
             std::env::set_var("TEST_DOCKER_USERNAME", "dockeruser");
         }
         let mut vars = HashMap::new();
-        vars.insert("_project_name_underscores".to_string(), Value::String("myapp".to_string()));
+        vars.insert(
+            "_project_name_underscores".to_string(),
+            Value::String("myapp".to_string()),
+        );
 
-        let result = interpolate_all("${env:TEST_DOCKER_USERNAME}/${var:_project_name_underscores}", &vars).unwrap();
+        let result = interpolate_all(
+            "${env:TEST_DOCKER_USERNAME}/${var:_project_name_underscores}",
+            &vars,
+        )
+        .unwrap();
         assert_eq!(result, "dockeruser/myapp");
 
         unsafe {
@@ -359,7 +382,10 @@ mod tests {
     #[test]
     fn test_interpolate_all_var_only() {
         let mut vars = HashMap::new();
-        vars.insert("_project_name_underscores".to_string(), Value::String("myapp".to_string()));
+        vars.insert(
+            "_project_name_underscores".to_string(),
+            Value::String("myapp".to_string()),
+        );
 
         let result = interpolate_all("project-${var:_project_name_underscores}", &vars).unwrap();
         assert_eq!(result, "project-myapp");
@@ -371,7 +397,10 @@ mod tests {
             std::env::set_var("TEST_ENV_VAR", "envvalue");
         }
         let mut vars = HashMap::new();
-        vars.insert("_project_name_underscores".to_string(), Value::String("myapp".to_string()));
+        vars.insert(
+            "_project_name_underscores".to_string(),
+            Value::String("myapp".to_string()),
+        );
 
         let input = serde_json::json!({
             "namespace": "${env:TEST_ENV_VAR}",

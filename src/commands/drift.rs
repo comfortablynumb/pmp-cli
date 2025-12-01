@@ -302,6 +302,7 @@ impl DriftCommand {
             apply_command: None,
             destroy_command: None,
             refresh_command: None,
+            ..Default::default()
         };
 
         executor.refresh(&config, env_path_str, &[])?;
@@ -339,7 +340,10 @@ impl DriftCommand {
         let mut current_resource = String::new();
 
         // Regex patterns for parsing
-        let resource_pattern = regex::Regex::new(r"^#\s+(.+?)\s+(will be|must be)\s+(created|updated|destroyed|replaced)").unwrap();
+        let resource_pattern = regex::Regex::new(
+            r"^#\s+(.+?)\s+(will be|must be)\s+(created|updated|destroyed|replaced)",
+        )
+        .unwrap();
         let change_pattern = regex::Regex::new(r"^\s+([+~-])\s+(.+?)\s+=\s+(.+)$").unwrap();
         let arrow_pattern = regex::Regex::new(r#""(.+?)"\s+->\s+"(.+?)""#).unwrap();
 
@@ -364,8 +368,16 @@ impl DriftCommand {
                 // For modifications, try to extract old -> new values
                 let (expected, actual) = if change_type == ChangeType::Modified {
                     if let Some(arrow_caps) = arrow_pattern.captures(value_part) {
-                        let old = arrow_caps.get(1).map(|m| m.as_str()).unwrap_or("").to_string();
-                        let new = arrow_caps.get(2).map(|m| m.as_str()).unwrap_or("").to_string();
+                        let old = arrow_caps
+                            .get(1)
+                            .map(|m| m.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let new = arrow_caps
+                            .get(2)
+                            .map(|m| m.as_str())
+                            .unwrap_or("")
+                            .to_string();
                         (old, new)
                     } else {
                         // Fallback if pattern doesn't match
@@ -484,6 +496,7 @@ impl DriftCommand {
             apply_command: None,
             destroy_command: None,
             refresh_command: None,
+            ..Default::default()
         };
 
         executor.apply(&config, env_path_str, &[])?;

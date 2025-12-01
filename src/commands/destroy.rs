@@ -76,13 +76,14 @@ impl DestroyCommand {
             // Show confirmation prompt unless --yes flag is provided
             if !skip_confirmation {
                 ctx.output.blank();
-                ctx.output
-                    .warning("WARNING: This will destroy all resources managed by this project group!");
+                ctx.output.warning(
+                    "WARNING: This will destroy all resources managed by this project group!",
+                );
                 ctx.output.dimmed(&format!(
                     "This project group has {} configured project(s) that will be destroyed:",
-                    resource.spec.projects.len()
+                    resource.spec.projects.projects().len()
                 ));
-                for project in resource.spec.projects.iter().rev() {
+                for project in resource.spec.projects.projects().iter().rev() {
                     ctx.output.dimmed(&format!("  - {}", project.name));
                 }
                 ctx.output.blank();
@@ -127,11 +128,7 @@ impl DestroyCommand {
 
             // Execute destroy on all configured projects (in reverse order)
             ProjectGroupHandler::execute_command_on_projects(
-                ctx,
-                &resource,
-                &env_name,
-                "destroy",
-                extra_args,
+                ctx, &resource, &env_name, "destroy", extra_args,
             )?;
 
             // Run post-destroy hooks
@@ -140,7 +137,8 @@ impl DestroyCommand {
                     == HookOutcome::Cancel
                 {
                     ctx.output.blank();
-                    ctx.output.warning("Post-destroy hooks cancelled further execution");
+                    ctx.output
+                        .warning("Post-destroy hooks cancelled further execution");
                     return Ok(());
                 }
             }
@@ -226,6 +224,7 @@ impl DestroyCommand {
                     apply_command: None,
                     destroy_command: None,
                     refresh_command: None,
+                    ..Default::default()
                 };
 
                 // Execute destroy on this node
@@ -329,11 +328,19 @@ impl DestroyCommand {
         ctx.output.success("Initialization completed");
 
         // Build executor config
+        let mut command_options = std::collections::HashMap::new();
+        if let Some(config) = &executor_config.config {
+            for (cmd_name, cmd_config) in &config.commands {
+                command_options.insert(cmd_name.clone(), cmd_config.options.clone());
+            }
+        }
+
         let execution_config = ExecutorConfig {
             plan_command: None,
             apply_command: None,
             destroy_command: None,
             refresh_command: None,
+            command_options,
         };
 
         // Run destroy
@@ -348,7 +355,8 @@ impl DestroyCommand {
                 == HookOutcome::Cancel
             {
                 ctx.output.blank();
-                ctx.output.warning("Post-destroy hooks cancelled further execution");
+                ctx.output
+                    .warning("Post-destroy hooks cancelled further execution");
                 return Ok(());
             }
         }
