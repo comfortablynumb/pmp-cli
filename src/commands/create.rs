@@ -215,7 +215,8 @@ impl CreateCommand {
                     // Show project name with environment and labels if available
                     let mut parts = vec![format!("{} ({})", p.name, env.metadata.environment_name)];
                     if !env.metadata.labels.is_empty() {
-                        let labels_str = env.metadata
+                        let labels_str = env
+                            .metadata
                             .labels
                             .iter()
                             .map(|(k, v)| format!("{}={}", k, v))
@@ -3297,31 +3298,31 @@ impl CreateCommand {
         // Step 5.5: Process installed plugins from template spec
         let mut collected_plugins = Vec::new();
 
-        if let Some(plugins_config) = &template.resource.spec.plugins {
-            if !plugins_config.installed.is_empty() {
-                // Discover existing projects (needed for plugins that require reference projects)
-                let discovered_projects = CollectionDiscovery::discover_projects(
-                    &*ctx.fs,
-                    &*ctx.output,
+        if let Some(plugins_config) = &template.resource.spec.plugins
+            && !plugins_config.installed.is_empty()
+        {
+            // Discover existing projects (needed for plugins that require reference projects)
+            let discovered_projects = CollectionDiscovery::discover_projects(
+                &*ctx.fs,
+                &*ctx.output,
+                &infrastructure_root,
+            )?;
+
+            for installed_plugin in &plugins_config.installed {
+                // In non-interactive mode, force use of defaults by setting disable_user_input_override
+                let mut plugin_config = installed_plugin.clone();
+                plugin_config.disable_user_input_override = true;
+
+                if let Some(plugin_info) = Self::collect_plugin_info(
+                    ctx,
+                    &plugin_config,
+                    &all_template_packs,
+                    &discovered_projects,
                     &infrastructure_root,
-                )?;
-
-                for installed_plugin in &plugins_config.installed {
-                    // In non-interactive mode, force use of defaults by setting disable_user_input_override
-                    let mut plugin_config = installed_plugin.clone();
-                    plugin_config.disable_user_input_override = true;
-
-                    if let Some(plugin_info) = Self::collect_plugin_info(
-                        ctx,
-                        &plugin_config,
-                        &all_template_packs,
-                        &discovered_projects,
-                        &infrastructure_root,
-                        project_name,
-                        environment_name,
-                    )? {
-                        collected_plugins.push(plugin_info);
-                    }
+                    project_name,
+                    environment_name,
+                )? {
+                    collected_plugins.push(plugin_info);
                 }
             }
         }

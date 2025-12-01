@@ -2266,12 +2266,18 @@ impl UpdateCommand {
             &plugin_info.resource.spec.requires_project_with_template
         {
             // First, check if the current project being updated matches the requirements (self-reference)
-            let current_project_matches = current_env_resource.api_version == required_template.api_version
+            let current_project_matches = current_env_resource.api_version
+                == required_template.api_version
                 && current_env_resource.kind == required_template.kind
                 && if let Some(label_selector) = &required_template.label_selector {
                     // Check if current project's labels match the selector
                     label_selector.iter().all(|(key, value)| {
-                        current_env_resource.metadata.labels.get(key).map(|v| v == value).unwrap_or(false)
+                        current_env_resource
+                            .metadata
+                            .labels
+                            .get(key)
+                            .map(|v| v == value)
+                            .unwrap_or(false)
                     })
                 } else {
                     true // No label selector, so it matches
@@ -2292,7 +2298,10 @@ impl UpdateCommand {
                     labels: current_env_resource.metadata.labels.clone(),
                 };
 
-                (Some(current_project_ref), Some(current_env_resource.clone()))
+                (
+                    Some(current_project_ref),
+                    Some(current_env_resource.clone()),
+                )
             } else {
                 // Find compatible projects (same logic as create command)
                 let compatible_projects: Vec<_> = projects.iter()
@@ -2333,45 +2342,47 @@ impl UpdateCommand {
                 })
                 .collect();
 
-            if compatible_projects.is_empty() {
-                ctx.output.warning(&format!(
-                    "  Plugin '{}' requires a {} project, but none found. Skipping.",
-                    installed_config.plugin_name, required_template.kind
-                ));
-                return Ok(None);
-            }
+                if compatible_projects.is_empty() {
+                    ctx.output.warning(&format!(
+                        "  Plugin '{}' requires a {} project, but none found. Skipping.",
+                        installed_config.plugin_name, required_template.kind
+                    ));
+                    return Ok(None);
+                }
 
-            // Let user select a compatible project
-            let project_names: Vec<String> = compatible_projects
-                .iter()
-                .map(|(p, env)| {
-                    // Show project name with environment and labels if available
-                    let mut parts = vec![format!("{} ({})", p.name, env.metadata.environment_name)];
-                    if !env.metadata.labels.is_empty() {
-                        let labels_str = env.metadata
-                            .labels
-                            .iter()
-                            .map(|(k, v)| format!("{}={}", k, v))
-                            .collect::<Vec<_>>()
-                            .join(", ");
-                        parts.push(format!("[{}]", labels_str));
-                    }
-                    parts.join(" ")
-                })
-                .collect();
+                // Let user select a compatible project
+                let project_names: Vec<String> = compatible_projects
+                    .iter()
+                    .map(|(p, env)| {
+                        // Show project name with environment and labels if available
+                        let mut parts =
+                            vec![format!("{} ({})", p.name, env.metadata.environment_name)];
+                        if !env.metadata.labels.is_empty() {
+                            let labels_str = env
+                                .metadata
+                                .labels
+                                .iter()
+                                .map(|(k, v)| format!("{}={}", k, v))
+                                .collect::<Vec<_>>()
+                                .join(", ");
+                            parts.push(format!("[{}]", labels_str));
+                        }
+                        parts.join(" ")
+                    })
+                    .collect();
 
-            let selected_display = ctx
-                .input
-                .select("  Select reference project:", project_names.clone())?;
+                let selected_display = ctx
+                    .input
+                    .select("  Select reference project:", project_names.clone())?;
 
-            // Find the matching project by display name
-            let selected_idx = project_names
-                .iter()
-                .position(|name| name == &selected_display)
-                .context("Selected project not found in list")?;
+                // Find the matching project by display name
+                let selected_idx = project_names
+                    .iter()
+                    .position(|name| name == &selected_display)
+                    .context("Selected project not found in list")?;
 
-            let (selected_project, selected_env) = &compatible_projects[selected_idx];
-            (Some(selected_project.clone()), Some(selected_env.clone()))
+                let (selected_project, selected_env) = &compatible_projects[selected_idx];
+                (Some(selected_project.clone()), Some(selected_env.clone()))
             }
         } else {
             (None, None)
