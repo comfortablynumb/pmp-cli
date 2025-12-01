@@ -51,6 +51,7 @@ struct CollectedPluginInfo {
     reference_project: Option<crate::template::metadata::ProjectReference>,
     reference_env: Option<crate::template::metadata::DynamicProjectEnvironmentResource>,
     raw_module_inputs: Option<HashMap<String, String>>,
+    plugin_spec: crate::template::metadata::PluginSpec,
 }
 
 impl CreateCommand {
@@ -157,16 +158,17 @@ impl CreateCommand {
                                     {
                                         // Check label selectors if provided
                                         if let Some(label_selector) = &required_template.label_selector {
-                                            if !project.labels.is_empty() {
+                                            // Check labels from the environment resource (not the project file)
+                                            if !env_resource.metadata.labels.is_empty() {
                                                 // All required labels must match
                                                 let matches = label_selector.iter().all(|(key, value)| {
-                                                    project.labels.get(key).map(|v| v == value).unwrap_or(false)
+                                                    env_resource.metadata.labels.get(key).map(|v| v == value).unwrap_or(false)
                                                 });
                                                 if !matches {
                                                     continue;
                                                 }
                                             } else {
-                                                // Project has no labels, can't match selector
+                                                // Environment has no labels, can't match selector
                                                 continue;
                                             }
                                         }
@@ -212,8 +214,8 @@ impl CreateCommand {
                 .map(|(p, env)| {
                     // Show project name with environment and labels if available
                     let mut parts = vec![format!("{} ({})", p.name, env.metadata.environment_name)];
-                    if !p.labels.is_empty() {
-                        let labels_str = p
+                    if !env.metadata.labels.is_empty() {
+                        let labels_str = env.metadata
                             .labels
                             .iter()
                             .map(|(k, v)| format!("{}={}", k, v))
@@ -285,6 +287,7 @@ impl CreateCommand {
             reference_project,
             reference_env,
             raw_module_inputs: installed_config.raw_module_inputs.clone(),
+            plugin_spec: plugin_info.resource.spec.clone(),
         }))
     }
 
@@ -355,7 +358,7 @@ impl CreateCommand {
                 reference_project: reference_project_metadata,
                 inputs: plugin_info.inputs.clone(),
                 files: Vec::new(), // Files will be populated during rendering
-                plugin_spec: None, // Plugin spec can be added later if needed
+                plugin_spec: Some(plugin_info.plugin_spec.clone()),
                 raw_module_inputs: plugin_info.raw_module_inputs.clone(),
             });
         }
@@ -3291,6 +3294,38 @@ impl CreateCommand {
             }
         }
 
+        // Step 5.5: Process installed plugins from template spec
+        let mut collected_plugins = Vec::new();
+
+        if let Some(plugins_config) = &template.resource.spec.plugins {
+            if !plugins_config.installed.is_empty() {
+                // Discover existing projects (needed for plugins that require reference projects)
+                let discovered_projects = CollectionDiscovery::discover_projects(
+                    &*ctx.fs,
+                    &*ctx.output,
+                    &infrastructure_root,
+                )?;
+
+                for installed_plugin in &plugins_config.installed {
+                    // In non-interactive mode, force use of defaults by setting disable_user_input_override
+                    let mut plugin_config = installed_plugin.clone();
+                    plugin_config.disable_user_input_override = true;
+
+                    if let Some(plugin_info) = Self::collect_plugin_info(
+                        ctx,
+                        &plugin_config,
+                        &all_template_packs,
+                        &discovered_projects,
+                        &infrastructure_root,
+                        project_name,
+                        environment_name,
+                    )? {
+                        collected_plugins.push(plugin_info);
+                    }
+                }
+            }
+        }
+
         // Step 6: Determine project paths
         // Project folder uses the original project name (preserving hyphens)
         let project_root = infrastructure_root.join("projects").join(project_name);
@@ -3299,7 +3334,22 @@ impl CreateCommand {
         // Step 7: Create directory structure
         ctx.fs.create_dir_all(&environment_path)?;
 
-        // Step 8: Render template files
+        // Step 8: Render collected plugins
+        let added_plugins = if !collected_plugins.is_empty() {
+            Self::render_collected_plugins(
+                ctx,
+                collected_plugins,
+                &environment_path,
+                &template.resource.spec.api_version,
+                &template.resource.spec.kind,
+                project_name,
+                environment_name,
+            )?
+        } else {
+            Vec::new()
+        };
+
+        // Step 9: Render template files
         let template_src = &template.path;
         let renderer = TemplateRenderer::new();
         renderer
@@ -3312,7 +3362,7 @@ impl CreateCommand {
             )
             .context("Failed to render template")?;
 
-        // Step 9: Generate _common.tf if needed (only opentofu executor does this)
+        // Step 10: Generate _common.tf if needed (only opentofu executor does this)
         let template_executor_name = template.resource.spec.executor.name();
         if let Some(executor_config) = &infrastructure.spec.executor
             && !executor_config.config.is_empty()
@@ -3335,13 +3385,13 @@ impl CreateCommand {
                     &environment_path,
                     &executor_config.config,
                     &metadata,
-                    None, // No plugins for now
+                    Some(&added_plugins),
                     reference_projects,
                 )
                 .context("Failed to generate common file")?;
         }
 
-        // Step 10: Generate .pmp.project.yaml
+        // Step 11: Generate .pmp.project.yaml
         Self::generate_project_identifier_yaml(
             ctx,
             &project_root,
@@ -3350,7 +3400,7 @@ impl CreateCommand {
             &template.resource.metadata.labels,
         )?;
 
-        // Step 11: Generate .pmp.environment.yaml
+        // Step 12: Generate .pmp.environment.yaml
         Self::generate_project_environment_yaml(
             ctx,
             &environment_path,
@@ -3361,7 +3411,7 @@ impl CreateCommand {
             template_pack_name,
             template_name,
             reference_projects,
-            &[], // No added plugins
+            &added_plugins,
             &[], // No project dependencies (the caller handles this)
             executor_override,
         )?;
@@ -3502,6 +3552,7 @@ impl CreateCommand {
                     .get("description")
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string()),
+                labels: template.metadata.labels.clone(), // Propagate labels from template
             },
             spec: ProjectSpec {
                 resource: ResourceDefinition {

@@ -1275,6 +1275,11 @@ pub struct DynamicProjectEnvironmentMetadata {
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+
+    /// Labels inherited from template for categorization and filtering
+    #[serde(default)]
+    #[serde(skip_serializing_if = "HashMap::is_empty")]
+    pub labels: HashMap<String, String>,
 }
 
 /// Dynamic project environment resource (new format with dynamic kind)

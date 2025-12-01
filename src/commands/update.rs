@@ -46,6 +46,7 @@ struct CollectedPluginInfo {
     reference_project: Option<crate::template::metadata::ProjectReference>,
     reference_env: Option<DynamicProjectEnvironmentResource>,
     raw_module_inputs: Option<HashMap<String, String>>,
+    plugin_spec: crate::template::metadata::PluginSpec,
 }
 
 impl UpdateCommand {
@@ -340,6 +341,7 @@ impl UpdateCommand {
                     &collection_root,
                     &project_name,
                     &env_name,
+                    &current_env_resource,
                 )? {
                     newly_collected_plugins.push(plugin_info);
                 }
@@ -353,6 +355,22 @@ impl UpdateCommand {
             } else {
                 ProjectPlugins { added: Vec::new() }
             };
+
+        // Enrich existing plugins with plugin_spec (for plugins added before this fix)
+        // This ensures _common.tf generation works correctly with required_fields
+        for existing_plugin in &mut all_plugins_for_rendering.added {
+            if existing_plugin.plugin_spec.is_none() {
+                // Try to load plugin spec from template packs
+                if let Some(spec) = Self::load_plugin_spec(
+                    ctx,
+                    &_all_template_packs,
+                    &existing_plugin.template_pack_name,
+                    &existing_plugin.name,
+                ) {
+                    existing_plugin.plugin_spec = Some(spec);
+                }
+            }
+        }
 
         // Render the newly collected plugins to get AddedPlugin structs
         if !newly_collected_plugins.is_empty() {
@@ -441,7 +459,7 @@ impl UpdateCommand {
                     reference_project,
                     inputs: plugin_info.inputs,
                     files: Vec::new(), // Will be populated when files are generated
-                    plugin_spec: None, // Not needed for update command
+                    plugin_spec: Some(plugin_info.plugin_spec.clone()),
                     raw_module_inputs: plugin_info.raw_module_inputs.clone(),
                 });
             }
@@ -2113,6 +2131,7 @@ impl UpdateCommand {
         collection_root: &Path,
         project_name: &str,
         environment_name: &str,
+        current_env_resource: &DynamicProjectEnvironmentResource,
     ) -> Result<Option<CollectedPluginInfo>> {
         // Find the template pack containing this plugin
         let template_pack = template_packs
@@ -2158,8 +2177,37 @@ impl UpdateCommand {
         let (reference_project, reference_env) = if let Some(required_template) =
             &plugin_info.resource.spec.requires_project_with_template
         {
-            // Find compatible projects (same logic as create command)
-            let compatible_projects: Vec<_> = projects.iter()
+            // First, check if the current project being updated matches the requirements (self-reference)
+            let current_project_matches = current_env_resource.api_version == required_template.api_version
+                && current_env_resource.kind == required_template.kind
+                && if let Some(label_selector) = &required_template.label_selector {
+                    // Check if current project's labels match the selector
+                    label_selector.iter().all(|(key, value)| {
+                        current_env_resource.metadata.labels.get(key).map(|v| v == value).unwrap_or(false)
+                    })
+                } else {
+                    true // No label selector, so it matches
+                };
+
+            if current_project_matches {
+                // Use the current project as a self-reference
+                ctx.output.dimmed(&format!(
+                    "  Plugin requires reference to a {} project - using current project (self-reference)",
+                    required_template.kind
+                ));
+
+                // Create a ProjectReference for the current project
+                let current_project_ref = crate::template::metadata::ProjectReference {
+                    name: project_name.to_string(),
+                    kind: current_env_resource.kind.clone(),
+                    path: format!("projects/{}", project_name), // Standard path format
+                    labels: current_env_resource.metadata.labels.clone(),
+                };
+
+                (Some(current_project_ref), Some(current_env_resource.clone()))
+            } else {
+                // Find compatible projects (same logic as create command)
+                let compatible_projects: Vec<_> = projects.iter()
                 .filter_map(|project| {
                     let project_path = collection_root.join(&project.path);
                     let environments_dir = project_path.join("environments");
@@ -2174,16 +2222,17 @@ impl UpdateCommand {
                                     {
                                         // Check label selectors if provided
                                         if let Some(label_selector) = &required_template.label_selector {
-                                            if !project.labels.is_empty() {
+                                            // Check labels from the environment resource (not the project file)
+                                            if !env_resource.metadata.labels.is_empty() {
                                                 // All required labels must match
                                                 let matches = label_selector.iter().all(|(key, value)| {
-                                                    project.labels.get(key).map(|v| v == value).unwrap_or(false)
+                                                    env_resource.metadata.labels.get(key).map(|v| v == value).unwrap_or(false)
                                                 });
                                                 if !matches {
                                                     continue;
                                                 }
                                             } else {
-                                                // Project has no labels, can't match selector
+                                                // Environment has no labels, can't match selector
                                                 continue;
                                             }
                                         }
@@ -2210,8 +2259,8 @@ impl UpdateCommand {
                 .map(|(p, env)| {
                     // Show project name with environment and labels if available
                     let mut parts = vec![format!("{} ({})", p.name, env.metadata.environment_name)];
-                    if !p.labels.is_empty() {
-                        let labels_str = p
+                    if !env.metadata.labels.is_empty() {
+                        let labels_str = env.metadata
                             .labels
                             .iter()
                             .map(|(k, v)| format!("{}={}", k, v))
@@ -2235,6 +2284,7 @@ impl UpdateCommand {
 
             let (selected_project, selected_env) = &compatible_projects[selected_idx];
             (Some(selected_project.clone()), Some(selected_env.clone()))
+            }
         } else {
             (None, None)
         };
@@ -2278,7 +2328,38 @@ impl UpdateCommand {
             reference_project,
             reference_env,
             raw_module_inputs: installed_config.raw_module_inputs.clone(),
+            plugin_spec: plugin_info.resource.spec.clone(),
         }))
+    }
+
+    /// Load plugin spec from template pack
+    /// Returns None if plugin not found
+    fn load_plugin_spec(
+        ctx: &crate::context::Context,
+        template_packs: &[crate::template::TemplatePackInfo],
+        template_pack_name: &str,
+        plugin_name: &str,
+    ) -> Option<crate::template::metadata::PluginSpec> {
+        // Find the template pack
+        let template_pack = template_packs
+            .iter()
+            .find(|pack| pack.resource.metadata.name == template_pack_name)?;
+
+        // Discover plugins in this template pack
+        let plugins = TemplateDiscovery::discover_plugins_in_pack(
+            &*ctx.fs,
+            &*ctx.output,
+            &template_pack.path,
+            &template_pack.resource.metadata.name,
+        )
+        .ok()?;
+
+        // Find the specific plugin
+        let plugin_info = plugins
+            .iter()
+            .find(|p| p.resource.metadata.name == plugin_name)?;
+
+        Some(plugin_info.resource.spec.clone())
     }
 
     /// Build default inputs for plugins without prompting user
@@ -2369,6 +2450,12 @@ impl UpdateCommand {
                     .get("description")
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string()),
+                // Preserve existing labels if present, otherwise use template labels
+                labels: if !current_env.metadata.labels.is_empty() {
+                    current_env.metadata.labels.clone()
+                } else {
+                    template.metadata.labels.clone()
+                },
             },
             spec: ProjectSpec {
                 resource: ResourceDefinition {
