@@ -251,8 +251,8 @@ mod tests {
             exit_on_confirm: false,
         };
         assert_eq!(config.question, "Continue?");
-        assert_eq!(config.exit_on_cancel, true);
-        assert_eq!(config.exit_on_confirm, false);
+        assert!(config.exit_on_cancel);
+        assert!(!config.exit_on_confirm);
     }
 
     #[test]
@@ -264,8 +264,8 @@ exit_on_confirm: false
 "#;
         let config: ConfirmHookConfig = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(config.question, "Are you sure you want to proceed?");
-        assert_eq!(config.exit_on_cancel, true);
-        assert_eq!(config.exit_on_confirm, false);
+        assert!(config.exit_on_cancel);
+        assert!(!config.exit_on_confirm);
     }
 
     #[test]
@@ -296,8 +296,8 @@ config:
         match hook {
             Hook::Confirm(config) => {
                 assert_eq!(config.question, "Deploy to production?");
-                assert_eq!(config.exit_on_cancel, true);
-                assert_eq!(config.exit_on_confirm, false);
+                assert!(config.exit_on_cancel);
+                assert!(!config.exit_on_confirm);
             }
             _ => panic!("Expected Confirm hook"),
         }
@@ -312,7 +312,7 @@ config:
         };
         assert_eq!(config.name, "TEST_VAR");
         assert_eq!(config.prompt, "Enter value:");
-        assert_eq!(config.sensitive, false);
+        assert!(!config.sensitive);
     }
 
     #[test]
@@ -324,7 +324,7 @@ config:
         };
         assert_eq!(config.name, "SECRET_KEY");
         assert_eq!(config.prompt, "Enter secret:");
-        assert_eq!(config.sensitive, true);
+        assert!(config.sensitive);
     }
 
     #[test]
@@ -411,7 +411,7 @@ sensitive: true
         let config: SetEnvironmentHookConfig = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(config.name, "DATABASE_URL");
         assert_eq!(config.prompt, "Enter database connection string:");
-        assert_eq!(config.sensitive, true);
+        assert!(config.sensitive);
     }
 
     #[test]
@@ -442,7 +442,7 @@ config:
             Hook::SetEnvironment(config) => {
                 assert_eq!(config.name, "AWS_REGION");
                 assert_eq!(config.prompt, "Enter AWS region:");
-                assert_eq!(config.sensitive, false);
+                assert!(!config.sensitive);
             }
             _ => panic!("Expected SetEnvironment hook"),
         }
@@ -450,7 +450,7 @@ config:
 
     #[test]
     fn test_multiple_hooks_with_set_environment() {
-        let hooks = vec![
+        let hooks = [
             Hook::Command(CommandHookConfig {
                 command: "echo Starting deployment".to_string(),
             }),
@@ -482,7 +482,7 @@ config:
         match &hooks[1] {
             Hook::SetEnvironment(config) => {
                 assert_eq!(config.name, "DEPLOY_VERSION");
-                assert_eq!(config.sensitive, false);
+                assert!(!config.sensitive);
             }
             _ => panic!("Expected SetEnvironment hook at index 1"),
         }
@@ -490,7 +490,7 @@ config:
         match &hooks[2] {
             Hook::SetEnvironment(config) => {
                 assert_eq!(config.name, "DEPLOY_TOKEN");
-                assert_eq!(config.sensitive, true);
+                assert!(config.sensitive);
             }
             _ => panic!("Expected SetEnvironment hook at index 2"),
         }
@@ -498,8 +498,8 @@ config:
         match &hooks[3] {
             Hook::Confirm(config) => {
                 assert_eq!(config.question, "Ready to deploy?");
-                assert_eq!(config.exit_on_cancel, true);
-                assert_eq!(config.exit_on_confirm, false);
+                assert!(config.exit_on_cancel);
+                assert!(!config.exit_on_confirm);
             }
             _ => panic!("Expected Confirm hook at index 3"),
         }
@@ -531,8 +531,8 @@ config:
         match &hooks[0] {
             Hook::Confirm(config) => {
                 assert_eq!(config.question, "Are you sure you want to continue?");
-                assert_eq!(config.exit_on_cancel, true);
-                assert_eq!(config.exit_on_confirm, false);
+                assert!(config.exit_on_cancel);
+                assert!(!config.exit_on_confirm);
             }
             _ => panic!("Expected Confirm hook"),
         }
@@ -550,7 +550,7 @@ config:
             Hook::SetEnvironment(config) => {
                 assert_eq!(config.name, "API_KEY");
                 assert_eq!(config.prompt, "Enter your API key:");
-                assert_eq!(config.sensitive, true);
+                assert!(config.sensitive);
             }
             _ => panic!("Expected SetEnvironment hook"),
         }
