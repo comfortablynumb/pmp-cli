@@ -88,14 +88,13 @@ impl ApplyCommand {
                 .context("Failed to convert environment path to string")?;
 
             // Run pre-apply hooks
-            if !hooks.pre_apply.is_empty() {
-                if HooksRunner::run_hooks(&hooks.pre_apply, env_dir_str, "pre-apply")?
+            if !hooks.pre_apply.is_empty()
+                && HooksRunner::run_hooks(&hooks.pre_apply, env_dir_str, "pre-apply")?
                     == HookOutcome::Cancel
-                {
-                    ctx.output.blank();
-                    ctx.output.warning("Apply cancelled by pre-apply hook");
-                    return Ok(());
-                }
+            {
+                ctx.output.blank();
+                ctx.output.warning("Apply cancelled by pre-apply hook");
+                return Ok(());
             }
 
             // Process ProjectGroup - create/update and then execute on all defined projects
@@ -111,15 +110,14 @@ impl ApplyCommand {
             )?;
 
             // Run post-apply hooks
-            if !hooks.post_apply.is_empty() {
-                if HooksRunner::run_hooks(&hooks.post_apply, env_dir_str, "post-apply")?
+            if !hooks.post_apply.is_empty()
+                && HooksRunner::run_hooks(&hooks.post_apply, env_dir_str, "post-apply")?
                     == HookOutcome::Cancel
-                {
-                    ctx.output.blank();
-                    ctx.output
-                        .warning("Post-apply hooks cancelled further execution");
-                    return Ok(());
-                }
+            {
+                ctx.output.blank();
+                ctx.output
+                    .warning("Post-apply hooks cancelled further execution");
+                return Ok(());
             }
 
             ctx.output.blank();
@@ -190,14 +188,13 @@ impl ApplyCommand {
             .context("Failed to convert environment path to string")?;
 
         // Run pre-apply hooks
-        if !hooks.pre_apply.is_empty() {
-            if HooksRunner::run_hooks(&hooks.pre_apply, env_dir_str, "pre-apply")?
+        if !hooks.pre_apply.is_empty()
+            && HooksRunner::run_hooks(&hooks.pre_apply, env_dir_str, "pre-apply")?
                 == HookOutcome::Cancel
-            {
-                ctx.output.blank();
-                ctx.output.warning("Apply cancelled by pre-apply hook");
-                return Ok(());
-            }
+        {
+            ctx.output.blank();
+            ctx.output.warning("Apply cancelled by pre-apply hook");
+            return Ok(());
         }
 
         // Run helm repo update if configured
@@ -256,15 +253,14 @@ impl ApplyCommand {
         executor.apply(&execution_config, env_dir_str, extra_args)?;
 
         // Run post-apply hooks
-        if !hooks.post_apply.is_empty() {
-            if HooksRunner::run_hooks(&hooks.post_apply, env_dir_str, "post-apply")?
+        if !hooks.post_apply.is_empty()
+            && HooksRunner::run_hooks(&hooks.post_apply, env_dir_str, "post-apply")?
                 == HookOutcome::Cancel
-            {
-                ctx.output.blank();
-                ctx.output
-                    .warning("Post-apply hooks cancelled further execution");
-                return Ok(());
-            }
+        {
+            ctx.output.blank();
+            ctx.output
+                .warning("Post-apply hooks cancelled further execution");
+            return Ok(());
         }
 
         ctx.output.blank();

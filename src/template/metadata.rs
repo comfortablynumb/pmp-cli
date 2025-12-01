@@ -1152,7 +1152,9 @@ impl ProjectGroupProjects {
                             if let Some(merged_config) = &mut merged_executor.config {
                                 // Merge commands
                                 for (cmd, cmd_config) in &project_config.commands {
-                                    merged_config.commands.insert(cmd.clone(), cmd_config.clone());
+                                    merged_config
+                                        .commands
+                                        .insert(cmd.clone(), cmd_config.clone());
                                 }
                             } else {
                                 merged_executor.config = Some(project_config.clone());
@@ -1742,13 +1744,13 @@ impl TemplateResource {
         // Validate dependency_name uniqueness
         let mut dependency_names = std::collections::HashSet::new();
         for dep in &resource.spec.dependencies {
-            if let Some(dep_name) = &dep.dependency_name {
-                if !dependency_names.insert(dep_name.clone()) {
-                    anyhow::bail!(
-                        "Duplicate dependency_name '{}' found in template dependencies. Each dependency_name must be unique.",
-                        dep_name
-                    );
-                }
+            if let Some(dep_name) = &dep.dependency_name
+                && !dependency_names.insert(dep_name.clone())
+            {
+                anyhow::bail!(
+                    "Duplicate dependency_name '{}' found in template dependencies. Each dependency_name must be unique.",
+                    dep_name
+                );
             }
         }
 
@@ -2731,6 +2733,7 @@ spec:
             },
             executor: ExecutorProjectConfig {
                 name: "opentofu".to_string(),
+                config: None,
             },
             inputs: HashMap::new(),
             custom: None,
@@ -2738,7 +2741,10 @@ spec:
             template: None,
             environment: None,
             template_reference_projects: Vec::new(),
-            projects: Vec::new(),
+            projects: ProjectGroupProjects {
+                list: Vec::new(),
+                shared_config: None,
+            },
             dependencies: vec![
                 ProjectDependency {
                     project: DependencyProject {

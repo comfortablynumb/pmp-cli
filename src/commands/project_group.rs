@@ -10,7 +10,7 @@ use crate::template::{DynamicProjectEnvironmentResource, TemplateDiscovery};
 use anyhow::{Context, Result};
 use serde_json::Value;
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// Handles project group operations
 pub struct ProjectGroupHandler;
@@ -198,7 +198,7 @@ impl ProjectGroupHandler {
     /// Execute a command using the executor
     fn execute_with_executor(
         ctx: &crate::context::Context,
-        env_path: &PathBuf,
+        env_path: &Path,
         executor: &dyn Executor,
         command: &str,
         extra_args: &[String],
@@ -233,14 +233,13 @@ impl ProjectGroupHandler {
             _ => return Err(anyhow::anyhow!("Unknown command: {}", command)),
         };
 
-        if !pre_hooks.is_empty() {
-            if HooksRunner::run_hooks(pre_hooks, env_dir_str, &format!("pre-{}", command))?
+        if !pre_hooks.is_empty()
+            && HooksRunner::run_hooks(pre_hooks, env_dir_str, &format!("pre-{}", command))?
                 == HookOutcome::Cancel
-            {
-                ctx.output
-                    .warning(&format!("{} cancelled by pre-{} hook", command, command));
-                return Ok(());
-            }
+        {
+            ctx.output
+                .warning(&format!("{} cancelled by pre-{} hook", command, command));
+            return Ok(());
         }
 
         // Initialize executor
@@ -249,15 +248,15 @@ impl ProjectGroupHandler {
         let init_output = executor.init(env_dir_str)?;
 
         if !init_output.status.success() {
-            if !init_output.stdout.is_empty() {
-                if let Ok(stdout_str) = String::from_utf8(init_output.stdout.clone()) {
-                    ctx.output.error(&stdout_str);
-                }
+            if !init_output.stdout.is_empty()
+                && let Ok(stdout_str) = String::from_utf8(init_output.stdout.clone())
+            {
+                ctx.output.error(&stdout_str);
             }
-            if !init_output.stderr.is_empty() {
-                if let Ok(stderr_str) = String::from_utf8(init_output.stderr.clone()) {
-                    ctx.output.error(&stderr_str);
-                }
+            if !init_output.stderr.is_empty()
+                && let Ok(stderr_str) = String::from_utf8(init_output.stderr.clone())
+            {
+                ctx.output.error(&stderr_str);
             }
             anyhow::bail!(
                 "Initialization failed with exit code: {:?}",
@@ -310,16 +309,15 @@ impl ProjectGroupHandler {
             _ => return Err(anyhow::anyhow!("Unknown command: {}", command)),
         };
 
-        if !post_hooks.is_empty() {
-            if HooksRunner::run_hooks(post_hooks, env_dir_str, &format!("post-{}", command))?
+        if !post_hooks.is_empty()
+            && HooksRunner::run_hooks(post_hooks, env_dir_str, &format!("post-{}", command))?
                 == HookOutcome::Cancel
-            {
-                ctx.output.warning(&format!(
-                    "Post-{} hooks cancelled further execution",
-                    command
-                ));
-                return Ok(());
-            }
+        {
+            ctx.output.warning(&format!(
+                "Post-{} hooks cancelled further execution",
+                command
+            ));
+            return Ok(());
         }
 
         ctx.output.success(&format!("{} completed", command));
@@ -511,17 +509,13 @@ impl ProjectGroupHandler {
                 // Match by dependency_name
                 template_dependencies
                     .iter()
-                    .find(|dep| {
-                        dep.dependency_name.as_ref() == Some(dep_name)
-                    })
+                    .find(|dep| dep.dependency_name.as_ref() == Some(dep_name))
             } else {
                 // Match by api_version and kind (legacy behavior)
-                template_dependencies
-                    .iter()
-                    .find(|dep| {
-                        dep.project.api_version == ref_resource.api_version
-                            && dep.project.kind == ref_resource.kind
-                    })
+                template_dependencies.iter().find(|dep| {
+                    dep.project.api_version == ref_resource.api_version
+                        && dep.project.kind == ref_resource.kind
+                })
             };
 
             // Validate that if dependency_name was specified, we found a matching dependency

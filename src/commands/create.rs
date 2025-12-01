@@ -264,7 +264,12 @@ impl CreateCommand {
 
             if customize {
                 ctx.output.dimmed("  Collecting plugin inputs...");
-                Self::collect_plugin_inputs(ctx, &merged_inputs, project_name, Some(environment_name))?
+                Self::collect_plugin_inputs(
+                    ctx,
+                    &merged_inputs,
+                    project_name,
+                    Some(environment_name),
+                )?
             } else {
                 // Use defaults
                 ctx.output.dimmed("  Using default values...");
@@ -603,6 +608,7 @@ impl CreateCommand {
     }
 
     /// Execute the create command
+    #[allow(clippy::too_many_arguments)]
     pub fn execute(
         ctx: &crate::context::Context,
         output_path: Option<&str>,
@@ -769,7 +775,8 @@ impl CreateCommand {
         ctx.output.blank();
 
         // Step 5: Select template (either from --template flag or via category navigation)
-        let (selected_pack_name, selected_template_name) = if let Some(template_str) = template_spec {
+        let (selected_pack_name, selected_template_name) = if let Some(template_str) = template_spec
+        {
             // Parse template specification in format: pack-name/template-name
             let parts: Vec<&str> = template_str.split('/').collect();
             if parts.len() != 2 {
@@ -808,7 +815,10 @@ impl CreateCommand {
             }
 
             ctx.output.subsection("Template Selection");
-            ctx.output.dimmed(&format!("Using specified template: {}/{}", pack_name, template_name));
+            ctx.output.dimmed(&format!(
+                "Using specified template: {}/{}",
+                pack_name, template_name
+            ));
             ctx.output.blank();
 
             (pack_name, template_name)
@@ -824,7 +834,10 @@ impl CreateCommand {
                 &filtered_packs_with_templates,
             )?;
 
-            (selected_template_ref.0.clone(), selected_template_ref.1.clone())
+            (
+                selected_template_ref.0.clone(),
+                selected_template_ref.1.clone(),
+            )
         };
 
         // Find the selected template and config
@@ -1177,7 +1190,8 @@ impl CreateCommand {
             let env = &infrastructure.spec.environments[env_id];
             ctx.output.subsection("Environment");
             ctx.output.environment_badge(&env.name);
-            ctx.output.dimmed(&format!("Using environment ID: {}", env_id));
+            ctx.output
+                .dimmed(&format!("Using environment ID: {}", env_id));
             ctx.output.blank();
 
             env_id.to_string()
@@ -1371,7 +1385,8 @@ impl CreateCommand {
         ctx.output.subsection("Project Configuration");
         let mut project_name = if let Some(name) = project_name {
             // Project name specified via --name flag
-            ctx.output.dimmed(&format!("Using specified project name: {}", name));
+            ctx.output
+                .dimmed(&format!("Using specified project name: {}", name));
             ctx.output.blank();
 
             // Validate the provided name
@@ -1670,11 +1685,11 @@ impl CreateCommand {
         // Execute apply if --apply flag is set, otherwise ask user
         ctx.output.blank();
         let should_apply = if auto_apply {
-            ctx.output.dimmed("Auto-applying infrastructure (--apply flag set)...");
+            ctx.output
+                .dimmed("Auto-applying infrastructure (--apply flag set)...");
             true
         } else {
-            ctx
-                .input
+            ctx.input
                 .confirm("Do you want to execute 'apply' now?", false)
                 .context("Failed to get confirmation")?
         };
@@ -3268,12 +3283,10 @@ impl CreateCommand {
 
         // Fill in defaults for any missing inputs
         for input_def in &template.resource.spec.inputs {
-            if !final_inputs.contains_key(&input_def.name) {
-                if use_all_defaults {
-                    // Use default value if available
-                    if let Some(default) = &input_def.default {
-                        final_inputs.insert(input_def.name.clone(), default.clone());
-                    }
+            if !final_inputs.contains_key(&input_def.name) && use_all_defaults {
+                // Use default value if available
+                if let Some(default) = &input_def.default {
+                    final_inputs.insert(input_def.name.clone(), default.clone());
                 }
             }
         }
@@ -3921,9 +3934,13 @@ spec:
 
         // Run create command
         let result = CreateCommand::execute(
-            &ctx, None, // output_path
-            None, // template_packs_paths
-            None, // inputs_str
+            &ctx, None,  // output_path
+            None,  // template_packs_paths
+            None,  // inputs_str
+            None,  // template_spec
+            false, // auto_apply
+            None,  // project_name
+            None,  // environment_name
         );
 
         // Verify template was allowed and project was created
@@ -3965,7 +3982,15 @@ spec:
         let ctx = create_test_context(Arc::clone(&fs), input);
 
         // Run create command
-        let result = CreateCommand::execute(&ctx, None, None, None);
+        let result = CreateCommand::execute(
+            &ctx, None,  // output_path
+            None,  // template_packs_paths
+            None,  // inputs_str
+            None,  // template_spec
+            false, // auto_apply
+            None,  // project_name
+            None,  // environment_name
+        );
 
         // Should fail because no templates are available
         assert!(
@@ -4030,7 +4055,15 @@ spec:
         let ctx = create_test_context(Arc::clone(&fs), input);
 
         // Run create command
-        let result = CreateCommand::execute(&ctx, None, None, None);
+        let result = CreateCommand::execute(
+            &ctx, None,  // output_path
+            None,  // template_packs_paths
+            None,  // inputs_str
+            None,  // template_spec
+            false, // auto_apply
+            None,  // project_name
+            None,  // environment_name
+        );
 
         assert!(
             result.is_ok(),
@@ -4105,7 +4138,15 @@ spec:
         let ctx = create_test_context(Arc::clone(&fs), input);
 
         // Run create command
-        let result = CreateCommand::execute(&ctx, None, None, None);
+        let result = CreateCommand::execute(
+            &ctx, None,  // output_path
+            None,  // template_packs_paths
+            None,  // inputs_str
+            None,  // template_spec
+            false, // auto_apply
+            None,  // project_name
+            None,  // environment_name
+        );
 
         assert!(
             result.is_ok(),
@@ -4171,7 +4212,15 @@ spec:
         let ctx = create_test_context(Arc::clone(&fs), input);
 
         // Run create command
-        let result = CreateCommand::execute(&ctx, None, None, None);
+        let result = CreateCommand::execute(
+            &ctx, None,  // output_path
+            None,  // template_packs_paths
+            None,  // inputs_str
+            None,  // template_spec
+            false, // auto_apply
+            None,  // project_name
+            None,  // environment_name
+        );
 
         assert!(
             result.is_ok(),
@@ -4261,7 +4310,15 @@ spec:
         let ctx = create_test_context(Arc::clone(&fs), input);
 
         // Run create command
-        let result = CreateCommand::execute(&ctx, None, None, None);
+        let result = CreateCommand::execute(
+            &ctx, None,  // output_path
+            None,  // template_packs_paths
+            None,  // inputs_str
+            None,  // template_spec
+            false, // auto_apply
+            None,  // project_name
+            None,  // environment_name
+        );
 
         assert!(
             result.is_ok(),
@@ -4326,7 +4383,15 @@ spec:
         let ctx = create_test_context(Arc::clone(&fs), input);
 
         // Run create command
-        let result = CreateCommand::execute(&ctx, None, None, None);
+        let result = CreateCommand::execute(
+            &ctx, None,  // output_path
+            None,  // template_packs_paths
+            None,  // inputs_str
+            None,  // template_spec
+            false, // auto_apply
+            None,  // project_name
+            None,  // environment_name
+        );
 
         assert!(
             result.is_ok(),
@@ -4387,7 +4452,15 @@ spec:
         let ctx = create_test_context(Arc::clone(&fs), input);
 
         // Run create command
-        let result = CreateCommand::execute(&ctx, None, None, None);
+        let result = CreateCommand::execute(
+            &ctx, None,  // output_path
+            None,  // template_packs_paths
+            None,  // inputs_str
+            None,  // template_spec
+            false, // auto_apply
+            None,  // project_name
+            None,  // environment_name
+        );
 
         assert!(
             result.is_ok(),
@@ -4461,7 +4534,15 @@ spec:
         let ctx = create_test_context(Arc::clone(&fs), input);
 
         // Run create command
-        let result = CreateCommand::execute(&ctx, None, None, None);
+        let result = CreateCommand::execute(
+            &ctx, None,  // output_path
+            None,  // template_packs_paths
+            None,  // inputs_str
+            None,  // template_spec
+            false, // auto_apply
+            None,  // project_name
+            None,  // environment_name
+        );
 
         assert!(
             result.is_ok(),
@@ -4522,7 +4603,15 @@ spec:
         let ctx = create_test_context(Arc::clone(&fs), input);
 
         // Run create command
-        let result = CreateCommand::execute(&ctx, None, None, None);
+        let result = CreateCommand::execute(
+            &ctx, None,  // output_path
+            None,  // template_packs_paths
+            None,  // inputs_str
+            None,  // template_spec
+            false, // auto_apply
+            None,  // project_name
+            None,  // environment_name
+        );
 
         assert!(
             result.is_ok(),
@@ -4590,7 +4679,15 @@ spec:
         let ctx = create_test_context(Arc::clone(&fs), input);
 
         // Run create command
-        let result = CreateCommand::execute(&ctx, None, None, None);
+        let result = CreateCommand::execute(
+            &ctx, None,  // output_path
+            None,  // template_packs_paths
+            None,  // inputs_str
+            None,  // template_spec
+            false, // auto_apply
+            None,  // project_name
+            None,  // environment_name
+        );
 
         assert!(
             result.is_ok(),
@@ -4654,7 +4751,15 @@ spec:
         let ctx = create_test_context(Arc::clone(&fs), input);
 
         // Run create command
-        let result = CreateCommand::execute(&ctx, None, None, None);
+        let result = CreateCommand::execute(
+            &ctx, None,  // output_path
+            None,  // template_packs_paths
+            None,  // inputs_str
+            None,  // template_spec
+            false, // auto_apply
+            None,  // project_name
+            None,  // environment_name
+        );
 
         assert!(
             result.is_ok(),
@@ -4716,7 +4821,15 @@ spec:
         let ctx = create_test_context(Arc::clone(&fs), input);
 
         // Run create command
-        let result = CreateCommand::execute(&ctx, None, None, None);
+        let result = CreateCommand::execute(
+            &ctx, None,  // output_path
+            None,  // template_packs_paths
+            None,  // inputs_str
+            None,  // template_spec
+            false, // auto_apply
+            None,  // project_name
+            None,  // environment_name
+        );
 
         assert!(
             result.is_ok(),
@@ -4836,7 +4949,15 @@ spec:
         let ctx = create_test_context(Arc::clone(&fs), input);
 
         // Run create command
-        let result = CreateCommand::execute(&ctx, None, None, None);
+        let result = CreateCommand::execute(
+            &ctx, None,  // output_path
+            None,  // template_packs_paths
+            None,  // inputs_str
+            None,  // template_spec
+            false, // auto_apply
+            None,  // project_name
+            None,  // environment_name
+        );
 
         assert!(
             result.is_ok(),
@@ -4896,7 +5017,15 @@ spec:
         let ctx = create_test_context(Arc::clone(&fs), input);
 
         // Run create command
-        let result = CreateCommand::execute(&ctx, None, None, None);
+        let result = CreateCommand::execute(
+            &ctx, None,  // output_path
+            None,  // template_packs_paths
+            None,  // inputs_str
+            None,  // template_spec
+            false, // auto_apply
+            None,  // project_name
+            None,  // environment_name
+        );
 
         assert!(
             result.is_ok(),

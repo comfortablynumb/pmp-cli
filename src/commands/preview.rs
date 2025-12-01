@@ -88,14 +88,13 @@ impl PreviewCommand {
                 .context("Failed to convert environment path to string")?;
 
             // Run pre-preview hooks
-            if !hooks.pre_preview.is_empty() {
-                if HooksRunner::run_hooks(&hooks.pre_preview, env_dir_str, "pre-preview")?
+            if !hooks.pre_preview.is_empty()
+                && HooksRunner::run_hooks(&hooks.pre_preview, env_dir_str, "pre-preview")?
                     == HookOutcome::Cancel
-                {
-                    ctx.output.blank();
-                    ctx.output.warning("Preview cancelled by pre-preview hook");
-                    return Ok(());
-                }
+            {
+                ctx.output.blank();
+                ctx.output.warning("Preview cancelled by pre-preview hook");
+                return Ok(());
             }
 
             // Show ProjectGroup info
@@ -118,15 +117,14 @@ impl PreviewCommand {
             )?;
 
             // Run post-preview hooks
-            if !hooks.post_preview.is_empty() {
-                if HooksRunner::run_hooks(&hooks.post_preview, env_dir_str, "post-preview")?
+            if !hooks.post_preview.is_empty()
+                && HooksRunner::run_hooks(&hooks.post_preview, env_dir_str, "post-preview")?
                     == HookOutcome::Cancel
-                {
-                    ctx.output.blank();
-                    ctx.output
-                        .warning("Post-preview hooks cancelled further execution");
-                    return Ok(());
-                }
+            {
+                ctx.output.blank();
+                ctx.output
+                    .warning("Post-preview hooks cancelled further execution");
+                return Ok(());
             }
 
             ctx.output.blank();
@@ -197,14 +195,13 @@ impl PreviewCommand {
             .context("Failed to convert environment path to string")?;
 
         // Run pre-preview hooks
-        if !hooks.pre_preview.is_empty() {
-            if HooksRunner::run_hooks(&hooks.pre_preview, env_dir_str, "pre-preview")?
+        if !hooks.pre_preview.is_empty()
+            && HooksRunner::run_hooks(&hooks.pre_preview, env_dir_str, "pre-preview")?
                 == HookOutcome::Cancel
-            {
-                ctx.output.blank();
-                ctx.output.warning("Preview cancelled by pre-preview hook");
-                return Ok(());
-            }
+        {
+            ctx.output.blank();
+            ctx.output.warning("Preview cancelled by pre-preview hook");
+            return Ok(());
         }
 
         // Run helm repo update if configured
@@ -263,15 +260,14 @@ impl PreviewCommand {
         executor.plan(&execution_config, env_dir_str, extra_args)?;
 
         // Run post-preview hooks
-        if !hooks.post_preview.is_empty() {
-            if HooksRunner::run_hooks(&hooks.post_preview, env_dir_str, "post-preview")?
+        if !hooks.post_preview.is_empty()
+            && HooksRunner::run_hooks(&hooks.post_preview, env_dir_str, "post-preview")?
                 == HookOutcome::Cancel
-            {
-                ctx.output.blank();
-                ctx.output
-                    .warning("Post-preview hooks cancelled further execution");
-                return Ok(());
-            }
+        {
+            ctx.output.blank();
+            ctx.output
+                .warning("Post-preview hooks cancelled further execution");
+            return Ok(());
         }
 
         ctx.output.blank();

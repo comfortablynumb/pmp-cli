@@ -254,16 +254,15 @@ impl ExecutionHelper {
         let hooks = Self::merge_hooks(&infrastructure_hooks, env_resource.spec.hooks.as_ref());
 
         // Run pre-preview hooks
-        if !hooks.pre_preview.is_empty() {
-            if HooksRunner::run_hooks(&hooks.pre_preview, env_dir_str, "pre-preview")?
+        if !hooks.pre_preview.is_empty()
+            && HooksRunner::run_hooks(&hooks.pre_preview, env_dir_str, "pre-preview")?
                 == HookOutcome::Cancel
-            {
-                ctx.output.warning(&format!(
-                    "Preview cancelled by pre-preview hook for {} ({})",
-                    node.project_name, node.environment_name
-                ));
-                return Ok(());
-            }
+        {
+            ctx.output.warning(&format!(
+                "Preview cancelled by pre-preview hook for {} ({})",
+                node.project_name, node.environment_name
+            ));
+            return Ok(());
         }
 
         // Run helm repo update if configured
@@ -299,16 +298,15 @@ impl ExecutionHelper {
         executor.plan(execution_config, env_dir_str, extra_args)?;
 
         // Run post-preview hooks
-        if !hooks.post_preview.is_empty() {
-            if HooksRunner::run_hooks(&hooks.post_preview, env_dir_str, "post-preview")?
+        if !hooks.post_preview.is_empty()
+            && HooksRunner::run_hooks(&hooks.post_preview, env_dir_str, "post-preview")?
                 == HookOutcome::Cancel
-            {
-                ctx.output.warning(&format!(
-                    "Post-preview hooks cancelled for {} ({})",
-                    node.project_name, node.environment_name
-                ));
-                return Ok(());
-            }
+        {
+            ctx.output.warning(&format!(
+                "Post-preview hooks cancelled for {} ({})",
+                node.project_name, node.environment_name
+            ));
+            return Ok(());
         }
 
         ctx.output.success(&format!(
@@ -356,16 +354,15 @@ impl ExecutionHelper {
         let hooks = Self::merge_hooks(&infrastructure_hooks, env_resource.spec.hooks.as_ref());
 
         // Run pre-apply hooks
-        if !hooks.pre_apply.is_empty() {
-            if HooksRunner::run_hooks(&hooks.pre_apply, env_dir_str, "pre-apply")?
+        if !hooks.pre_apply.is_empty()
+            && HooksRunner::run_hooks(&hooks.pre_apply, env_dir_str, "pre-apply")?
                 == HookOutcome::Cancel
-            {
-                ctx.output.warning(&format!(
-                    "Apply cancelled by pre-apply hook for {} ({})",
-                    node.project_name, node.environment_name
-                ));
-                return Ok(());
-            }
+        {
+            ctx.output.warning(&format!(
+                "Apply cancelled by pre-apply hook for {} ({})",
+                node.project_name, node.environment_name
+            ));
+            return Ok(());
         }
 
         // Run helm repo update if configured
@@ -401,16 +398,15 @@ impl ExecutionHelper {
         executor.apply(execution_config, env_dir_str, extra_args)?;
 
         // Run post-apply hooks
-        if !hooks.post_apply.is_empty() {
-            if HooksRunner::run_hooks(&hooks.post_apply, env_dir_str, "post-apply")?
+        if !hooks.post_apply.is_empty()
+            && HooksRunner::run_hooks(&hooks.post_apply, env_dir_str, "post-apply")?
                 == HookOutcome::Cancel
-            {
-                ctx.output.warning(&format!(
-                    "Post-apply hooks cancelled for {} ({})",
-                    node.project_name, node.environment_name
-                ));
-                return Ok(());
-            }
+        {
+            ctx.output.warning(&format!(
+                "Post-apply hooks cancelled for {} ({})",
+                node.project_name, node.environment_name
+            ));
+            return Ok(());
         }
 
         ctx.output.success(&format!(
@@ -458,16 +454,15 @@ impl ExecutionHelper {
         let hooks = Self::merge_hooks(&infrastructure_hooks, env_resource.spec.hooks.as_ref());
 
         // Run pre-destroy hooks
-        if !hooks.pre_destroy.is_empty() {
-            if HooksRunner::run_hooks(&hooks.pre_destroy, env_dir_str, "pre-destroy")?
+        if !hooks.pre_destroy.is_empty()
+            && HooksRunner::run_hooks(&hooks.pre_destroy, env_dir_str, "pre-destroy")?
                 == HookOutcome::Cancel
-            {
-                ctx.output.warning(&format!(
-                    "Destroy cancelled by pre-destroy hook for {} ({})",
-                    node.project_name, node.environment_name
-                ));
-                return Ok(());
-            }
+        {
+            ctx.output.warning(&format!(
+                "Destroy cancelled by pre-destroy hook for {} ({})",
+                node.project_name, node.environment_name
+            ));
+            return Ok(());
         }
 
         // Run helm repo update if configured
@@ -503,16 +498,15 @@ impl ExecutionHelper {
         executor.destroy(execution_config, env_dir_str, extra_args)?;
 
         // Run post-destroy hooks
-        if !hooks.post_destroy.is_empty() {
-            if HooksRunner::run_hooks(&hooks.post_destroy, env_dir_str, "post-destroy")?
+        if !hooks.post_destroy.is_empty()
+            && HooksRunner::run_hooks(&hooks.post_destroy, env_dir_str, "post-destroy")?
                 == HookOutcome::Cancel
-            {
-                ctx.output.warning(&format!(
-                    "Post-destroy hooks cancelled for {} ({})",
-                    node.project_name, node.environment_name
-                ));
-                return Ok(());
-            }
+        {
+            ctx.output.warning(&format!(
+                "Post-destroy hooks cancelled for {} ({})",
+                node.project_name, node.environment_name
+            ));
+            return Ok(());
         }
 
         ctx.output.success(&format!(

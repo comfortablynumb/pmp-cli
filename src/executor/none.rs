@@ -118,6 +118,7 @@ mod tests {
             apply_command: None,
             destroy_command: None,
             refresh_command: None,
+            command_options: std::collections::HashMap::new(),
         };
         assert!(executor.plan(&config, "/tmp", &[]).is_ok());
     }
@@ -130,6 +131,7 @@ mod tests {
             apply_command: None,
             destroy_command: None,
             refresh_command: None,
+            command_options: std::collections::HashMap::new(),
         };
         assert!(executor.apply(&config, "/tmp", &[]).is_ok());
     }
@@ -142,6 +144,7 @@ mod tests {
             apply_command: None,
             destroy_command: None,
             refresh_command: None,
+            command_options: std::collections::HashMap::new(),
         };
         assert!(executor.destroy(&config, "/tmp", &[]).is_ok());
     }
@@ -154,6 +157,7 @@ mod tests {
             apply_command: None,
             destroy_command: None,
             refresh_command: None,
+            command_options: std::collections::HashMap::new(),
         };
         assert!(executor.refresh(&config, "/tmp", &[]).is_ok());
     }

@@ -105,14 +105,13 @@ impl RefreshCommand {
             .context("Failed to convert environment path to string")?;
 
         // Run pre-refresh hooks
-        if !hooks.pre_refresh.is_empty() {
-            if HooksRunner::run_hooks(&hooks.pre_refresh, env_dir_str, "pre-refresh")?
+        if !hooks.pre_refresh.is_empty()
+            && HooksRunner::run_hooks(&hooks.pre_refresh, env_dir_str, "pre-refresh")?
                 == HookOutcome::Cancel
-            {
-                ctx.output.blank();
-                ctx.output.warning("Refresh cancelled by pre-refresh hook");
-                return Ok(());
-            }
+        {
+            ctx.output.blank();
+            ctx.output.warning("Refresh cancelled by pre-refresh hook");
+            return Ok(());
         }
 
         // Initialize executor
@@ -164,15 +163,14 @@ impl RefreshCommand {
         executor.refresh(&execution_config, env_dir_str, extra_args)?;
 
         // Run post-refresh hooks
-        if !hooks.post_refresh.is_empty() {
-            if HooksRunner::run_hooks(&hooks.post_refresh, env_dir_str, "post-refresh")?
+        if !hooks.post_refresh.is_empty()
+            && HooksRunner::run_hooks(&hooks.post_refresh, env_dir_str, "post-refresh")?
                 == HookOutcome::Cancel
-            {
-                ctx.output.blank();
-                ctx.output
-                    .warning("Post-refresh hooks cancelled further execution");
-                return Ok(());
-            }
+        {
+            ctx.output.blank();
+            ctx.output
+                .warning("Post-refresh hooks cancelled further execution");
+            return Ok(());
         }
 
         ctx.output.blank();

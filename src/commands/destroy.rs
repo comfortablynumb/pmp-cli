@@ -116,14 +116,13 @@ impl DestroyCommand {
                 .context("Failed to convert environment path to string")?;
 
             // Run pre-destroy hooks
-            if !hooks.pre_destroy.is_empty() {
-                if HooksRunner::run_hooks(&hooks.pre_destroy, env_dir_str, "pre-destroy")?
+            if !hooks.pre_destroy.is_empty()
+                && HooksRunner::run_hooks(&hooks.pre_destroy, env_dir_str, "pre-destroy")?
                     == HookOutcome::Cancel
-                {
-                    ctx.output.blank();
-                    ctx.output.warning("Destroy cancelled by pre-destroy hook");
-                    return Ok(());
-                }
+            {
+                ctx.output.blank();
+                ctx.output.warning("Destroy cancelled by pre-destroy hook");
+                return Ok(());
             }
 
             // Execute destroy on all configured projects (in reverse order)
@@ -132,15 +131,14 @@ impl DestroyCommand {
             )?;
 
             // Run post-destroy hooks
-            if !hooks.post_destroy.is_empty() {
-                if HooksRunner::run_hooks(&hooks.post_destroy, env_dir_str, "post-destroy")?
+            if !hooks.post_destroy.is_empty()
+                && HooksRunner::run_hooks(&hooks.post_destroy, env_dir_str, "post-destroy")?
                     == HookOutcome::Cancel
-                {
-                    ctx.output.blank();
-                    ctx.output
-                        .warning("Post-destroy hooks cancelled further execution");
-                    return Ok(());
-                }
+            {
+                ctx.output.blank();
+                ctx.output
+                    .warning("Post-destroy hooks cancelled further execution");
+                return Ok(());
             }
 
             ctx.output.blank();
@@ -284,14 +282,13 @@ impl DestroyCommand {
             .context("Failed to convert environment path to string")?;
 
         // Run pre-destroy hooks
-        if !hooks.pre_destroy.is_empty() {
-            if HooksRunner::run_hooks(&hooks.pre_destroy, env_dir_str, "pre-destroy")?
+        if !hooks.pre_destroy.is_empty()
+            && HooksRunner::run_hooks(&hooks.pre_destroy, env_dir_str, "pre-destroy")?
                 == HookOutcome::Cancel
-            {
-                ctx.output.blank();
-                ctx.output.warning("Destroy cancelled by pre-destroy hook");
-                return Ok(());
-            }
+        {
+            ctx.output.blank();
+            ctx.output.warning("Destroy cancelled by pre-destroy hook");
+            return Ok(());
         }
 
         // Run helm repo update if configured
@@ -350,15 +347,14 @@ impl DestroyCommand {
         executor.destroy(&execution_config, env_dir_str, extra_args)?;
 
         // Run post-destroy hooks
-        if !hooks.post_destroy.is_empty() {
-            if HooksRunner::run_hooks(&hooks.post_destroy, env_dir_str, "post-destroy")?
+        if !hooks.post_destroy.is_empty()
+            && HooksRunner::run_hooks(&hooks.post_destroy, env_dir_str, "post-destroy")?
                 == HookOutcome::Cancel
-            {
-                ctx.output.blank();
-                ctx.output
-                    .warning("Post-destroy hooks cancelled further execution");
-                return Ok(());
-            }
+        {
+            ctx.output.blank();
+            ctx.output
+                .warning("Post-destroy hooks cancelled further execution");
+            return Ok(());
         }
 
         ctx.output.blank();

@@ -368,12 +368,12 @@ pub fn generate_module_blocks(plugins: &[AddedPlugin]) -> String {
         }
 
         // Add raw module inputs if provided
-        if let Some(raw_inputs) = &plugin.raw_module_inputs {
-            if !raw_inputs.is_empty() {
-                hcl.push_str("\n  # Raw module inputs (HCL expressions)\n");
-                for (key, expression) in raw_inputs {
-                    hcl.push_str(&format!("  {} = {}\n", key, expression));
-                }
+        if let Some(raw_inputs) = &plugin.raw_module_inputs
+            && !raw_inputs.is_empty()
+        {
+            hcl.push_str("\n  # Raw module inputs (HCL expressions)\n");
+            for (key, expression) in raw_inputs {
+                hcl.push_str(&format!("  {} = {}\n", key, expression));
             }
         }
 
@@ -596,11 +596,11 @@ impl OpenTofuExecutor {
         HANDLER_INIT.call_once(|| {
             let _ = ctrlc::set_handler(move || {
                 INTERRUPTED.store(true, Ordering::SeqCst);
-                if let Ok(mut child_guard) = CHILD_PROCESS.lock() {
-                    if let Some(child) = child_guard.as_mut() {
-                        // Kill the child process
-                        let _ = child.kill();
-                    }
+                if let Ok(mut child_guard) = CHILD_PROCESS.lock()
+                    && let Some(child) = child_guard.as_mut()
+                {
+                    // Kill the child process
+                    let _ = child.kill();
                 }
                 std::process::exit(130); // Standard exit code for SIGINT
             });
