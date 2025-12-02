@@ -2571,16 +2571,19 @@ impl UpdateCommand {
         // Find new dependencies that don't exist in current environment
         let mut new_dependencies = Vec::new();
         for dep in &template.spec.dependencies {
-            let dep_name = dep.dependency_name.as_ref();
+            // Calculate the actual data_source_name that would be generated
+            // This matches the logic in lines 2663-2668 below
+            let template_ref = &dep.project;
+            let calculated_data_source_name = template_ref
+                .remote_state
+                .as_ref()
+                .map(|rs| rs.data_source_name.clone())
+                .or_else(|| dep.dependency_name.clone())
+                .unwrap_or_else(|| format!("ref_{}", merged_refs.len()));
+
             let exists = merged_refs.iter().any(|existing_ref| {
-                // Check if dependency already exists by matching data_source_name
-                if let Some(name) = dep_name {
-                    &existing_ref.data_source_name == name
-                } else {
-                    // If no dependency_name, check by kind and apiVersion
-                    existing_ref.api_version == dep.project.api_version
-                        && existing_ref.kind == dep.project.kind
-                }
+                // Check if dependency already exists by matching the actual data_source_name
+                &existing_ref.data_source_name == &calculated_data_source_name
             });
 
             if !exists {

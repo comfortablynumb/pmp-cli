@@ -409,10 +409,25 @@ pub fn generate_data_source_backends(
         return Ok(String::new());
     }
 
+    // Deduplicate plugins by data source name
+    // This handles cases where duplicate plugins exist
+    let mut seen = std::collections::HashSet::new();
+    let mut unique_plugins = Vec::new();
+    for plugin in plugins_with_refs {
+        let reference = plugin.reference_project.as_ref().unwrap();
+        let data_source_name = format!(
+            "plugin_{}_{}_{}",
+            plugin.template_pack_name, plugin.name, reference.name
+        );
+        if seen.insert(data_source_name) {
+            unique_plugins.push(plugin);
+        }
+    }
+
     let mut hcl = String::new();
     hcl.push_str("\n# Data sources for plugin reference projects\n");
 
-    for plugin in plugins_with_refs {
+    for plugin in unique_plugins {
         let reference = plugin.reference_project.as_ref().unwrap();
 
         // Data source name: plugin_{template_pack_name}_{plugin_name}_{reference_project_name}
@@ -472,10 +487,18 @@ pub fn generate_template_data_source_backends(
         return Ok(String::new());
     }
 
+    // Deduplicate template references by data_source_name
+    // This handles cases where the YAML file has duplicate entries
+    let mut seen = std::collections::HashSet::new();
+    let unique_refs: Vec<_> = template_refs
+        .iter()
+        .filter(|r| seen.insert(&r.data_source_name))
+        .collect();
+
     let mut hcl = String::new();
     hcl.push_str("\n# Data sources for template reference projects\n");
 
-    for template_ref in template_refs {
+    for template_ref in unique_refs {
         // Data source name: template_ref_{data_source_name}
         let data_source_name = format!("template_ref_{}", template_ref.data_source_name);
 
