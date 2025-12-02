@@ -52,6 +52,7 @@ impl TemplateCommand {
                 "terraform".to_string(),
                 "none".to_string(),
             ],
+            None,
         )?;
 
         // Ask about inputs
@@ -73,6 +74,7 @@ impl TemplateCommand {
                         "number".to_string(),
                         "boolean".to_string(),
                     ],
+                    None,
                 )?;
 
                 let input_description = ctx.input.text("Input description:", None)?;

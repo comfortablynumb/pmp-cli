@@ -434,7 +434,7 @@ impl DestroyCommand {
 
         let selected = ctx
             .input
-            .select("Select an environment:", environments)
+            .select("Select an environment:", environments, None)
             .context("Failed to select environment")?;
 
         Ok(selected)
@@ -464,7 +464,7 @@ impl DestroyCommand {
 
         let selected_project_display = ctx
             .input
-            .select("Select a project:", project_options.clone())
+            .select("Select a project:", project_options.clone(), None)
             .context("Failed to select project")?;
 
         let project_index = project_options

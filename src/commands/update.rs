@@ -128,7 +128,7 @@ impl UpdateCommand {
 
             let action = ctx
                 .input
-                .select("What would you like to do?", options)
+                .select("What would you like to do?", options, None)
                 .context("Failed to select action")?;
 
             if action == "Add Plugin" {
@@ -590,8 +590,17 @@ impl UpdateCommand {
             } else {
                 None
             };
-            let template_reference_projects =
-                &current_env_resource.spec.template_reference_projects;
+
+            // Check for new template dependencies and add them BEFORE generating _common.tf
+            let merged_template_reference_projects = Self::merge_template_dependencies(
+                ctx,
+                &matching_template.resource,
+                &current_env_resource,
+                &env_name,
+                &env_path,
+            )
+            .context("Failed to merge template dependencies")?;
+
             let metadata = crate::executor::ProjectMetadata {
                 api_version: &matching_template.resource.spec.api_version,
                 kind: &matching_template.resource.spec.kind,
@@ -605,9 +614,12 @@ impl UpdateCommand {
                     &executor_config.config,
                     &metadata,
                     plugins,
-                    template_reference_projects,
+                    &merged_template_reference_projects,
                 )
                 .context("Failed to generate common file")?;
+        } else {
+            // No executor, so no common file to generate
+            // Dependencies will be merged for environment YAML generation below
         }
 
         // Regenerate .pmp.environment.yaml file
@@ -628,6 +640,16 @@ impl UpdateCommand {
             None
         };
 
+        // Merge template dependencies (do this again to ensure we have it for YAML generation)
+        let merged_template_reference_projects = Self::merge_template_dependencies(
+            ctx,
+            &matching_template.resource,
+            &current_env_resource,
+            &env_name,
+            &env_path,
+        )
+        .context("Failed to merge template dependencies")?;
+
         Self::generate_project_environment_yaml(
             ctx,
             &env_path,
@@ -639,6 +661,7 @@ impl UpdateCommand {
             &matching_template.resource.metadata.name,
             plugins_for_yaml,
             &current_env_resource,
+            &merged_template_reference_projects,
         )
         .context("Failed to update .pmp.environment.yaml file")?;
 
@@ -947,7 +970,7 @@ impl UpdateCommand {
 
         let selected_plugin_display = ctx
             .input
-            .select("Select a plugin to add:", plugin_options.clone())
+            .select("Select a plugin to add:", plugin_options.clone(), None)
             .context("Failed to select plugin")?;
 
         let plugin_index = plugin_options
@@ -1003,7 +1026,7 @@ impl UpdateCommand {
 
             let selected_project_display = ctx
                 .input
-                .select("Select a project:", project_options.clone())
+                .select("Select a project:", project_options.clone(), None)
                 .context("Failed to select project")?;
 
             let project_index = project_options
@@ -1046,6 +1069,7 @@ impl UpdateCommand {
                     .select(
                         "Select reference environment:",
                         reference_environments.clone(),
+                        None,
                     )
                     .context("Failed to select reference environment")?
             };
@@ -1464,6 +1488,7 @@ impl UpdateCommand {
             .select(
                 "Which plugin would you like to remove?",
                 plugin_options.clone(),
+                None,
             )
             .context("Failed to select plugin")?;
 
@@ -1624,6 +1649,7 @@ impl UpdateCommand {
             .select(
                 "Which plugin would you like to update?",
                 plugin_options.clone(),
+                None,
             )
             .context("Failed to select plugin")?;
 
@@ -1898,7 +1924,7 @@ impl UpdateCommand {
 
         let selected = ctx
             .input
-            .select("Select an environment:", environments.clone())
+            .select("Select an environment:", environments.clone(), None)
             .context("Failed to select environment")?;
 
         Ok(selected)
@@ -1928,7 +1954,7 @@ impl UpdateCommand {
 
         let selected_project_display = ctx
             .input
-            .select("Select a project:", project_options.clone())
+            .select("Select a project:", project_options.clone(), None)
             .context("Failed to select project")?;
 
         let project_index = project_options
@@ -2077,15 +2103,19 @@ impl UpdateCommand {
                 let mut sorted_enum_values = enum_values.clone();
                 sorted_enum_values.sort();
 
-                let _default_str = current_value
+                let default_str = current_value
                     .and_then(|v| v.as_str())
                     .or_else(|| interpolated_default.as_ref().and_then(|v| v.as_str()))
                     .or_else(|| sorted_enum_values.first().map(|s| s.as_str()));
 
-                // Note: The starting cursor feature (pre-selecting the default) is not supported by the trait
+                // Find the default value index in the sorted list
+                let default_index = default_str.and_then(|default_val| {
+                    sorted_enum_values.iter().position(|v| v == default_val)
+                });
+
                 let selected = ctx
                     .input
-                    .select(&description, sorted_enum_values)
+                    .select(&description, sorted_enum_values, default_index)
                     .context("Failed to get input")?;
 
                 serde_json::Value::String(selected)
@@ -2373,7 +2403,7 @@ impl UpdateCommand {
 
                 let selected_display = ctx
                     .input
-                    .select("  Select reference project:", project_names.clone())?;
+                    .select("  Select reference project:", project_names.clone(), None)?;
 
                 // Find the matching project by display name
                 let selected_idx = project_names
@@ -2519,6 +2549,290 @@ impl UpdateCommand {
         Ok(inputs)
     }
 
+    /// Merge template dependencies with existing template reference projects
+    /// Returns a list containing both existing references and newly added ones
+    fn merge_template_dependencies(
+        ctx: &crate::context::Context,
+        template: &crate::template::metadata::TemplateResource,
+        current_env: &DynamicProjectEnvironmentResource,
+        environment_name: &str,
+        environment_path: &Path,
+    ) -> Result<Vec<crate::template::metadata::TemplateReferenceProject>> {
+        use crate::collection::CollectionDiscovery;
+        use crate::output;
+
+        let mut merged_refs = current_env.spec.template_reference_projects.clone();
+
+        // If template has no dependencies, just return existing references
+        if template.spec.dependencies.is_empty() {
+            return Ok(merged_refs);
+        }
+
+        // Find new dependencies that don't exist in current environment
+        let mut new_dependencies = Vec::new();
+        for dep in &template.spec.dependencies {
+            let dep_name = dep.dependency_name.as_ref();
+            let exists = merged_refs.iter().any(|existing_ref| {
+                // Check if dependency already exists by matching data_source_name
+                if let Some(name) = dep_name {
+                    &existing_ref.data_source_name == name
+                } else {
+                    // If no dependency_name, check by kind and apiVersion
+                    existing_ref.api_version == dep.project.api_version
+                        && existing_ref.kind == dep.project.kind
+                }
+            });
+
+            if !exists {
+                new_dependencies.push(dep);
+            }
+        }
+
+        // If no new dependencies, return existing references
+        if new_dependencies.is_empty() {
+            return Ok(merged_refs);
+        }
+
+        // Get infrastructure root from environment path
+        let infrastructure_root = environment_path
+            .parent() // environments dir
+            .and_then(|p| p.parent()) // project dir
+            .and_then(|p| p.parent()) // projects dir
+            .and_then(|p| p.parent()) // infrastructure root
+            .ok_or_else(|| anyhow::anyhow!("Failed to determine infrastructure root"))?;
+
+        output::subsection("New Template Dependencies Detected");
+        output::dimmed(&format!(
+            "Template requires {} new reference project(s).",
+            new_dependencies.len()
+        ));
+        output::blank();
+
+        // Discover all projects in the collection
+        let projects = CollectionDiscovery::discover_projects(
+            &*ctx.fs,
+            &*ctx.output,
+            infrastructure_root,
+        )?;
+
+        // Process each new dependency
+        for (ref_index, dep) in new_dependencies.iter().enumerate() {
+            let template_ref = &dep.project;
+            let ref_number = ref_index + 1;
+            let total_refs = new_dependencies.len();
+
+            // Show description if available, otherwise show kind and label selectors
+            if let Some(desc) = &template_ref.description {
+                output::dimmed(&format!("[{}/{}] {}", ref_number, total_refs, desc));
+            } else {
+                output::dimmed(&format!(
+                    "[{}/{}] Reference project matching apiVersion: {}, kind: {}",
+                    ref_number, total_refs, template_ref.api_version, template_ref.kind
+                ));
+            }
+
+            // Select reference project
+            let (reference_project_name, reference_env_name) =
+                Self::select_reference_project(ctx, template_ref, &projects, environment_name)?;
+
+            // Load the reference environment resource
+            let reference_project_path = infrastructure_root
+                .join("projects")
+                .join(&reference_project_name);
+            let reference_env_path = reference_project_path
+                .join("environments")
+                .join(&reference_env_name);
+
+            let reference_env_file = reference_env_path.join(".pmp.environment.yaml");
+
+            if !ctx.fs.exists(&reference_env_file) {
+                anyhow::bail!(
+                    "Reference environment file not found: {:?}",
+                    reference_env_file
+                );
+            }
+
+            let loaded_env_resource =
+                crate::template::metadata::DynamicProjectEnvironmentResource::from_file(
+                    &*ctx.fs,
+                    &reference_env_file,
+                )
+                .context("Failed to load reference environment resource")?;
+
+            // Store the template reference project
+            let data_source_name = template_ref
+                .remote_state
+                .as_ref()
+                .map(|rs| rs.data_source_name.clone())
+                .or_else(|| dep.dependency_name.clone())
+                .unwrap_or_else(|| format!("ref_{}", merged_refs.len()));
+
+            merged_refs.push(crate::template::metadata::TemplateReferenceProject {
+                api_version: loaded_env_resource.api_version.clone(),
+                kind: loaded_env_resource.kind.clone(),
+                name: loaded_env_resource.metadata.name.clone(),
+                environment: reference_env_name,
+                data_source_name,
+            });
+
+            output::blank();
+        }
+
+        Ok(merged_refs)
+    }
+
+    /// Select a reference project matching the template requirements
+    fn select_reference_project(
+        ctx: &crate::context::Context,
+        template_ref: &crate::template::metadata::TemplateProjectRef,
+        projects: &[crate::template::metadata::ProjectReference],
+        _environment_name: &str,
+    ) -> Result<(String, String)> {
+        use crate::collection::CollectionDiscovery;
+        use crate::output;
+
+        // Get infrastructure root and infrastructure resource
+        let (infrastructure, infrastructure_root) = CollectionDiscovery::find_collection(&*ctx.fs)?
+            .ok_or_else(|| anyhow::anyhow!("Failed to find infrastructure collection"))?;
+
+        // Filter projects by required apiVersion and kind
+        let mut compatible_projects = Vec::new();
+        for project in projects {
+            let project_path = infrastructure_root.join(&project.path);
+            let environments_dir = project_path.join("environments");
+
+            if let Ok(env_entries) = ctx.fs.read_dir(&environments_dir) {
+                for env_path in env_entries {
+                    let env_file = env_path.join(".pmp.environment.yaml");
+                    if ctx.fs.exists(&env_file)
+                        && let Ok(env_resource) =
+                            crate::template::metadata::DynamicProjectEnvironmentResource::from_file(
+                                &*ctx.fs,
+                                &env_file,
+                            )
+                    {
+                        // Check apiVersion/kind match AND template is in category tree
+                        // Also check labels - match against EITHER project labels OR environment resource labels
+                        if env_resource.api_version == template_ref.api_version
+                            && env_resource.kind == template_ref.kind
+                            && (Self::labels_match(&project.labels, &template_ref.label_selector)
+                                || Self::labels_match(
+                                    &env_resource.metadata.labels,
+                                    &template_ref.label_selector,
+                                ))
+                            && env_resource
+                                .spec
+                                .template
+                                .as_ref()
+                                .map(|t| {
+                                    infrastructure.is_template_in_category_tree(
+                                        &t.template_pack_name,
+                                        &t.name,
+                                    )
+                                })
+                                .unwrap_or(false)
+                        {
+                            compatible_projects.push((project.clone(), project_path.clone()));
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        if compatible_projects.is_empty() {
+            anyhow::bail!(
+                "No compatible projects found for template reference.\n\nRequired: {} (Kind: {})",
+                template_ref.api_version,
+                template_ref.kind
+            );
+        }
+
+        // Sort projects by name for consistent display
+        compatible_projects.sort_by(|a, b| a.0.name.cmp(&b.0.name));
+        compatible_projects.dedup_by(|a, b| a.0.name == b.0.name);
+
+        let project_options: Vec<String> = compatible_projects
+            .iter()
+            .map(|(proj, _)| {
+                // Show project name with labels if available
+                if !proj.labels.is_empty() {
+                    let labels_str = proj
+                        .labels
+                        .iter()
+                        .map(|(k, v)| format!("{}={}", k, v))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    format!("{} ({})", proj.name, labels_str)
+                } else {
+                    proj.name.clone()
+                }
+            })
+            .collect();
+
+        let selected_project_display = ctx
+            .input
+            .select("Select reference project:", project_options.clone(), None)
+            .context("Failed to select reference project")?;
+
+        let project_index = project_options
+            .iter()
+            .position(|opt| opt == &selected_project_display)
+            .context("Project not found")?;
+
+        let (selected_project, selected_project_path) = &compatible_projects[project_index];
+
+        output::blank();
+        output::key_value_highlight("Reference Project", &selected_project.name);
+        output::key_value("Resource Kind", &template_ref.kind);
+
+        // Discover environments from the selected reference project
+        let reference_environments =
+            CollectionDiscovery::discover_environments(&*ctx.fs, selected_project_path)?;
+
+        if reference_environments.is_empty() {
+            anyhow::bail!(
+                "No environments found in reference project: {}",
+                selected_project.name
+            );
+        }
+
+        let reference_env_name = if reference_environments.len() == 1 {
+            reference_environments[0].clone()
+        } else {
+            ctx.input
+                .select(
+                    "Select reference environment:",
+                    reference_environments.clone(),
+                    None,
+                )
+                .context("Failed to select reference environment")?
+        };
+
+        output::blank();
+        output::key_value("Reference Environment", &reference_env_name);
+
+        Ok((selected_project.name.clone(), reference_env_name))
+    }
+
+    /// Check if project labels match the label selector
+    fn labels_match(
+        project_labels: &std::collections::HashMap<String, String>,
+        selector: &std::collections::HashMap<String, String>,
+    ) -> bool {
+        if selector.is_empty() {
+            return true; // No label requirements
+        }
+
+        for (key, value) in selector.iter() {
+            match project_labels.get(key) {
+                Some(project_value) if project_value == value => continue,
+                _ => return false,
+            }
+        }
+        true
+    }
+
     /// Generate the .pmp.environment.yaml file for the project environment (with spec)
     #[allow(clippy::too_many_arguments)]
     fn generate_project_environment_yaml(
@@ -2532,6 +2846,7 @@ impl UpdateCommand {
         template_name: &str,
         merged_plugins: Option<&crate::template::metadata::ProjectPlugins>,
         current_env: &DynamicProjectEnvironmentResource,
+        merged_template_reference_projects: &[crate::template::metadata::TemplateReferenceProject],
     ) -> Result<()> {
         use crate::template::metadata::{
             DynamicProjectEnvironmentMetadata, DynamicProjectEnvironmentResource,
@@ -2575,7 +2890,7 @@ impl UpdateCommand {
                 environment: Some(EnvironmentReference {
                     name: environment_name.to_string(),
                 }),
-                template_reference_projects: current_env.spec.template_reference_projects.clone(), // Preserve from current env
+                template_reference_projects: merged_template_reference_projects.to_vec(), // Use merged list
                 dependencies: current_env.spec.dependencies.clone(), // Preserve from current env
                 projects: current_env.spec.projects.clone(),         // Preserve from current env
                 hooks: current_env
@@ -2679,15 +2994,19 @@ impl UpdateCommand {
                 let mut sorted_enum_values = enum_values.clone();
                 sorted_enum_values.sort();
 
-                let _default_str = interpolated_default
+                let default_str = interpolated_default
                     .as_ref()
                     .and_then(|v| v.as_str())
                     .or_else(|| sorted_enum_values.first().map(|s| s.as_str()));
 
-                // Note: The starting cursor feature (pre-selecting the default) is not supported by the trait
+                // Find the default value index in the sorted list
+                let default_index = default_str.and_then(|default_val| {
+                    sorted_enum_values.iter().position(|v| v == default_val)
+                });
+
                 let selected = ctx
                     .input
-                    .select(&description, sorted_enum_values)
+                    .select(&description, sorted_enum_values, default_index)
                     .context("Failed to get input")?;
 
                 Value::String(selected)
@@ -2858,15 +3177,19 @@ impl UpdateCommand {
                 let mut sorted_enum_values = enum_values.clone();
                 sorted_enum_values.sort();
 
-                let _default_str = current_value
+                let default_str = current_value
                     .and_then(|v| v.as_str())
                     .or_else(|| interpolated_default.as_ref().and_then(|v| v.as_str()))
                     .or_else(|| sorted_enum_values.first().map(|s| s.as_str()));
 
-                // Note: The starting cursor feature (pre-selecting the default) is not supported by the trait
+                // Find the default value index in the sorted list
+                let default_index = default_str.and_then(|default_val| {
+                    sorted_enum_values.iter().position(|v| v == default_val)
+                });
+
                 let selected = ctx
                     .input
-                    .select(&description, sorted_enum_values)
+                    .select(&description, sorted_enum_values, default_index)
                     .context("Failed to get input")?;
 
                 Value::String(selected)

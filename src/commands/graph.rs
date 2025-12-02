@@ -112,7 +112,7 @@ impl GraphCommand {
             environments[0].clone()
         } else {
             ctx.input
-                .select("Select environment:", environments.clone())
+                .select("Select environment:", environments.clone(), None)
                 .context("Failed to select environment")?
         };
 

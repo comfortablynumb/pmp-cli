@@ -110,7 +110,7 @@ impl GenerateCommand {
 
             let selected_pack_display = ctx
                 .input
-                .select("Select a template pack:", pack_options.clone())
+                .select("Select a template pack:", pack_options.clone(), None)
                 .context("Failed to select template pack")?;
 
             let pack_index = pack_options
@@ -190,7 +190,7 @@ impl GenerateCommand {
 
             let selected_template_display = ctx
                 .input
-                .select("Template:", template_options.clone())
+                .select("Template:", template_options.clone(), None)
                 .context("Failed to select template")?;
 
             let template_index = template_options
@@ -235,7 +235,7 @@ impl GenerateCommand {
                 // Multiple environments, let user choose
                 let selected_env = ctx
                     .input
-                    .select("Environment context:", env_keys.clone())
+                    .select("Environment context:", env_keys.clone(), None)
                     .context("Failed to select environment")?;
 
                 ctx.output.environment_badge(&selected_env);
@@ -399,15 +399,13 @@ impl GenerateCommand {
             let selected = if let Some(default) = default_str {
                 let starting_cursor = sorted_enum_values
                     .iter()
-                    .position(|v| v == default)
-                    .unwrap_or(0);
-                let _ = starting_cursor; // Suppress unused warning
+                    .position(|v| v == default);
                 ctx.input
-                    .select(description, sorted_enum_values.clone())
+                    .select(description, sorted_enum_values.clone(), starting_cursor)
                     .context("Failed to get input")?
             } else {
                 ctx.input
-                    .select(description, sorted_enum_values)
+                    .select(description, sorted_enum_values, None)
                     .context("Failed to get input")?
             };
 

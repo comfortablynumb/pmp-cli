@@ -230,7 +230,7 @@ impl CreateCommand {
 
             let selected_display = ctx
                 .input
-                .select("Select reference project:", project_names.clone())?;
+                .select("Select reference project:", project_names.clone(), None)?;
 
             // Find the matching project by display name
             let selected_idx = project_names
@@ -502,9 +502,16 @@ impl CreateCommand {
                 let mut sorted_enum_values = enum_values.clone();
                 sorted_enum_values.sort();
 
+                // Find the default value index in the sorted list
+                let default_index = if let Some(Value::String(default_val)) = &interpolated_default {
+                    sorted_enum_values.iter().position(|v| v == default_val)
+                } else {
+                    None
+                };
+
                 let selected = ctx
                     .input
-                    .select(&description, sorted_enum_values)
+                    .select(&description, sorted_enum_values, default_index)
                     .context("Failed to get input")?;
 
                 Value::String(selected)
@@ -906,7 +913,7 @@ impl CreateCommand {
                 })
                 .collect();
 
-            let selected_pack_display = ctx.input.select("Select a template pack:", pack_options.clone())
+            let selected_pack_display = ctx.input.select("Select a template pack:", pack_options.clone(), None)
                 .context("Failed to select template pack")?;
 
             let pack_index = pack_options
@@ -957,7 +964,7 @@ impl CreateCommand {
                 })
                 .collect();
 
-            let selected_template_display = ctx.input.select("Template:", template_options.clone())
+            let selected_template_display = ctx.input.select("Template:", template_options.clone(), None)
                 .context("Failed to select template")?;
 
             let template_index = template_options
@@ -1091,7 +1098,7 @@ impl CreateCommand {
 
                 let selected_project_display = ctx
                     .input
-                    .select("Select reference project:", project_options.clone())
+                    .select("Select reference project:", project_options.clone(), None)
                     .context("Failed to select reference project")?;
 
                 let project_index = project_options
@@ -1124,6 +1131,7 @@ impl CreateCommand {
                         .select(
                             "Select reference environment:",
                             reference_environments.clone(),
+                            None,
                         )
                         .context("Failed to select reference environment")?
                 };
@@ -1231,7 +1239,7 @@ impl CreateCommand {
 
             let selected_env_display = ctx
                 .input
-                .select("Environment:", env_options.clone())
+                .select("Environment:", env_options.clone(), None)
                 .context("Failed to select environment")?;
 
             // Find the key for the selected environment
@@ -1906,15 +1914,13 @@ impl CreateCommand {
             let selected = if let Some(default) = default_str {
                 let starting_cursor = sorted_enum_values
                     .iter()
-                    .position(|v| v == default)
-                    .unwrap_or(0);
-                let _ = starting_cursor; // Suppress unused warning
+                    .position(|v| v == default);
                 ctx.input
-                    .select(&description, sorted_enum_values.clone())
+                    .select(&description, sorted_enum_values.clone(), starting_cursor)
                     .context("Failed to get input")?
             } else {
                 ctx.input
-                    .select(&description, sorted_enum_values)
+                    .select(&description, sorted_enum_values, None)
                     .context("Failed to get input")?
             };
 
@@ -2018,7 +2024,7 @@ impl CreateCommand {
 
                 let selected = ctx
                     .input
-                    .select(description, options)
+                    .select(description, options, None)
                     .context("Failed to get input")?;
 
                 Ok(Value::Bool(selected == "Yes"))
@@ -2103,7 +2109,7 @@ impl CreateCommand {
 
                 let selected_label = ctx
                     .input
-                    .select(description, labels)
+                    .select(description, labels, None)
                     .context("Failed to get input")?;
 
                 // Find the corresponding value
@@ -2398,7 +2404,7 @@ impl CreateCommand {
 
         let selected = ctx
             .input
-            .select(description, project_names)
+            .select(description, project_names, None)
             .context("Failed to select project")?;
 
         // Extract project name from selection
@@ -3155,7 +3161,7 @@ impl CreateCommand {
             // Show selection prompt (empty string to avoid repeated prompts during navigation)
             let selected = ctx
                 .input
-                .select("", options.clone())
+                .select("", options.clone(), None)
                 .context("Failed to select")?;
 
             // Find which option was selected
@@ -3266,7 +3272,7 @@ impl CreateCommand {
         );
         final_inputs.insert(
             "_project_name_hyphens".to_string(),
-            serde_json::Value::String(project_name.to_string()),
+            serde_json::Value::String(project_name.replace('_', "-")),
         );
         final_inputs.insert(
             "_environment".to_string(),

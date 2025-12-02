@@ -16,7 +16,7 @@ pub enum MockResponse {
 /// Trait for user input operations to enable testing with mocks
 pub trait UserInput: Send + Sync {
     /// Display a selection prompt with options
-    fn select(&self, prompt: &str, options: Vec<String>) -> Result<String>;
+    fn select(&self, prompt: &str, options: Vec<String>, default: Option<usize>) -> Result<String>;
 
     /// Display a multi-selection prompt with options
     fn multi_select(
@@ -40,9 +40,13 @@ pub trait UserInput: Send + Sync {
 pub struct InquireUserInput;
 
 impl UserInput for InquireUserInput {
-    fn select(&self, prompt: &str, options: Vec<String>) -> Result<String> {
+    fn select(&self, prompt: &str, options: Vec<String>, default: Option<usize>) -> Result<String> {
         use inquire::Select;
-        let answer = Select::new(prompt, options).prompt()?;
+        let mut prompt_builder = Select::new(prompt, options);
+        if let Some(default_index) = default {
+            prompt_builder = prompt_builder.with_starting_cursor(default_index);
+        }
+        let answer = prompt_builder.prompt()?;
         Ok(answer)
     }
 
@@ -128,7 +132,7 @@ impl Default for MockUserInput {
 }
 
 impl UserInput for MockUserInput {
-    fn select(&self, _prompt: &str, options: Vec<String>) -> Result<String> {
+    fn select(&self, _prompt: &str, options: Vec<String>, _default: Option<usize>) -> Result<String> {
         match self.next_response()? {
             MockResponse::Select(answer) => {
                 // Verify the answer is in the options

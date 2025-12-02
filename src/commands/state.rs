@@ -501,7 +501,7 @@ impl StateCommand {
             let env_name = if environments.len() == 1 {
                 environments[0].clone()
             } else {
-                ctx.input.select("Select environment:", environments)?
+                ctx.input.select("Select environment:", environments, None)?
             };
 
             Ok(project_path.join("environments").join(env_name))
