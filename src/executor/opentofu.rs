@@ -295,18 +295,6 @@ pub fn generate_module_blocks(plugins: &[AddedPlugin]) -> String {
         // Construct module name and source path based on whether plugin has dependencies
         // Only use reference project name if the plugin spec defines dependencies
         // AND the reference_projects count matches the dependencies count
-
-        // Debug: Print plugin info
-        eprintln!("DEBUG: Plugin {}/{}", plugin.template_pack_name, plugin.name);
-        eprintln!("  - Has spec: {}", plugin.plugin_spec.is_some());
-        if let Some(spec) = &plugin.plugin_spec {
-            eprintln!("  - Dependencies count: {}", spec.dependencies.len());
-        }
-        eprintln!("  - Reference projects count: {}", plugin.reference_projects.len());
-        for (idx, ref_proj) in plugin.reference_projects.iter().enumerate() {
-            eprintln!("    [{}] name: {}", idx, ref_proj.name);
-        }
-
         let has_valid_dependencies = plugin
             .plugin_spec
             .as_ref()
@@ -316,15 +304,11 @@ pub fn generate_module_blocks(plugins: &[AddedPlugin]) -> String {
             })
             .unwrap_or(false);
 
-        eprintln!("  - has_valid_dependencies: {}", has_valid_dependencies);
-
         // Check if the first reference project name is different from the plugin name
         let should_append_ref_name = has_valid_dependencies
             && plugin.reference_projects.first()
                 .map(|first_ref| first_ref.name != plugin.name)
                 .unwrap_or(false);
-
-        eprintln!("  - should_append_ref_name: {}", should_append_ref_name);
 
         let (module_name, source_path) = if should_append_ref_name
             && let Some(first_ref) = plugin.reference_projects.first()
