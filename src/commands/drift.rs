@@ -164,7 +164,7 @@ impl DriftCommand {
         } else {
             ctx.input.confirm(
                 "Apply changes to reconcile drift? This will run 'tofu apply'.",
-                false,
+                Some(false),
             )?
         };
 

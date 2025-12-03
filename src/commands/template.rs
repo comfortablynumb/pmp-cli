@@ -56,7 +56,7 @@ impl TemplateCommand {
         )?;
 
         // Ask about inputs
-        let add_inputs = ctx.input.confirm("Add input definitions?", true)?;
+        let add_inputs = ctx.input.confirm("Add input definitions?", Some(true))?;
 
         let mut inputs = Vec::new();
         if add_inputs {
@@ -83,7 +83,7 @@ impl TemplateCommand {
 
                 inputs.push((input_name, input_type, input_description, input_default));
 
-                let add_more = ctx.input.confirm("Add another input?", true)?;
+                let add_more = ctx.input.confirm("Add another input?", Some(true))?;
                 if !add_more {
                     break;
                 }

@@ -120,7 +120,7 @@ impl CloneCommand {
         output::blank();
 
         // Confirm clone
-        let confirmed = ctx.input.confirm("Proceed with cloning?", true)?;
+        let confirmed = ctx.input.confirm("Proceed with cloning?", Some(true))?;
 
         if !confirmed {
             ctx.output.dimmed("Clone cancelled.");

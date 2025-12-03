@@ -171,7 +171,7 @@ impl EnvCommand {
                 "Promote {} → {}? This will overwrite target configurations.",
                 source_env, target_env
             ),
-            false,
+            Some(false),
         )?;
 
         if !confirmed {

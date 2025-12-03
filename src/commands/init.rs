@@ -237,7 +237,7 @@ impl InitCommand {
             // Ask if they want to add another environment
             let add_another = ctx
                 .input
-                .confirm("Add another environment?", false)
+                .confirm("Add another environment?", Some(false))
                 .context("Failed to get confirmation")?;
 
             if !add_another {
@@ -362,7 +362,7 @@ impl InitCommand {
                     // Ask if they want to continue
                     let continue_editing = ctx
                         .input
-                        .confirm("Continue editing?", true)
+                        .confirm("Continue editing?", Some(true))
                         .context("Failed to get confirmation")?;
 
                     if !continue_editing {
@@ -389,7 +389,7 @@ impl InitCommand {
                     // Ask if they want to continue
                     let continue_editing = ctx
                         .input
-                        .confirm("Continue editing?", true)
+                        .confirm("Continue editing?", Some(true))
                         .context("Failed to get confirmation")?;
 
                     if !continue_editing {
@@ -412,7 +412,7 @@ impl InitCommand {
                     // Ask if they want to continue
                     let continue_editing = ctx
                         .input
-                        .confirm("Continue editing?", true)
+                        .confirm("Continue editing?", Some(true))
                         .context("Failed to get confirmation")?;
 
                     if !continue_editing {

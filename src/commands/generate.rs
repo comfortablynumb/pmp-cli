@@ -416,7 +416,7 @@ impl GenerateCommand {
                 serde_json::Value::Bool(b) => {
                     let answer = ctx
                         .input
-                        .confirm(description, *b)
+                        .confirm(description, Some(*b))
                         .context("Failed to get input")?;
                     Ok(serde_json::Value::Bool(answer))
                 }

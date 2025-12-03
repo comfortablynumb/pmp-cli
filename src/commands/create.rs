@@ -2,7 +2,7 @@ use crate::collection::CollectionDiscovery;
 use crate::commands::apply::ApplyCommand;
 use crate::output;
 use crate::schema::SchemaValidator;
-use crate::template::metadata::{AddedPlugin, InputType, PluginProjectReference};
+use crate::template::metadata::{AddedPlugin, AddedPluginReference, InputType, PluginProjectReference};
 use crate::template::utils::interpolate_all;
 use crate::template::{TemplateDiscovery, TemplateInfo, TemplatePackInfo, TemplateRenderer};
 use anyhow::{Context, Result};
@@ -48,8 +48,7 @@ struct CollectedPluginInfo {
     plugin_name: String,
     plugin_path: std::path::PathBuf,
     inputs: HashMap<String, Value>,
-    reference_project: Option<crate::template::metadata::ProjectReference>,
-    reference_env: Option<crate::template::metadata::DynamicProjectEnvironmentResource>,
+    reference_projects: Vec<(crate::template::metadata::ProjectReference, crate::template::metadata::DynamicProjectEnvironmentResource)>,
     raw_module_inputs: Option<HashMap<String, String>>,
     plugin_spec: crate::template::metadata::PluginSpec,
 }
@@ -138,111 +137,124 @@ impl CreateCommand {
             }
         };
 
-        // Check if plugin requires a reference project
-        let (reference_project, reference_env) = if let Some(required_template) =
-            &plugin_info.resource.spec.requires_project_with_template
-        {
-            // Find compatible projects
-            let compatible_projects: Vec<_> = projects.iter()
-                .filter_map(|project| {
-                    let project_path = collection_root.join(&project.path);
-                    let environments_dir = project_path.join("environments");
+        // Check if plugin requires reference projects
+        let reference_projects_and_envs: Vec<(crate::template::metadata::ProjectReference, crate::template::metadata::DynamicProjectEnvironmentResource)> =
+            if !plugin_info.resource.spec.dependencies.is_empty() {
+                let mut refs = Vec::new();
 
-                    if let Ok(env_entries) = ctx.fs.read_dir(&environments_dir) {
-                        for env_path in env_entries {
-                            let env_file = env_path.join(".pmp.environment.yaml");
-                            if ctx.fs.exists(&env_file)
-                                && let Ok(env_resource) = crate::template::metadata::DynamicProjectEnvironmentResource::from_file(&*ctx.fs, &env_file)
-                                    && env_resource.api_version == required_template.api_version
-                                        && env_resource.kind == required_template.kind
-                                    {
-                                        // Check label selectors if provided
-                                        if let Some(label_selector) = &required_template.label_selector {
-                                            // Check labels from the environment resource (not the project file)
-                                            if !env_resource.metadata.labels.is_empty() {
-                                                // All required labels must match
-                                                let matches = label_selector.iter().all(|(key, value)| {
-                                                    env_resource.metadata.labels.get(key).map(|v| v == value).unwrap_or(false)
-                                                });
-                                                if !matches {
+                for dependency in &plugin_info.resource.spec.dependencies {
+                    let dependency_ref = &dependency.project;
+
+                    // Find compatible projects for THIS dependency
+                    let compatible_projects: Vec<_> = projects.iter()
+                        .filter_map(|project| {
+                            let project_path = collection_root.join(&project.path);
+                            let environments_dir = project_path.join("environments");
+
+                            if let Ok(env_entries) = ctx.fs.read_dir(&environments_dir) {
+                                for env_path in env_entries {
+                                    let env_file = env_path.join(".pmp.environment.yaml");
+                                    if ctx.fs.exists(&env_file)
+                                        && let Ok(env_resource) = crate::template::metadata::DynamicProjectEnvironmentResource::from_file(&*ctx.fs, &env_file)
+                                            && env_resource.api_version == dependency_ref.api_version
+                                                && env_resource.kind == dependency_ref.kind
+                                        {
+                                            // Check label selectors if provided
+                                            if !dependency_ref.label_selector.is_empty() {
+                                                // Check labels from the environment resource
+                                                if !env_resource.metadata.labels.is_empty() {
+                                                    // All required labels must match
+                                                    let matches = dependency_ref.label_selector.iter().all(|(key, value)| {
+                                                        env_resource.metadata.labels.get(key).map(|v| v == value).unwrap_or(false)
+                                                    });
+                                                    if !matches {
+                                                        continue;
+                                                    }
+                                                } else {
+                                                    // Environment has no labels, can't match selector
                                                     continue;
                                                 }
-                                            } else {
-                                                // Environment has no labels, can't match selector
-                                                continue;
                                             }
+
+                                            return Some((project.clone(), env_resource));
                                         }
+                                }
+                            }
+                            None
+                        })
+                        .collect();
 
-                                        return Some((project.clone(), env_resource));
-                                    }
+                    if compatible_projects.is_empty() {
+                        let _dep_display = dependency.dependency_name.as_deref()
+                            .unwrap_or(&dependency_ref.kind);
+                        ctx.output.warning(&format!(
+                            "  Plugin '{}' requires a {} project{}, but none found. Skipping.",
+                            installed_config.plugin_name,
+                            dependency_ref.kind,
+                            dependency.dependency_name.as_ref()
+                                .map(|n| format!(" (dependency: {})", n))
+                                .unwrap_or_default()
+                        ));
+                        return Ok(None);
+                    }
+
+                    // Show description if available, otherwise show kind and label selectors
+                    if let Some(description) = &dependency_ref.description {
+                        ctx.output.dimmed(&format!("  {}", description));
+                    } else {
+                        let mut info_parts = vec![format!(
+                            "Plugin requires a reference to a {} project",
+                            dependency_ref.kind
+                        )];
+                        if !dependency_ref.label_selector.is_empty() {
+                            let labels_str = dependency_ref.label_selector
+                                .iter()
+                                .map(|(k, v)| format!("{}={}", k, v))
+                                .collect::<Vec<_>>()
+                                .join(", ");
+                            info_parts.push(format!("(labels: {})", labels_str));
                         }
+                        if let Some(dep_name) = &dependency.dependency_name {
+                            info_parts.push(format!("[dependency: {}]", dep_name));
+                        }
+                        ctx.output.dimmed(&format!("  {}:", info_parts.join(" ")));
                     }
-                    None
-                })
-                .collect();
 
-            if compatible_projects.is_empty() {
-                ctx.output.warning(&format!(
-                    "  Plugin '{}' requires a {} project, but none found. Skipping.",
-                    installed_config.plugin_name, required_template.kind
-                ));
-                return Ok(None);
-            }
-
-            // Let user select a compatible project
-            // Show description if available, otherwise show kind and label selectors
-            if let Some(description) = &required_template.description {
-                ctx.output.dimmed(&format!("  {}", description));
-            } else {
-                let mut info_parts = vec![format!(
-                    "Plugin requires a reference to a {} project",
-                    required_template.kind
-                )];
-                if let Some(label_selector) = &required_template.label_selector {
-                    let labels_str = label_selector
+                    let project_names: Vec<String> = compatible_projects
                         .iter()
-                        .map(|(k, v)| format!("{}={}", k, v))
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    info_parts.push(format!("(labels: {})", labels_str));
+                        .map(|(p, env)| {
+                            let mut parts = vec![format!("{} ({})", p.name, env.metadata.environment_name)];
+                            if !env.metadata.labels.is_empty() {
+                                let labels_str = env
+                                    .metadata
+                                    .labels
+                                    .iter()
+                                    .map(|(k, v)| format!("{}={}", k, v))
+                                    .collect::<Vec<_>>()
+                                    .join(", ");
+                                parts.push(format!("[{}]", labels_str));
+                            }
+                            parts.join(" ")
+                        })
+                        .collect();
+
+                    let selected_display = ctx
+                        .input
+                        .select("Select reference project:", project_names.clone(), None)?;
+
+                    let selected_idx = project_names
+                        .iter()
+                        .position(|name| name == &selected_display)
+                        .context("Selected project not found in list")?;
+
+                    let (selected_project, selected_env) = &compatible_projects[selected_idx];
+                    refs.push((selected_project.clone(), selected_env.clone()));
                 }
-                ctx.output.dimmed(&format!("  {}:", info_parts.join(" ")));
-            }
 
-            let project_names: Vec<String> = compatible_projects
-                .iter()
-                .map(|(p, env)| {
-                    // Show project name with environment and labels if available
-                    let mut parts = vec![format!("{} ({})", p.name, env.metadata.environment_name)];
-                    if !env.metadata.labels.is_empty() {
-                        let labels_str = env
-                            .metadata
-                            .labels
-                            .iter()
-                            .map(|(k, v)| format!("{}={}", k, v))
-                            .collect::<Vec<_>>()
-                            .join(", ");
-                        parts.push(format!("[{}]", labels_str));
-                    }
-                    parts.join(" ")
-                })
-                .collect();
-
-            let selected_display = ctx
-                .input
-                .select("Select reference project:", project_names.clone(), None)?;
-
-            // Find the matching project by display name
-            let selected_idx = project_names
-                .iter()
-                .position(|name| name == &selected_display)
-                .context("Selected project not found in list")?;
-
-            let (selected_project, selected_env) = &compatible_projects[selected_idx];
-            (Some(selected_project.clone()), Some(selected_env.clone()))
-        } else {
-            (None, None)
-        };
+                refs
+            } else {
+                Vec::new()
+            };
 
         // Merge plugin inputs with installed config inputs
         let mut merged_inputs = plugin_info.resource.spec.inputs.clone();
@@ -263,7 +275,7 @@ impl CreateCommand {
             // Ask user if they want to customize inputs
             let customize = ctx
                 .input
-                .confirm("  Do you want to customize inputs for this plugin?", false)?;
+                .confirm("  Do you want to customize inputs for this plugin?", Some(false))?;
 
             if customize {
                 ctx.output.dimmed("  Collecting plugin inputs...");
@@ -285,12 +297,12 @@ impl CreateCommand {
             plugin_name: installed_config.plugin_name.clone(),
             plugin_path: plugin_info.path.clone(),
             inputs: plugin_inputs,
-            reference_project,
-            reference_env,
+            reference_projects: reference_projects_and_envs,
             raw_module_inputs: installed_config.raw_module_inputs.clone(),
             plugin_spec: plugin_info.resource.spec.clone(),
         }))
     }
+
 
     /// Render collected plugins to disk
     #[allow(clippy::too_many_arguments)]
@@ -312,9 +324,16 @@ impl CreateCommand {
                 .join(&plugin_info.template_pack_name)
                 .join(&plugin_info.plugin_name);
 
-            // Add reference project name to path if this plugin requires a reference project
-            if let Some(ref_project) = &plugin_info.reference_project {
-                module_path = module_path.join(&ref_project.name);
+            // Add reference project name to path ONLY if:
+            // 1. Plugin spec has dependencies
+            // 2. Number of reference projects matches dependencies
+            // 3. Reference project name differs from plugin name (avoid duplication)
+            if !plugin_info.plugin_spec.dependencies.is_empty()
+                && plugin_info.reference_projects.len() == plugin_info.plugin_spec.dependencies.len()
+                && let Some((first_ref, _)) = plugin_info.reference_projects.first()
+                && first_ref.name != plugin_info.plugin_name
+            {
+                module_path = module_path.join(&first_ref.name);
             }
 
             let renderer = TemplateRenderer::new();
@@ -341,22 +360,49 @@ impl CreateCommand {
                 environment: environment_name.to_string(),
             };
 
-            let reference_project_metadata =
-                plugin_info
-                    .reference_env
-                    .as_ref()
-                    .map(|ref_env| PluginProjectReference {
+            // Build reference metadata from resolved projects and plugin spec
+            let reference_projects_metadata: Vec<AddedPluginReference> = plugin_info
+                .reference_projects
+                .iter()
+                .enumerate()
+                .filter_map(|(idx, (_ref_project, ref_env))| {
+                    // Get corresponding dependency from plugin spec
+                    let dependency = plugin_info.plugin_spec.dependencies.get(idx)?;
+
+                    // Extract data_source_name from remote_state config
+                    let data_source_name = dependency
+                        .project
+                        .remote_state
+                        .as_ref()?
+                        .data_source_name
+                        .clone();
+
+                    Some(AddedPluginReference {
                         api_version: ref_env.api_version.clone(),
                         kind: ref_env.kind.clone(),
                         name: ref_env.metadata.name.clone(),
                         environment: ref_env.metadata.environment_name.clone(),
-                    });
+                        data_source_name,
+                        dependency_name: dependency.dependency_name.clone(),
+                    })
+                })
+                .collect();
+
+            // Validate: dependency count should match reference count
+            if reference_projects_metadata.len() != plugin_info.plugin_spec.dependencies.len() {
+                anyhow::bail!(
+                    "Plugin '{}': reference count mismatch (expected {}, got {})",
+                    plugin_info.plugin_name,
+                    plugin_info.plugin_spec.dependencies.len(),
+                    reference_projects_metadata.len()
+                );
+            }
 
             added_plugins.push(AddedPlugin {
                 template_pack_name: plugin_info.template_pack_name,
                 name: plugin_info.plugin_name,
                 project: plugin_project_ref,
-                reference_project: reference_project_metadata,
+                reference_projects: reference_projects_metadata,
                 inputs: plugin_info.inputs.clone(),
                 files: Vec::new(), // Files will be populated during rendering
                 plugin_spec: Some(plugin_info.plugin_spec.clone()),
@@ -521,7 +567,7 @@ impl CreateCommand {
                     Value::Bool(b) => {
                         let answer = ctx
                             .input
-                            .confirm(&description, *b)
+                            .confirm(&description, Some(*b))
                             .context("Failed to get input")?;
                         Value::Bool(answer)
                     }
@@ -1603,11 +1649,21 @@ impl CreateCommand {
             &selected_environment,
         )?;
 
+        // Add _plugins variable to inputs for template rendering
+        let mut template_inputs = inputs.clone();
+
+        if !added_plugins.is_empty() {
+            let plugins_data = serde_json::json!({
+                "added": added_plugins
+            });
+            template_inputs.insert("_plugins".to_string(), plugins_data);
+        }
+
         // Then render template
         ctx.output.dimmed("Rendering template...");
         let renderer = TemplateRenderer::new();
         let _generated_files = renderer
-            .render_template(ctx, template_src, environment_path.as_path(), &inputs, None)
+            .render_template(ctx, template_src, environment_path.as_path(), &template_inputs, None)
             .context("Failed to render template")?;
 
         // Step 15.5: Generate common file (e.g., _common.tf) if executor config is present
@@ -1702,7 +1758,7 @@ impl CreateCommand {
             true
         } else {
             ctx.input
-                .confirm("Do you want to execute 'apply' now?", false)
+                .confirm("Do you want to execute 'apply' now?", Some(false))
                 .context("Failed to get confirmation")?
         };
 
@@ -1933,7 +1989,7 @@ impl CreateCommand {
                 serde_json::Value::Bool(b) => {
                     let answer = ctx
                         .input
-                        .confirm(&description, *b)
+                        .confirm(&description, Some(*b))
                         .context("Failed to get input")?;
                     Ok(serde_json::Value::Bool(answer))
                 }

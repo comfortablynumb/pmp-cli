@@ -101,15 +101,33 @@ impl HooksRunner {
         println!(); // Add blank line for better readability
 
         // Prompt user with the question from config
-        let confirmed = Confirm::new(&config.question)
-            .with_default(false)
-            .prompt()
-            .with_context(|| {
-                format!(
-                    "Failed to get user confirmation for {} hook (question: '{}')",
-                    hook_type, config.question
-                )
-            })?;
+        let confirmed = match config.default {
+            Some(value) => {
+                // Default provided - allow Enter to accept it
+                Confirm::new(&config.question)
+                    .with_default(value)
+                    .prompt()
+                    .with_context(|| {
+                        format!(
+                            "Failed to get user confirmation for {} hook (question: '{}')",
+                            hook_type, config.question
+                        )
+                    })?
+            }
+            None => {
+                // No default - require explicit Y/N input
+                let help_msg = "Please enter Y or N explicitly";
+                Confirm::new(&config.question)
+                    .with_help_message(help_msg)
+                    .prompt()
+                    .with_context(|| {
+                        format!(
+                            "Failed to get user confirmation for {} hook (question: '{}')",
+                            hook_type, config.question
+                        )
+                    })?
+            }
+        };
 
         println!(); // Add blank line after confirmation
 
@@ -248,6 +266,7 @@ mod tests {
         let config = ConfirmHookConfig {
             question: "Continue?".to_string(),
             exit_on_cancel: true,
+            default: None,
             exit_on_confirm: false,
         };
         assert_eq!(config.question, "Continue?");
@@ -273,6 +292,7 @@ exit_on_confirm: false
         let config = ConfirmHookConfig {
             question: "Do you want to continue?".to_string(),
             exit_on_cancel: true,
+            default: None,
             exit_on_confirm: false,
         };
 
@@ -335,6 +355,7 @@ config:
         let confirm_hook = Hook::Confirm(ConfirmHookConfig {
             question: "Continue?".to_string(),
             exit_on_cancel: true,
+            default: None,
             exit_on_confirm: false,
         });
         let set_env_hook = Hook::SetEnvironment(SetEnvironmentHookConfig {
@@ -467,7 +488,8 @@ config:
             Hook::Confirm(ConfirmHookConfig {
                 question: "Ready to deploy?".to_string(),
                 exit_on_cancel: true,
-                exit_on_confirm: false,
+                default: None,
+            exit_on_confirm: false,
             }),
         ];
 

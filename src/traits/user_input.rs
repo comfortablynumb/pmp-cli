@@ -33,7 +33,9 @@ pub trait UserInput: Send + Sync {
     fn password(&self, prompt: &str) -> Result<String>;
 
     /// Display a confirmation prompt (yes/no)
-    fn confirm(&self, prompt: &str, default: bool) -> Result<bool>;
+    /// If default is Some(value), allow Enter to accept the default
+    /// If default is None, require explicit Y/N input
+    fn confirm(&self, prompt: &str, default: Option<bool>) -> Result<bool>;
 }
 
 /// Real user input implementation using inquire crate
@@ -81,9 +83,23 @@ impl UserInput for InquireUserInput {
         Ok(answer)
     }
 
-    fn confirm(&self, prompt: &str, default: bool) -> Result<bool> {
+    fn confirm(&self, prompt: &str, default: Option<bool>) -> Result<bool> {
         use inquire::Confirm;
-        let answer = Confirm::new(prompt).with_default(default).prompt()?;
+
+        let answer = match default {
+            Some(value) => {
+                // Default provided - allow Enter to accept it
+                Confirm::new(prompt).with_default(value).prompt()?
+            }
+            None => {
+                // No default - require explicit Y/N input
+                let help_msg = "Please enter Y or N explicitly";
+                Confirm::new(prompt)
+                    .with_help_message(help_msg)
+                    .prompt()?
+            }
+        };
+
         Ok(answer)
     }
 }
@@ -188,10 +204,13 @@ impl UserInput for MockUserInput {
         }
     }
 
-    fn confirm(&self, _prompt: &str, _default: bool) -> Result<bool> {
-        match self.next_response()? {
-            MockResponse::Confirm(answer) => Ok(answer),
-            _ => anyhow::bail!("Expected Confirm response but got a different type"),
+    fn confirm(&self, _prompt: &str, default: Option<bool>) -> Result<bool> {
+        match default {
+            Some(value) => Ok(value), // Auto-use default without consuming mock response
+            None => match self.next_response()? {
+                MockResponse::Confirm(answer) => Ok(answer),
+                _ => anyhow::bail!("Expected Confirm response but got a different type"),
+            },
         }
     }
 }

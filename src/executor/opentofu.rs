@@ -210,37 +210,41 @@ pub fn generate_plugin_override_variables(plugins: &[AddedPlugin]) -> String {
     let mut has_variables = false;
 
     for plugin in plugins {
-        // Only process plugins with reference projects
-        if plugin.reference_project.is_none() {
-            continue;
-        }
-
-        let ref_project = plugin.reference_project.as_ref().unwrap();
-
         // Get plugin spec from stored data
         let plugin_spec = match &plugin.plugin_spec {
             Some(spec) => spec,
             None => continue, // Skip if plugin spec not available
         };
 
-        // Get remote_state configuration
-        let remote_state = match &plugin_spec.requires_project_with_template {
-            Some(template_ref) => match &template_ref.remote_state {
-                Some(rs) => rs,
-                None => continue, // No remote_state config, skip
-            },
-            None => continue,
-        };
+        // Process ALL reference projects for this plugin
+        for plugin_ref in &plugin.reference_projects {
+            // Find matching dependency in plugin spec by data_source_name
+            let dependency = plugin_spec.dependencies.iter().find(|dep| {
+                dep.project
+                    .remote_state
+                    .as_ref()
+                    .map(|rs| rs.data_source_name == plugin_ref.data_source_name)
+                    .unwrap_or(false)
+            });
 
-        // Generate variables for each required field
-        for field_name in remote_state.required_fields.keys() {
-            let var_name = format!(
-                "pmp_plugin_{}_{}_{}_{}",
-                plugin.template_pack_name.to_lowercase(),
-                plugin.name.to_lowercase(),
-                ref_project.name.to_lowercase(),
-                field_name.to_lowercase()
-            );
+            let remote_state = match dependency {
+                Some(dep) => match &dep.project.remote_state {
+                    Some(rs) => rs,
+                    None => continue,
+                },
+                None => continue,
+            };
+
+            // Generate variables for each required field
+            for field_name in remote_state.required_fields.keys() {
+                let var_name = format!(
+                    "pmp_plugin_{}_{}_{}_{}_{}",
+                    plugin.template_pack_name.to_lowercase(),
+                    plugin.name.to_lowercase(),
+                    plugin_ref.data_source_name.to_lowercase(), // NEW: uniqueness
+                    plugin_ref.name.to_lowercase(),
+                    field_name.to_lowercase()
+                );
 
             if !has_variables {
                 hcl.push_str(
@@ -249,14 +253,19 @@ pub fn generate_plugin_override_variables(plugins: &[AddedPlugin]) -> String {
                 has_variables = true;
             }
 
-            hcl.push_str(&format!("variable \"{}\" {{\n", var_name));
-            hcl.push_str("  type    = string\n");
-            hcl.push_str("  default = null\n");
-            hcl.push_str(&format!(
-                "  description = \"Override for {}.outputs.{} (env: TF_VAR_{})\"\n",
-                ref_project.name, field_name, var_name
-            ));
-            hcl.push_str("}\n\n");
+                hcl.push_str(&format!("variable \"{}\" {{\n", var_name));
+                hcl.push_str("  type    = string\n");
+                hcl.push_str("  default = null\n");
+                hcl.push_str(&format!(
+                    "  description = \"Override for plugin_{}_{}_{}.outputs.{} (env: TF_VAR_{})\"\n",
+                    plugin.template_pack_name,
+                    plugin.name,
+                    plugin_ref.data_source_name,
+                    field_name,
+                    var_name
+                ));
+                hcl.push_str("}\n\n");
+            }
         }
     }
 
@@ -283,21 +292,56 @@ pub fn generate_module_blocks(plugins: &[AddedPlugin]) -> String {
     hcl.push_str("\n# Plugin modules\n");
 
     for plugin in plugins {
-        // Construct module name and source path based on whether plugin has a reference project
-        let (module_name, source_path) = if let Some(ref_project) = &plugin.reference_project {
-            // Plugin references another project - use reference project name in path
+        // Construct module name and source path based on whether plugin has dependencies
+        // Only use reference project name if the plugin spec defines dependencies
+        // AND the reference_projects count matches the dependencies count
+
+        // Debug: Print plugin info
+        eprintln!("DEBUG: Plugin {}/{}", plugin.template_pack_name, plugin.name);
+        eprintln!("  - Has spec: {}", plugin.plugin_spec.is_some());
+        if let Some(spec) = &plugin.plugin_spec {
+            eprintln!("  - Dependencies count: {}", spec.dependencies.len());
+        }
+        eprintln!("  - Reference projects count: {}", plugin.reference_projects.len());
+        for (idx, ref_proj) in plugin.reference_projects.iter().enumerate() {
+            eprintln!("    [{}] name: {}", idx, ref_proj.name);
+        }
+
+        let has_valid_dependencies = plugin
+            .plugin_spec
+            .as_ref()
+            .map(|spec| {
+                !spec.dependencies.is_empty()
+                    && plugin.reference_projects.len() == spec.dependencies.len()
+            })
+            .unwrap_or(false);
+
+        eprintln!("  - has_valid_dependencies: {}", has_valid_dependencies);
+
+        // Check if the first reference project name is different from the plugin name
+        let should_append_ref_name = has_valid_dependencies
+            && plugin.reference_projects.first()
+                .map(|first_ref| first_ref.name != plugin.name)
+                .unwrap_or(false);
+
+        eprintln!("  - should_append_ref_name: {}", should_append_ref_name);
+
+        let (module_name, source_path) = if should_append_ref_name
+            && let Some(first_ref) = plugin.reference_projects.first()
+        {
+            // Plugin has dependencies and ref name differs - use reference project name in path
             (
                 format!(
                     "{}_{}_{}",
-                    plugin.template_pack_name, plugin.name, ref_project.name
+                    plugin.template_pack_name, plugin.name, first_ref.name
                 ),
                 format!(
                     "./modules/{}/{}/{}",
-                    plugin.template_pack_name, plugin.name, ref_project.name
+                    plugin.template_pack_name, plugin.name, first_ref.name
                 ),
             )
         } else {
-            // Plugin has no reference - no project name suffix needed
+            // Plugin has no dependencies OR ref name matches plugin name - no suffix needed
             (
                 format!("{}_{}", plugin.template_pack_name, plugin.name),
                 format!("./modules/{}/{}", plugin.template_pack_name, plugin.name),
@@ -307,12 +351,9 @@ pub fn generate_module_blocks(plugins: &[AddedPlugin]) -> String {
         hcl.push_str(&format!("module \"{}\" {{\n", module_name));
         hcl.push_str(&format!("  source = \"{}\"\n", source_path));
 
-        // If plugin has a reference project, pass parameters from remote state
-        if let Some(ref_project) = &plugin.reference_project {
-            let data_source_name = format!(
-                "plugin_{}_{}_{}",
-                plugin.template_pack_name, plugin.name, ref_project.name
-            );
+        // Generate parameters from ALL reference projects
+        if !plugin.reference_projects.is_empty() {
+            hcl.push_str("\n  # Parameters from reference projects (with optional overrides)\n");
 
             // Get plugin spec from stored data
             let plugin_spec = match &plugin.plugin_spec {
@@ -324,46 +365,61 @@ pub fn generate_module_blocks(plugins: &[AddedPlugin]) -> String {
                 }
             };
 
-            // Get remote_state configuration
-            let remote_state = match &plugin_spec.requires_project_with_template {
-                Some(template_ref) => match &template_ref.remote_state {
-                    Some(rs) => rs,
-                    None => {
-                        // No remote_state config - skip parameters
-                        hcl.push_str("}\n\n");
-                        continue;
-                    }
-                },
-                None => {
-                    hcl.push_str("}\n\n");
-                    continue;
-                }
-            };
+            for plugin_ref in &plugin.reference_projects {
+                // Find matching dependency in plugin spec
+                let dependency = plugin_spec.dependencies.iter().find(|dep| {
+                    dep.project
+                        .remote_state
+                        .as_ref()
+                        .map(|rs| rs.data_source_name == plugin_ref.data_source_name)
+                        .unwrap_or(false)
+                });
 
-            hcl.push_str("\n  # Parameters from reference project (with optional overrides)\n");
-
-            // Generate module parameters for each required field
-            for (field_name, field_config) in &remote_state.required_fields {
-                // Determine the parameter name (use alias if provided, otherwise use original field name)
-                let param_name = match &field_config.alias {
-                    Some(alias) => alias.clone(),
-                    None => field_name.clone(),
+                let remote_state = match dependency {
+                    Some(dep) => match &dep.project.remote_state {
+                        Some(rs) => rs,
+                        None => continue,
+                    },
+                    None => continue,
                 };
 
-                // Generate variable name for override
-                let var_name = format!(
-                    "pmp_plugin_{}_{}_{}_{}",
-                    plugin.template_pack_name.to_lowercase(),
-                    plugin.name.to_lowercase(),
-                    ref_project.name.to_lowercase(),
-                    field_name.to_lowercase()
+                // Terraform data source name
+                let tf_data_source_name = format!(
+                    "plugin_{}_{}_{}",
+                    plugin.template_pack_name,
+                    plugin.name,
+                    plugin_ref.data_source_name
                 );
 
-                // Generate coalesce expression: prefer env var, fallback to remote state
-                hcl.push_str(&format!(
-                    "  {} = coalesce(var.{}, data.terraform_remote_state.{}.outputs.{})\n",
-                    param_name, var_name, data_source_name, field_name
-                ));
+                // Add comment if dependency_name exists
+                if let Some(dep_name) = &plugin_ref.dependency_name {
+                    hcl.push_str(&format!("  # From dependency: {}\n", dep_name));
+                }
+
+                // Generate module parameters for each required field
+                for (field_name, field_config) in &remote_state.required_fields {
+                    // Use alias if provided, otherwise original field name
+                    let param_name = field_config
+                        .alias
+                        .as_ref()
+                        .unwrap_or(field_name);
+
+                    // Override variable name
+                    let var_name = format!(
+                        "pmp_plugin_{}_{}_{}_{}_{}",
+                        plugin.template_pack_name.to_lowercase(),
+                        plugin.name.to_lowercase(),
+                        plugin_ref.data_source_name.to_lowercase(),
+                        plugin_ref.name.to_lowercase(),
+                        field_name.to_lowercase()
+                    );
+
+                    // Coalesce: env var override → remote state output
+                    hcl.push_str(&format!(
+                        "  {} = coalesce(var.{}, data.terraform_remote_state.{}.outputs.{})\n",
+                        param_name, var_name, tf_data_source_name, field_name
+                    ));
+                }
             }
         }
 
@@ -399,63 +455,71 @@ pub fn generate_data_source_backends(
         return Ok(String::new());
     }
 
-    // Filter plugins that have reference projects
-    let plugins_with_refs: Vec<&AddedPlugin> = plugins
-        .iter()
-        .filter(|p| p.reference_project.is_some())
-        .collect();
+    // Flatten all plugin references into (plugin, ref) pairs
+    let plugin_refs: Vec<(&AddedPlugin, &crate::template::metadata::AddedPluginReference)> =
+        plugins
+            .iter()
+            .flat_map(|plugin| {
+                plugin
+                    .reference_projects
+                    .iter()
+                    .map(move |plugin_ref| (plugin, plugin_ref))
+            })
+            .collect();
 
-    if plugins_with_refs.is_empty() {
+    if plugin_refs.is_empty() {
         return Ok(String::new());
     }
 
-    // Deduplicate plugins by data source name
-    // This handles cases where duplicate plugins exist
+    // Deduplicate to avoid duplicate data sources
     let mut seen = std::collections::HashSet::new();
-    let mut unique_plugins = Vec::new();
-    for plugin in plugins_with_refs {
-        let reference = plugin.reference_project.as_ref().unwrap();
-        let data_source_name = format!(
+    let mut unique_refs = Vec::new();
+
+    for (plugin, plugin_ref) in plugin_refs {
+        let tf_data_source_name = format!(
             "plugin_{}_{}_{}",
-            plugin.template_pack_name, plugin.name, reference.name
+            plugin.template_pack_name, plugin.name, plugin_ref.data_source_name
         );
-        if seen.insert(data_source_name) {
-            unique_plugins.push(plugin);
+
+        if seen.insert(tf_data_source_name) {
+            unique_refs.push((plugin, plugin_ref));
         }
     }
 
     let mut hcl = String::new();
     hcl.push_str("\n# Data sources for plugin reference projects\n");
 
-    for plugin in unique_plugins {
-        let reference = plugin.reference_project.as_ref().unwrap();
-
-        // Data source name: plugin_{template_pack_name}_{plugin_name}_{reference_project_name}
-        let data_source_name = format!(
+    for (plugin, plugin_ref) in unique_refs {
+        let tf_data_source_name = format!(
             "plugin_{}_{}_{}",
-            plugin.template_pack_name, plugin.name, reference.name
+            plugin.template_pack_name, plugin.name, plugin_ref.data_source_name
         );
 
-        // Get backend type from executor config
+        // Get backend type
         let backend_type = executor_config
             .get("backend")
             .and_then(|b| b.get("type"))
             .and_then(|t| t.as_str())
             .unwrap_or("local");
 
-        // Generate backend config pointing to reference project's state
+        // Generate backend config for reference project
         let backend_config_hcl = generate_backend_config_map(
             executor_config,
-            Some(&reference.api_version),
-            Some(&reference.kind),
-            Some(&reference.environment),
-            Some(&reference.name),
+            Some(&plugin_ref.api_version),
+            Some(&plugin_ref.kind),
+            Some(&plugin_ref.environment),
+            Some(&plugin_ref.name),
         )?;
+
+        // Optional comment with dependency name
+        if let Some(dep_name) = &plugin_ref.dependency_name {
+            hcl.push_str(&format!("# Dependency: {}\n", dep_name));
+        }
 
         // Generate data source block
         hcl.push_str(&format!(
             "data \"terraform_remote_state\" \"{}\" {{\n",
-            data_source_name
+            tf_data_source_name
         ));
         hcl.push_str(&format!("  backend = \"{}\"\n", backend_type));
 
@@ -500,7 +564,7 @@ pub fn generate_template_data_source_backends(
 
     for template_ref in unique_refs {
         // Data source name: template_ref_{data_source_name}
-        let data_source_name = format!("template_ref_{}", template_ref.data_source_name);
+        let tf_data_source_name = format!("template_ref_{}", template_ref.data_source_name);
 
         // Get backend type from executor config
         let backend_type = executor_config
@@ -521,7 +585,7 @@ pub fn generate_template_data_source_backends(
         // Generate data source block
         hcl.push_str(&format!(
             "data \"terraform_remote_state\" \"{}\" {{\n",
-            data_source_name
+            tf_data_source_name
         ));
         hcl.push_str(&format!("  backend = \"{}\"\n", backend_type));
 

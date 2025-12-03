@@ -705,7 +705,7 @@ impl StateCommand {
         if !force {
             let confirmed = ctx
                 .input
-                .confirm("This will replace the current state. Continue?", false)?;
+                .confirm("This will replace the current state. Continue?", Some(false))?;
 
             if !confirmed {
                 ctx.output.dimmed("Restore cancelled.");

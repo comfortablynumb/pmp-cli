@@ -144,7 +144,7 @@ impl InfrastructureCommand {
         let mut environments: HashMap<String, Environment> = HashMap::new();
         let configure_envs = ctx
             .input
-            .confirm("Configure environments?", false)
+            .confirm("Configure environments?", Some(false))
             .context("Failed to get confirmation")?;
 
         if configure_envs {
@@ -165,7 +165,7 @@ impl InfrastructureCommand {
         // Step 9: Configure categories (optional)
         let configure_categories = ctx
             .input
-            .confirm("Create categories for organizing templates?", false)
+            .confirm("Create categories for organizing templates?", Some(false))
             .context("Failed to get confirmation")?;
 
         let (categories, template_packs_config) = if configure_categories {
@@ -187,7 +187,7 @@ impl InfrastructureCommand {
         let mut executor_config: Option<ExecutorCollectionConfig> = None;
         let configure_executor = ctx
             .input
-            .confirm("Configure executor backend?", false)
+            .confirm("Configure executor backend?", Some(false))
             .context("Failed to get confirmation")?;
 
         if configure_executor {
@@ -258,7 +258,7 @@ impl InfrastructureCommand {
         // Step 15: Ask if user wants to generate CI job files
         let generate_ci = ctx
             .input
-            .confirm("Generate CI/CD pipeline files?", false)
+            .confirm("Generate CI/CD pipeline files?", Some(false))
             .context("Failed to get CI generation confirmation")?;
 
         if generate_ci {
@@ -374,7 +374,7 @@ impl InfrastructureCommand {
             output::blank();
 
             // Ask if they want to add another environment
-            let add_another = ctx.input.confirm("Add another environment?", false)?;
+            let add_another = ctx.input.confirm("Add another environment?", Some(false))?;
 
             if !add_another {
                 break;
@@ -525,7 +525,7 @@ impl InfrastructureCommand {
             // Ask about subcategories
             let create_subcategories = ctx.input.confirm(
                 &format!("{}Create subcategories for this category?", indent),
-                false,
+                Some(false),
             )?;
 
             let subcategories = if create_subcategories && !available_templates.is_empty() {
@@ -559,7 +559,7 @@ impl InfrastructureCommand {
             // Ask if they want to add another category at this level
             let add_another = ctx.input.confirm(
                 &format!("{}Add another category at this level?", indent),
-                false,
+                Some(false),
             )?;
 
             if !add_another {
@@ -600,7 +600,7 @@ impl InfrastructureCommand {
                     .input
                     .text("State file key:", Some("terraform.tfstate"))?;
                 let region = ctx.input.text("AWS region:", Some("us-east-1"))?;
-                let encrypt = ctx.input.confirm("Enable encryption?", true)?;
+                let encrypt = ctx.input.confirm("Enable encryption?", Some(true))?;
                 let dynamodb_table = ctx
                     .input
                     .text("DynamoDB table for locking (optional):", None)?;

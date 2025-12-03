@@ -287,8 +287,9 @@ pub struct AllowedPluginConfig {
     pub disable_user_input_override: bool,
 }
 
-/// Reference to a template that provides the plugin (used for requires_project_with_template)
+/// Reference to a template that provides the plugin (DEPRECATED - use PluginProjectRef)
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct PluginTemplateRef {
     /// API version of the template
     #[serde(rename = "apiVersion")]
@@ -311,6 +312,31 @@ pub struct PluginTemplateRef {
     pub remote_state: Option<RemoteStateConfig>,
 }
 
+/// Reference to a project required by a plugin
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginProjectRef {
+    /// API version of the required project
+    #[serde(rename = "apiVersion")]
+    pub api_version: String,
+
+    /// Kind of the required project
+    pub kind: String,
+
+    /// Optional label selector for filtering compatible projects
+    /// All labels must match (AND logic)
+    #[serde(default)]
+    pub label_selector: HashMap<String, String>,
+
+    /// Optional description to show to user when selecting reference project
+    /// If provided, this is shown instead of kind and label selectors
+    #[serde(default)]
+    pub description: Option<String>,
+
+    /// Remote state configuration for accessing the reference project
+    #[serde(default)]
+    pub remote_state: Option<PluginRemoteStateConfig>,
+}
+
 /// Configuration for required fields from remote state
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RequiredField {
@@ -320,12 +346,26 @@ pub struct RequiredField {
     pub alias: Option<String>,
 }
 
-/// Remote state configuration for a plugin
+/// Remote state configuration for a plugin (DEPRECATED - use PluginRemoteStateConfig)
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct RemoteStateConfig {
     /// Map of remote state output names to their configuration
     /// Key: name of the output in the reference project's remote state
     /// Value: configuration for how to use this output
+    pub required_fields: HashMap<String, RequiredField>,
+}
+
+/// Remote state configuration for a plugin dependency
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginRemoteStateConfig {
+    /// Name of the data source in _common.tf (e.g., "postgres_instance")
+    /// Used as: data.terraform_remote_state.plugin_{pack}_{plugin}_{data_source_name}
+    pub data_source_name: String,
+
+    /// Map of remote state output names to their configuration
+    /// Key: name of the output in the reference project's remote state
+    /// Value: configuration for how to use this output (supports aliasing)
     pub required_fields: HashMap<String, RequiredField>,
 }
 
@@ -376,6 +416,20 @@ pub struct TemplateDependency {
     pub dependency_name: Option<String>,
 }
 
+/// Dependency on another project (used in plugins)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginDependency {
+    /// Project reference containing apiVersion, kind, and remote_state config
+    pub project: PluginProjectRef,
+
+    /// Optional unique name for this dependency
+    /// Can be used to reference this specific dependency when multiple are defined
+    /// Must be unique within the plugin's dependencies list
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dependency_name: Option<String>,
+}
+
 // ============================================================================
 // Plugin Resource (Kubernetes-style)
 // ============================================================================
@@ -421,10 +475,10 @@ pub struct PluginSpec {
     #[serde(default, deserialize_with = "deserialize_inputs")]
     pub inputs: Vec<InputDefinition>,
 
-    /// Optional requirement for a reference project with specific template
-    /// If set, user must select a project matching this template when adding the plugin
+    /// Dependencies on other projects (0-n)
+    /// If set, user must select projects matching these dependencies when adding the plugin
     #[serde(default)]
-    pub requires_project_with_template: Option<PluginTemplateRef>,
+    pub dependencies: Vec<PluginDependency>,
 }
 
 // ============================================================================
@@ -934,6 +988,31 @@ pub struct TemplateReferenceProject {
     pub data_source_name: String,
 }
 
+/// Reference information for a plugin dependency that has been resolved
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AddedPluginReference {
+    /// API version of the resource kind
+    #[serde(rename = "apiVersion")]
+    pub api_version: String,
+
+    /// Kind of the resource
+    pub kind: String,
+
+    /// Name of the reference project
+    pub name: String,
+
+    /// Environment name of the reference project
+    pub environment: String,
+
+    /// Data source name for this reference (from plugin spec)
+    pub data_source_name: String,
+
+    /// Optional dependency name (from plugin spec)
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dependency_name: Option<String>,
+}
+
 /// Information about a plugin that has been added to a project environment
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AddedPlugin {
@@ -946,11 +1025,11 @@ pub struct AddedPlugin {
     /// Reference to the project where this plugin is added
     pub project: PluginProjectReference,
 
-    /// Reference to the project that this plugin connects to (for plugins with requires_project_with_template)
-    /// This is used to generate terraform_remote_state data sources in the main project's _common.tf
+    /// References to projects that this plugin connects to
+    /// Each entry corresponds to one dependency in the plugin spec
     #[serde(default)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub reference_project: Option<PluginProjectReference>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub reference_projects: Vec<AddedPluginReference>,
 
     /// Inputs used when adding the plugin
     pub inputs: HashMap<String, Value>,
@@ -1444,6 +1523,12 @@ pub struct CommandHookConfig {
 pub struct ConfirmHookConfig {
     /// The question to ask the user
     pub question: String,
+
+    /// Default value for the confirmation
+    /// If Some(value), allow Enter to accept the default
+    /// If None, require explicit Y/N input
+    #[serde(default)]
+    pub default: Option<bool>,
 
     /// If true, exit (cancel) the command when user cancels/declines the confirmation
     #[serde(default = "default_exit_on_cancel")]

@@ -133,7 +133,7 @@ impl ExecutionHelper {
                     command_name,
                     graph.node_count()
                 ),
-                true,
+                Some(true),
             )
             .context("Failed to get confirmation")?;
 
