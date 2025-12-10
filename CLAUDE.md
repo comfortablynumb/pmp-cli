@@ -77,6 +77,366 @@ collection/
 - Reusable components referenced by templates
 - Contains metadata and spec with `role` and `inputs`
 
+### Input Types System
+
+PMP supports 25+ input types for collecting user input during project creation. All input types can be used in both templates (`.pmp.template.yaml`) and plugins (`.pmp.plugin.yaml`).
+
+#### Basic Input Types
+
+**String**
+```yaml
+- name: project_name
+  type: string
+  description: Name of the project
+  default: "my-project"
+```
+
+**Number**
+```yaml
+- name: replica_count
+  type: number
+  description: Number of replicas
+  default: 3
+  min: 1
+  max: 10
+```
+
+**Boolean**
+```yaml
+- name: enable_monitoring
+  type: boolean
+  description: Enable monitoring
+  default: true
+```
+
+**Password**
+```yaml
+- name: admin_password
+  type: password
+  description: Administrator password
+  default: ""
+```
+
+**Email**
+```yaml
+- name: contact_email
+  type: email
+  description: Contact email address
+  default: ""
+```
+
+**URL**
+```yaml
+- name: webhook_url
+  type: url
+  description: Webhook URL
+  default: ""
+```
+
+**IP**
+```yaml
+- name: server_ip
+  type: ip
+  description: Server IP address
+  default: ""
+```
+
+**CIDR**
+```yaml
+- name: vpc_cidr
+  type: cidr
+  description: VPC CIDR block
+  default: "10.0.0.0/16"
+```
+
+**JSON**
+```yaml
+- name: custom_config
+  type: json
+  description: Custom configuration in JSON format
+  default: "{}"
+```
+
+**YAML**
+```yaml
+- name: config_yaml
+  type: yaml
+  description: Configuration in YAML format
+  default: ""
+```
+
+#### Selection Input Types
+
+**Select** (Single choice from options)
+```yaml
+- name: environment_type
+  type: select
+  description: Type of environment
+  options:
+    - label: "Development"
+      value: "dev"
+    - label: "Production"
+      value: "prod"
+  default: "dev"
+```
+
+**MultiSelect** (Multiple choices from options)
+```yaml
+- name: enabled_features
+  type: multiselect
+  description: Features to enable
+  options:
+    - label: "Monitoring"
+      value: "monitoring"
+    - label: "Logging"
+      value: "logging"
+    - label: "Tracing"
+      value: "tracing"
+  default: ["monitoring"]
+```
+
+#### List and Array Input Types
+
+**List** (Comma-separated values)
+```yaml
+- name: allowed_ips
+  type: list
+  description: Allowed IP addresses (comma-separated)
+  default: ""
+```
+
+**Object** (Single structured object with named fields)
+```yaml
+- name: database_config
+  type: object
+  description: Database configuration
+  fields:
+    - name: host
+      type: string
+      description: Database host
+      default: "localhost"
+    - name: port
+      type: number
+      description: Database port
+      default: 5432
+    - name: ssl_enabled
+      type: boolean
+      description: Enable SSL
+      default: true
+```
+- Groups multiple related inputs into a single structured object
+- Supports nested objects (fields can also be of type `object`)
+- Each field can use any supported input type
+- Returns JSON object with field names as keys
+
+**RepeatableObject** (Array of structured objects with add/remove functionality)
+```yaml
+- name: team_members
+  type: repeatable_object
+  description: Team members with roles
+  min: 0
+  max: 50
+  add_another_prompt: "Add another team member?"
+  fields:
+    - name: username
+      type: string
+      description: GitHub username
+    - name: role
+      type: select
+      description: Member role
+      options:
+        - label: "Member"
+          value: "member"
+        - label: "Maintainer"
+          value: "maintainer"
+      default: "member"
+```
+- Interactive workflow: User can **Add**, **Remove**, or mark **Done**
+- Shows current item count after each operation
+- When removing, displays a list of existing items with summaries for easy selection
+- Respects `min` and `max` constraints during add/remove operations
+- Returns array of objects as JSON
+
+#### Project Reference Input Types
+
+**ProjectSelect** (Single project reference)
+```yaml
+- name: vpc_project
+  type: project_select
+  description: VPC project to use
+  filter:
+    apiVersion: pmp.io/v1
+    kind: VPC
+```
+
+**MultiProjectSelect** (Multiple project references)
+```yaml
+- name: dependent_services
+  type: multi_project_select
+  description: Dependent services
+  filter:
+    apiVersion: pmp.io/v1
+    kind: Service
+```
+
+#### Specialized Input Types
+
+**Color** (Hex color with validation)
+```yaml
+- name: brand_color
+  type: color
+  description: Brand color
+  allow_alpha: true
+  default: "#3B82F6"
+```
+- Validates hex color format: `#RRGGBB` or `#RRGGBBAA` (with alpha)
+- Returns string value (e.g., "#3B82F6" or "#3B82F6FF")
+
+**Duration** (Time duration parsing)
+```yaml
+- name: cache_ttl
+  type: duration
+  description: Cache time-to-live
+  min_seconds: 60
+  max_seconds: 86400
+  default: "1h"
+```
+- Accepts formats: "1h30m", "5d", "2w", "30s"
+- Units: s (seconds), m (minutes), h (hours), d (days), w (weeks)
+- Returns number (seconds)
+
+**Cron** (Cron expression validation)
+```yaml
+- name: backup_schedule
+  type: cron
+  description: Backup schedule (cron expression)
+  default: "0 2 * * *"
+```
+- Validates cron expressions (5 or 6 fields)
+- Format: `minute hour day month weekday [year]`
+- Returns string value
+
+**KeyValue** (Key-value pairs)
+```yaml
+- name: labels
+  type: keyvalue
+  description: Resource labels
+  key_value_separator: "="
+  pair_separator: ","
+  min: 0
+  max: 20
+  default: ""
+```
+- Input format: `key1=value1,key2=value2`
+- Returns JSON object: `{"key1": "value1", "key2": "value2"}`
+
+**Semver** (Semantic version validation)
+```yaml
+- name: app_version
+  type: semver
+  description: Application version
+  allow_prerelease: true
+  allow_build: true
+  default: "1.0.0"
+```
+- Validates semantic versioning: `MAJOR.MINOR.PATCH[-PRERELEASE][+BUILD]`
+- Examples: "1.0.0", "2.1.3-beta.1", "1.0.0+20230615"
+- Returns string value
+
+**Region** (Cloud region selection)
+```yaml
+- name: aws_region
+  type: region
+  description: AWS region
+  default: "us-east-1"
+```
+
+**Path** (File/directory path)
+```yaml
+- name: config_path
+  type: path
+  description: Configuration file path
+  default: "/etc/app/config.yaml"
+```
+
+**Port** (Network port number)
+```yaml
+- name: service_port
+  type: port
+  description: Service port
+  default: 8080
+```
+
+**ARN** (AWS ARN validation)
+```yaml
+- name: role_arn
+  type: arn
+  description: IAM role ARN
+  default: ""
+```
+
+**DockerImage** (Docker image reference)
+```yaml
+- name: container_image
+  type: docker_image
+  description: Container image
+  default: "nginx:latest"
+```
+
+#### Input Type Features
+
+**Conditional Inputs** - Show/hide inputs based on other values:
+```yaml
+- name: enable_ssl
+  type: boolean
+  default: false
+
+- name: ssl_certificate
+  type: string
+  description: SSL certificate path
+  show_if:
+    - field: enable_ssl
+      condition: equals
+      value: true
+```
+
+**Default Value Interpolation** - Use variables in defaults:
+```yaml
+- name: namespace
+  type: string
+  default: "${var:_project_name_hyphens}-ns"
+```
+
+**Template Rendering** - Access input values in templates:
+```hcl
+# Handlebars template (.tf.hbs)
+resource "kubernetes_namespace" "app" {
+  metadata {
+    name = "{{namespace}}"
+  }
+}
+
+{{#if enable_monitoring}}
+resource "kubernetes_service_monitor" "app" {
+  # ... monitoring config
+}
+{{/if}}
+
+{{#each team_members}}
+resource "github_team_membership" "member_{{@index}}" {
+  username = "{{username}}"
+  role     = "{{role}}"
+}
+{{/each}}
+```
+
+**Handlebars Helpers**:
+- `{{bool variable_name}}` - Boolean to HCL (true/false)
+- `{{json variable_name}}` - JSON stringify
+- `{{#if variable}}...{{/if}}` - Conditional rendering
+- `{{#each array}}...{{/each}}` - Array iteration
+- `{{#eq a b}}...{{/eq}}` - Equality comparison
+
 ### Plugin System
 
 **Allowed Plugins** (`spec.plugins.allowed`):
@@ -90,6 +450,37 @@ collection/
 - User can customize inputs or use defaults
 - Set `disable_user_input_override: true` to skip user prompt and use defaults/configured values
 - Processed before template rendering
+
+**Plugin Configuration in Project Groups**:
+
+Projects in `spec.projects.list` can pre-configure plugins (both installed and allowed):
+
+```yaml
+spec:
+  projects:
+    list:
+      - name: my-project
+        template_pack: pack-name
+        template: template-name
+        plugins:
+          <plugin-name>:
+            reference_projects:
+              - name: reference-project-name
+                environment: env-name  # Optional, defaults to project group environment
+                dependency_name: dep-name  # Optional, matches by apiVersion/kind if not specified
+            inputs:
+              <input-name>:
+                value: <value>
+                # OR
+                use_default: true
+```
+
+**Behavior:**
+- Pre-configured dependencies skip interactive prompts
+- Partial configuration: prompts only for unconfigured dependencies
+- Applies to both `spec.plugins.installed` and `spec.plugins.allowed`
+- Input precedence: pre-configured value > template default
+- Dependency matching: by dependency_name (if specified) or by apiVersion+kind (fallback)
 
 ### Infrastructure System
 

@@ -6,11 +6,11 @@ use crate::template::{DynamicProjectEnvironmentResource, ProjectResource};
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 
-/// Handles the 'apply' command - runs executor apply with hooks
-pub struct ApplyCommand;
+/// Handles the 'test' command - runs executor test without creating infrastructure
+pub struct TestCommand;
 
-impl ApplyCommand {
-    /// Execute the apply command
+impl TestCommand {
+    /// Execute the test command
     pub fn execute(
         ctx: &crate::context::Context,
         project_path: Option<&str>,
@@ -56,7 +56,7 @@ impl ApplyCommand {
         let resource = DynamicProjectEnvironmentResource::from_file(&*ctx.fs, &env_file)
             .context("Failed to load environment resource")?;
 
-        ctx.output.section("Apply");
+        ctx.output.section("Test");
         ctx.output.key_value_highlight("Project", &project_name);
         ctx.output.environment_badge(&env_name);
 
@@ -70,7 +70,7 @@ impl ApplyCommand {
         let executor_config = resource.get_executor_config();
 
         // Check if this is a ProjectGroup with spec.projects defined
-        // ProjectGroups have special handling - they create and execute their defined projects
+        // ProjectGroups have special handling - they execute test on their defined projects
         if executor_config.name == "none" && !resource.spec.projects.is_empty() {
             // Load collection to get infrastructure-level hooks
             let (collection, _collection_root) = CollectionDiscovery::find_collection(&*ctx.fs)?
@@ -87,41 +87,48 @@ impl ApplyCommand {
                 .to_str()
                 .context("Failed to convert environment path to string")?;
 
-            // Run pre-apply hooks
-            if !hooks.pre_apply.is_empty()
-                && HooksRunner::run_hooks(&hooks.pre_apply, env_dir_str, "pre-apply")?
+            // Run pre-test hooks
+            if !hooks.pre_test.is_empty()
+                && HooksRunner::run_hooks(&hooks.pre_test, env_dir_str, "pre-test")?
                     == HookOutcome::Cancel
             {
                 ctx.output.blank();
-                ctx.output.warning("Apply cancelled by pre-apply hook");
+                ctx.output.warning("Test cancelled by pre-test hook");
                 return Ok(());
             }
 
-            // Process ProjectGroup - create/update and then execute on all defined projects
+            // Show ProjectGroup info
             ctx.output.blank();
-            ctx.output.subsection("Processing Project Group");
-            ProjectGroupHandler::process_projects(
-                ctx, &resource, &env_name, None, // template_packs_paths
-            )?;
+            ctx.output.subsection("Project Group Projects");
+            ctx.output.dimmed(&format!(
+                "This project group has {} configured project(s):",
+                resource.spec.projects.projects().len()
+            ));
+            for project in resource.spec.projects.projects() {
+                ctx.output.dimmed(&format!(
+                    "  - {} (template: {}/{})",
+                    project.name, project.template_pack, project.template
+                ));
+            }
 
-            // Execute apply on all configured projects
+            // Execute test on all configured projects
             ProjectGroupHandler::execute_command_on_projects(
-                ctx, &resource, &env_name, "apply", extra_args,
+                ctx, &resource, &env_name, "test", extra_args,
             )?;
 
-            // Run post-apply hooks
-            if !hooks.post_apply.is_empty()
-                && HooksRunner::run_hooks(&hooks.post_apply, env_dir_str, "post-apply")?
+            // Run post-test hooks
+            if !hooks.post_test.is_empty()
+                && HooksRunner::run_hooks(&hooks.post_test, env_dir_str, "post-test")?
                     == HookOutcome::Cancel
             {
                 ctx.output.blank();
                 ctx.output
-                    .warning("Post-apply hooks cancelled further execution");
+                    .warning("Post-test hooks cancelled further execution");
                 return Ok(());
             }
 
             ctx.output.blank();
-            ctx.output.success("Apply completed successfully");
+            ctx.output.success("Test completed successfully");
             return Ok(());
         }
 
@@ -131,21 +138,21 @@ impl ApplyCommand {
             &env_path,
             &project_name,
             &env_name,
-            "apply",
+            "test",
         )?;
 
         if let Some(graph) = maybe_graph {
-            // Execute apply on entire dependency graph
+            // Execute test on entire dependency graph
             crate::commands::ExecutionHelper::execute_on_graph(
                 ctx,
                 &graph,
-                "apply",
-                crate::commands::ExecutionHelper::execute_apply_on_node,
+                "test",
+                crate::commands::ExecutionHelper::execute_test_on_node,
             )?;
 
             ctx.output.blank();
             ctx.output
-                .success("Apply completed successfully for all projects");
+                .success("Test completed successfully for all projects");
             return Ok(());
         }
 
@@ -187,13 +194,13 @@ impl ApplyCommand {
             .to_str()
             .context("Failed to convert environment path to string")?;
 
-        // Run pre-apply hooks
-        if !hooks.pre_apply.is_empty()
-            && HooksRunner::run_hooks(&hooks.pre_apply, env_dir_str, "pre-apply")?
+        // Run pre-test hooks
+        if !hooks.pre_test.is_empty()
+            && HooksRunner::run_hooks(&hooks.pre_test, env_dir_str, "pre-test")?
                 == HookOutcome::Cancel
         {
             ctx.output.blank();
-            ctx.output.warning("Apply cancelled by pre-apply hook");
+            ctx.output.warning("Test cancelled by pre-test hook");
             return Ok(());
         }
 
@@ -247,25 +254,28 @@ impl ApplyCommand {
             command_options,
         };
 
-        // Run apply
-        ctx.output.subsection("Running Apply");
+        // Run test
+        ctx.output.subsection("Running Test");
         ctx.output
-            .dimmed(&format!("Executing {} apply...", executor.get_name()));
-        executor.apply(&execution_config, env_dir_str, extra_args)?;
+            .dimmed(&format!("Executing {} test...", executor.get_name()));
+        ctx.output.blank();
+        ctx.output.dimmed("This will validate the configuration without creating infrastructure.");
+        ctx.output.blank();
+        executor.test(&execution_config, env_dir_str, extra_args)?;
 
-        // Run post-apply hooks
-        if !hooks.post_apply.is_empty()
-            && HooksRunner::run_hooks(&hooks.post_apply, env_dir_str, "post-apply")?
+        // Run post-test hooks
+        if !hooks.post_test.is_empty()
+            && HooksRunner::run_hooks(&hooks.post_test, env_dir_str, "post-test")?
                 == HookOutcome::Cancel
         {
             ctx.output.blank();
             ctx.output
-                .warning("Post-apply hooks cancelled further execution");
+                .warning("Post-test hooks cancelled further execution");
             return Ok(());
         }
 
         ctx.output.blank();
-        ctx.output.success("Apply completed successfully");
+        ctx.output.success("Test completed successfully");
 
         Ok(())
     }

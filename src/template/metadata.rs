@@ -708,6 +708,72 @@ pub enum InputType {
     },
     /// Port number input (1-65535)
     Port,
+    /// Single structured object with named fields
+    Object {
+        /// Fields within the object
+        fields: Vec<InputDefinition>,
+    },
+    /// Array of structured objects (repeatable prompt)
+    #[serde(rename = "repeatable_object")]
+    RepeatableObject {
+        /// Fields within each object
+        fields: Vec<InputDefinition>,
+        /// Minimum number of items
+        #[serde(skip_serializing_if = "Option::is_none")]
+        min: Option<usize>,
+        /// Maximum number of items
+        #[serde(skip_serializing_if = "Option::is_none")]
+        max: Option<usize>,
+        /// Custom prompt for "Add another?"
+        #[serde(skip_serializing_if = "Option::is_none")]
+        add_another_prompt: Option<String>,
+    },
+    /// Hex color input with validation
+    #[serde(rename = "color")]
+    Color {
+        /// If true, allow alpha channel (#RRGGBBAA)
+        #[serde(default, skip_serializing_if = "is_false")]
+        allow_alpha: bool,
+    },
+    /// Duration input (e.g., "1h30m", "5d", "2w")
+    #[serde(rename = "duration")]
+    Duration {
+        /// Minimum duration in seconds
+        #[serde(skip_serializing_if = "Option::is_none")]
+        min_seconds: Option<u64>,
+        /// Maximum duration in seconds
+        #[serde(skip_serializing_if = "Option::is_none")]
+        max_seconds: Option<u64>,
+    },
+    /// Cron expression input with validation
+    #[serde(rename = "cron")]
+    Cron,
+    /// Key-value pairs input (returns object/map)
+    #[serde(rename = "keyvalue")]
+    KeyValue {
+        /// Separator between key and value (default: "=")
+        #[serde(default = "default_keyvalue_separator")]
+        key_value_separator: String,
+        /// Separator between pairs (default: ",")
+        #[serde(default = "default_list_separator")]
+        pair_separator: String,
+        /// Minimum number of pairs
+        #[serde(skip_serializing_if = "Option::is_none")]
+        min: Option<usize>,
+        /// Maximum number of pairs
+        #[serde(skip_serializing_if = "Option::is_none")]
+        max: Option<usize>,
+    },
+    /// Semantic version input (e.g., "1.2.3", "2.0.0-beta.1")
+    #[serde(rename = "semver")]
+    Semver {
+        /// If true, allow pre-release versions
+        #[serde(default = "default_true", skip_serializing_if = "is_true")]
+        allow_prerelease: bool,
+        /// If true, allow build metadata
+        #[serde(default = "default_true", skip_serializing_if = "is_true")]
+        allow_build: bool,
+    },
 }
 
 /// Helper function for serde to determine if a bool is false
@@ -723,6 +789,11 @@ fn is_true(b: &bool) -> bool {
 /// Default value for list separator
 fn default_list_separator() -> String {
     ",".to_string()
+}
+
+/// Default value for key-value separator
+fn default_keyvalue_separator() -> String {
+    "=".to_string()
 }
 
 /// Default value for true boolean
@@ -1140,6 +1211,41 @@ pub struct ProjectGroupReferenceProject {
     pub dependency_name: Option<String>,
 }
 
+/// Reference project configuration for a plugin dependency
+/// This is used in project groups to pre-configure which projects satisfy plugin dependencies
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectGroupPluginReferenceProject {
+    /// Name of the reference project
+    pub name: String,
+
+    /// Optional: Environment name (defaults to same environment as the project group)
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub environment: Option<String>,
+
+    /// Optional: Dependency name to match against plugin dependencies
+    /// If specified, the reference project must match the dependency with this name
+    /// from the plugin's spec.dependencies list
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dependency_name: Option<String>,
+}
+
+/// Plugin configuration for a project in a project group
+/// Supports pre-configuring both installed and allowed plugins
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ProjectGroupPluginConfig {
+    /// Reference projects to pass to plugin dependencies
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub reference_projects: Vec<ProjectGroupPluginReferenceProject>,
+
+    /// Input overrides for this plugin
+    #[serde(default)]
+    #[serde(skip_serializing_if = "HashMap::is_empty")]
+    pub inputs: HashMap<String, ProjectGroupInputConfig>,
+}
+
 /// A project configuration within a project group
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectGroupProject {
@@ -1170,6 +1276,12 @@ pub struct ProjectGroupProject {
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub executor: Option<ExecutorConfigOverride>,
+
+    /// Optional: Plugin configurations (both installed and allowed)
+    /// Key: plugin name, Value: plugin configuration (reference_projects + inputs)
+    #[serde(default)]
+    #[serde(skip_serializing_if = "HashMap::is_empty")]
+    pub plugins: HashMap<String, ProjectGroupPluginConfig>,
 }
 
 /// Shared configuration applied to all projects in a project group
@@ -1608,6 +1720,14 @@ pub struct HooksConfig {
     /// Hooks to run after refresh
     #[serde(default)]
     pub post_refresh: Vec<Hook>,
+
+    /// Hooks to run before test
+    #[serde(default)]
+    pub pre_test: Vec<Hook>,
+
+    /// Hooks to run after test
+    #[serde(default)]
+    pub post_test: Vec<Hook>,
 }
 
 /// Input override configuration for infrastructure-level input customization

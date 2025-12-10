@@ -207,6 +207,7 @@ impl ExecutionHelper {
                 apply_command: None,
                 destroy_command: None,
                 refresh_command: None,
+                test_command: None,
                 command_options,
             };
 
@@ -311,6 +312,107 @@ impl ExecutionHelper {
 
         ctx.output.success(&format!(
             "Preview completed for {} ({})",
+            node.project_name, node.environment_name
+        ));
+
+        Ok(())
+    }
+
+    /// Execute test on a single node
+    pub fn execute_test_on_node(
+        ctx: &crate::context::Context,
+        node: &DependencyNode,
+        executor: &dyn Executor,
+        execution_config: &ExecutorConfig,
+        extra_args: &[String],
+    ) -> Result<()> {
+        // Skip execution for none executor (dependency-only projects)
+        if executor.get_name() == "none" {
+            ctx.output.dimmed(&format!(
+                "Skipping {} ({}) - dependency-only project",
+                node.project_name, node.environment_name
+            ));
+            return Ok(());
+        }
+
+        let env_dir_str = node
+            .environment_path
+            .to_str()
+            .context("Failed to convert environment path to string")?;
+
+        // Load collection to get infrastructure-level hooks
+        let (collection, _) = crate::collection::CollectionDiscovery::find_collection(&*ctx.fs)?
+            .context("Infrastructure is required to run commands")?;
+
+        let infrastructure_hooks = collection.get_hooks();
+
+        // Load environment resource to get environment-level hooks
+        let env_file = node.environment_path.join(".pmp.environment.yaml");
+        let env_resource = DynamicProjectEnvironmentResource::from_file(&*ctx.fs, &env_file)
+            .context("Failed to load environment resource")?;
+
+        // Merge hooks: environment hooks take precedence over infrastructure hooks
+        let hooks = Self::merge_hooks(&infrastructure_hooks, env_resource.spec.hooks.as_ref());
+
+        // Run pre-test hooks
+        if !hooks.pre_test.is_empty()
+            && HooksRunner::run_hooks(&hooks.pre_test, env_dir_str, "pre-test")?
+                == HookOutcome::Cancel
+        {
+            ctx.output.warning(&format!(
+                "Test cancelled by pre-test hook for {} ({})",
+                node.project_name, node.environment_name
+            ));
+            return Ok(());
+        }
+
+        // Run helm repo update if configured
+        Self::run_helm_repo_update_if_needed(ctx, &collection, executor.get_name())?;
+
+        // Initialize executor
+        ctx.output
+            .dimmed(&format!("Initializing {}...", executor.get_name()));
+        let init_output = executor.init(env_dir_str)?;
+
+        if !init_output.status.success() {
+            if !init_output.stdout.is_empty()
+                && let Ok(stdout_str) = String::from_utf8(init_output.stdout.clone())
+            {
+                ctx.output.error(&stdout_str);
+            }
+            if !init_output.stderr.is_empty()
+                && let Ok(stderr_str) = String::from_utf8(init_output.stderr.clone())
+            {
+                ctx.output.error(&stderr_str);
+            }
+            anyhow::bail!(
+                "Initialization failed with exit code: {:?}",
+                init_output.status.code()
+            );
+        }
+
+        ctx.output.success("Initialization completed");
+
+        // Run test
+        ctx.output
+            .dimmed(&format!("Executing {} test...", executor.get_name()));
+        ctx.output.dimmed("This will validate the configuration without creating infrastructure.");
+        executor.test(execution_config, env_dir_str, extra_args)?;
+
+        // Run post-test hooks
+        if !hooks.post_test.is_empty()
+            && HooksRunner::run_hooks(&hooks.post_test, env_dir_str, "post-test")?
+                == HookOutcome::Cancel
+        {
+            ctx.output.warning(&format!(
+                "Post-test hooks cancelled for {} ({})",
+                node.project_name, node.environment_name
+            ));
+            return Ok(());
+        }
+
+        ctx.output.success(&format!(
+            "Test completed for {} ({})",
             node.project_name, node.environment_name
         ));
 

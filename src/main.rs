@@ -3,9 +3,12 @@ mod commands;
 mod context;
 mod executor;
 mod hooks;
+mod import;
 mod output;
 mod schema;
 mod template;
+#[cfg(test)]
+mod test_helpers;
 mod traits;
 
 use anyhow::Result;
@@ -13,8 +16,8 @@ use clap::{Parser, Subcommand};
 use commands::{
     ApplyCommand, CiCommand, CiDetectChangesCommand, CloneCommand, CreateCommand, DepsCommand,
     DestroyCommand, DriftCommand, EnvCommand, FindCommand, GenerateCommand, GraphCommand,
-    InfrastructureCommand, PolicyCommand, PreviewCommand, RefreshCommand, SearchCommand,
-    StateCommand, TemplateCommand, UiCommand, UpdateCommand,
+    ImportCommand, InfrastructureCommand, PolicyCommand, PreviewCommand, RefreshCommand,
+    SearchCommand, StateCommand, TemplateCommand, TestCommand, UiCommand, UpdateCommand,
 };
 
 #[derive(Parser)]
@@ -190,6 +193,20 @@ enum ProjectSubcommands {
         executor_args: Vec<String>,
     },
 
+    /// Test configuration without creating infrastructure (run IaC test)
+    #[command(
+        long_about = "Test configuration without creating infrastructure (run IaC test)\n\nValidates the configuration and runs tests without actually creating or modifying resources.\nFor OpenTofu, this runs 'tofu test' which validates the configuration.\n\nYou can pass additional executor options after --:\n\nExamples:\n  pmp project test\n  pmp project test --path ./my-project\n  pmp project test -- -verbose"
+    )]
+    Test {
+        /// Path to the project directory (defaults to current directory)
+        #[arg(short, long)]
+        path: Option<String>,
+
+        /// Additional arguments to pass to the executor (after --)
+        #[arg(last = true)]
+        executor_args: Vec<String>,
+    },
+
     /// Visualize dependency graph
     #[command(
         long_about = "Visualize project dependency graphs\n\nSupports multiple output formats:\n- ASCII: Terminal-friendly tree visualization\n- Mermaid: Mermaid.js diagram format\n- DOT: GraphViz DOT format\n\nExamples:\n  pmp project graph\n  pmp project graph --all\n  pmp project graph --format mermaid --output graph.mmd\n  pmp project graph --format dot --output graph.dot"
@@ -269,6 +286,12 @@ enum Commands {
         #[command(subcommand)]
         command: InfrastructureSubcommands,
     },
+
+    /// Import existing infrastructure into PMP
+    #[command(
+        long_about = "Import existing Terraform/OpenTofu infrastructure into PMP\n\nSubcommands:\n- project: Import entire project directory\n- state: Import from state file\n- resource: Import specific resources\n- bulk: Import multiple projects from config\n\nExamples:\n  pmp import project ./my-terraform-infra\n  pmp import project ./my-infra --name my-app --environment production\n  pmp import state ./terraform.tfstate --name my-app\n  pmp import resource aws_s3_bucket.my_bucket --project my-storage --environment prod\n  pmp import bulk ./import-config.yaml"
+    )]
+    Import(ImportCommand),
 
     /// Project management commands
     #[command(
@@ -753,6 +776,9 @@ fn main() -> Result<()> {
                 )?;
             }
         },
+        Commands::Import(import_cmd) => {
+            import_cmd.execute(&ctx)?;
+        }
         Commands::Project { command } => match command {
             ProjectSubcommands::Create {
                 output,
@@ -820,6 +846,12 @@ fn main() -> Result<()> {
                 executor_args,
             } => {
                 RefreshCommand::execute(&ctx, path.as_deref(), &executor_args)?;
+            }
+            ProjectSubcommands::Test {
+                path,
+                executor_args,
+            } => {
+                TestCommand::execute(&ctx, path.as_deref(), &executor_args)?;
             }
             ProjectSubcommands::Graph {
                 path,

@@ -51,7 +51,7 @@ impl DriftCommand {
         let current_path = if let Some(p) = path {
             std::path::PathBuf::from(p)
         } else {
-            std::env::current_dir()?
+            ctx.fs.current_dir()?
         };
 
         // Check if we're in an environment context

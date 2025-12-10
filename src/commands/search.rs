@@ -390,7 +390,7 @@ impl SearchCommand {
     }
 
     fn search_terraform_resources(
-        _ctx: &Context,
+        ctx: &Context,
         env_path: &Path,
         resource_type: Option<&str>,
         resource_name: Option<&str>,
@@ -401,12 +401,9 @@ impl SearchCommand {
         // Format: resource "type" "name" { ... }
         let resource_regex = regex::Regex::new(r#"resource\s+"([^"]+)"\s+"([^"]+)"\s*\{"#).unwrap();
 
-        for entry in std::fs::read_dir(env_path)? {
-            let entry = entry?;
-            let path = entry.path();
-
+        for path in ctx.fs.read_dir(env_path)? {
             if path.extension().and_then(|s| s.to_str()) == Some("tf")
-                && let Ok(content) = std::fs::read_to_string(&path)
+                && let Ok(content) = ctx.fs.read_to_string(&path)
             {
                 for (line_num, line) in content.lines().enumerate() {
                     if let Some(captures) = resource_regex.captures(line) {
@@ -447,7 +444,7 @@ impl SearchCommand {
     }
 
     fn search_terraform_outputs(
-        _ctx: &Context,
+        ctx: &Context,
         env_path: &Path,
         output_name: &str,
     ) -> Result<Vec<Match>> {
@@ -457,12 +454,9 @@ impl SearchCommand {
         // Format: output "name" { ... }
         let output_regex = regex::Regex::new(r#"output\s+"([^"]+)"\s*\{"#).unwrap();
 
-        for entry in std::fs::read_dir(env_path)? {
-            let entry = entry?;
-            let path = entry.path();
-
+        for path in ctx.fs.read_dir(env_path)? {
             if path.extension().and_then(|s| s.to_str()) == Some("tf")
-                && let Ok(content) = std::fs::read_to_string(&path)
+                && let Ok(content) = ctx.fs.read_to_string(&path)
             {
                 for (line_num, line) in content.lines().enumerate() {
                     if let Some(captures) = output_regex.captures(line) {

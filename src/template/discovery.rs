@@ -60,7 +60,7 @@ impl TemplateDiscovery {
         }
 
         // 2. Check current directory's .pmp/template-packs
-        let current_templates_path = std::env::current_dir()?.join(".pmp").join("template-packs");
+        let current_templates_path = fs.current_dir()?.join(".pmp").join("template-packs");
 
         if fs.exists(&current_templates_path) {
             all_template_packs.extend(Self::load_template_packs_from_dir(
@@ -287,7 +287,7 @@ impl TemplateDiscovery {
         let mut templates = Vec::new();
 
         // Check current directory's .pmp/template-packs
-        let current_templates_path = std::env::current_dir()?.join(".pmp").join("template-packs");
+        let current_templates_path = fs.current_dir()?.join(".pmp").join("template-packs");
 
         if fs.exists(&current_templates_path) {
             templates.extend(Self::load_templates_from_dir(

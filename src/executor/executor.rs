@@ -14,6 +14,8 @@ pub struct ExecutorConfig {
     pub destroy_command: Option<String>,
     /// Optional custom refresh command (overrides default)
     pub refresh_command: Option<String>,
+    /// Optional custom test command (overrides default)
+    pub test_command: Option<String>,
     /// Command-specific options from template configuration
     pub command_options: std::collections::HashMap<String, Vec<String>>,
 }
@@ -77,6 +79,17 @@ pub trait Executor: Send + Sync {
         extra_args: &[String],
     ) -> Result<()>;
 
+    /// Execute the test command (validate configuration without creating infrastructure)
+    /// For OpenTofu, this runs 'tofu test' to validate the configuration
+    /// Runs interactively with inherited stdio for user interaction
+    /// Additional args can be passed via extra_args (e.g., from -- separator)
+    fn test(
+        &self,
+        config: &ExecutorConfig,
+        working_dir: &str,
+        extra_args: &[String],
+    ) -> Result<()>;
+
     /// Get the name of this executor (e.g., "opentofu", "terraform")
     fn get_name(&self) -> &str;
 
@@ -91,6 +104,9 @@ pub trait Executor: Send + Sync {
 
     /// Get the default refresh command for this executor
     fn default_refresh_command(&self) -> &str;
+
+    /// Get the default test command for this executor
+    fn default_test_command(&self) -> &str;
 
     /// Generate common infrastructure file (e.g., _common.tf) with backend and module configuration
     /// Default implementation does nothing (only OpenTofu executor generates _common.tf)

@@ -36,6 +36,9 @@ pub trait FileSystem: Send + Sync {
 
     /// Walk directory recursively (for template discovery)
     fn walk_dir(&self, path: &Path, max_depth: usize) -> Result<Vec<PathBuf>>;
+
+    /// Get current working directory
+    fn current_dir(&self) -> Result<PathBuf>;
 }
 
 /// Real filesystem implementation using std::fs
@@ -106,6 +109,10 @@ impl FileSystem for RealFileSystem {
 
         Ok(paths)
     }
+
+    fn current_dir(&self) -> Result<PathBuf> {
+        std::env::current_dir().context("Failed to get current directory")
+    }
 }
 
 /// Mock filesystem implementation for testing (in-memory)
@@ -113,16 +120,25 @@ impl FileSystem for RealFileSystem {
 pub struct MockFileSystem {
     files: Arc<RwLock<HashMap<PathBuf, String>>>,
     directories: Arc<RwLock<HashMap<PathBuf, ()>>>,
+    current_dir: Arc<RwLock<PathBuf>>,
 }
 
 #[allow(dead_code)]
 impl MockFileSystem {
     /// Create new empty mock filesystem
     pub fn new() -> Self {
+        // Use actual current directory as default to maintain backward compatibility
+        let current = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
         Self {
             files: Arc::new(RwLock::new(HashMap::new())),
             directories: Arc::new(RwLock::new(HashMap::new())),
+            current_dir: Arc::new(RwLock::new(current)),
         }
+    }
+
+    /// Set the current directory for this mock filesystem
+    pub fn set_current_dir(&self, path: PathBuf) {
+        *self.current_dir.write().unwrap() = path;
     }
 
     /// Get captured file contents for testing assertions
@@ -288,5 +304,9 @@ impl FileSystem for MockFileSystem {
         }
 
         Ok(entries)
+    }
+
+    fn current_dir(&self) -> Result<PathBuf> {
+        Ok(self.current_dir.read().unwrap().clone())
     }
 }

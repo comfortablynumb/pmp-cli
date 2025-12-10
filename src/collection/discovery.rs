@@ -10,7 +10,7 @@ impl CollectionDiscovery {
     pub fn find_collection(
         fs: &dyn crate::traits::FileSystem,
     ) -> Result<Option<(InfrastructureResource, PathBuf)>> {
-        let current_dir = std::env::current_dir()?;
+        let current_dir = fs.current_dir()?;
         Self::find_collection_in_path(fs, &current_dir)
     }
 

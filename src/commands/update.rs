@@ -372,14 +372,15 @@ impl UpdateCommand {
             }
 
             // Clean up stale reference_projects if plugin has no dependencies
-            if let Some(spec) = &existing_plugin.plugin_spec {
-                if spec.dependencies.is_empty() && !existing_plugin.reference_projects.is_empty() {
-                    output::dimmed(&format!(
-                        "  Cleaning stale references for plugin {}/{} (no dependencies)",
-                        existing_plugin.template_pack_name, existing_plugin.name
-                    ));
-                    existing_plugin.reference_projects.clear();
-                }
+            if let Some(spec) = &existing_plugin.plugin_spec
+                && spec.dependencies.is_empty()
+                && !existing_plugin.reference_projects.is_empty()
+            {
+                output::dimmed(&format!(
+                    "  Cleaning stale references for plugin {}/{} (no dependencies)",
+                    existing_plugin.template_pack_name, existing_plugin.name
+                ));
+                existing_plugin.reference_projects.clear();
             }
         }
 
@@ -1024,22 +1025,20 @@ impl UpdateCommand {
                     } else {
                         p.plugin_info.resource.metadata.name.clone()
                     }
+                } else if dependency_count > 0 {
+                    format!(
+                        "{} - {} ({} {})",
+                        p.plugin_info.resource.metadata.name,
+                        desc,
+                        dependency_count,
+                        if dependency_count == 1 { "dependency" } else { "dependencies" }
+                    )
                 } else {
-                    if dependency_count > 0 {
-                        format!(
-                            "{} - {} ({} {})",
-                            p.plugin_info.resource.metadata.name,
-                            desc,
-                            dependency_count,
-                            if dependency_count == 1 { "dependency" } else { "dependencies" }
-                        )
-                    } else {
-                        format!(
-                            "{} - {}",
-                            p.plugin_info.resource.metadata.name,
-                            desc
-                        )
-                    }
+                    format!(
+                        "{} - {}",
+                        p.plugin_info.resource.metadata.name,
+                        desc
+                    )
                 }
             })
             .collect();
@@ -2226,8 +2225,43 @@ impl UpdateCommand {
                 None
             };
 
-            let value = if let Some(enum_values) = &input_def.enum_values {
-                // This is a select input
+            let value = if let Some(input_type) = &input_def.input_type {
+                // Handle based on input type
+                match input_type {
+                    crate::template::metadata::InputType::Select { options } => {
+                        // Build list of display labels
+                        let labels: Vec<String> = options.iter().map(|opt| opt.label.clone()).collect();
+
+                        // Get current value string
+                        let current_value_str = current_value.and_then(|v| v.as_str());
+                        let default_value_str = interpolated_default.as_ref().and_then(|v| v.as_str());
+
+                        // Find default index based on current value or default
+                        let default_idx = current_value_str
+                            .or(default_value_str)
+                            .and_then(|val| options.iter().position(|opt| opt.value == val));
+
+                        let selected_label = ctx
+                            .input
+                            .select(&description, labels, default_idx)
+                            .context("Failed to get input")?;
+
+                        // Find the corresponding value
+                        let selected_option = options
+                            .iter()
+                            .find(|opt| opt.label == selected_label)
+                            .ok_or_else(|| anyhow::anyhow!("Selected option not found"))?;
+
+                        serde_json::Value::String(selected_option.value.clone())
+                    }
+                    _ => {
+                        // For other input types, fall back to value-based handling
+                        let default_value = current_value.or(interpolated_default.as_ref());
+                        Self::collect_input_by_value(ctx, &description, default_value)?
+                    }
+                }
+            } else if let Some(enum_values) = &input_def.enum_values {
+                // Deprecated: This is a select input using old format
                 // Sort enum values alphabetically for display
                 let mut sorted_enum_values = enum_values.clone();
                 sorted_enum_values.sort();
@@ -2251,49 +2285,7 @@ impl UpdateCommand {
             } else {
                 // Determine the default value (prefer current value over template default)
                 let default_value = current_value.or(interpolated_default.as_ref());
-
-                match default_value {
-                    Some(serde_json::Value::Bool(b)) => {
-                        let answer = ctx
-                            .input
-                            .confirm(&description, Some(*b))
-                            .context("Failed to get input")?;
-                        serde_json::Value::Bool(answer)
-                    }
-                    Some(serde_json::Value::Number(n)) => {
-                        let answer = ctx
-                            .input
-                            .text(&description, Some(&n.to_string()))
-                            .context("Failed to get input")?;
-
-                        // Try to parse as number
-                        if let Ok(num) = answer.parse::<i64>() {
-                            serde_json::Value::Number(num.into())
-                        } else if let Ok(num) = answer.parse::<f64>() {
-                            serde_json::Value::Number(serde_json::Number::from_f64(num).unwrap())
-                        } else {
-                            serde_json::Value::String(answer)
-                        }
-                    }
-                    Some(serde_json::Value::String(s)) => {
-                        // Don't pass empty string as default to avoid "()" display
-                        let default = if s.is_empty() { None } else { Some(s.as_str()) };
-                        let answer = ctx
-                            .input
-                            .text(&description, default)
-                            .context("Failed to get input")?;
-                        serde_json::Value::String(answer)
-                    }
-                    _ => {
-                        // No current value or default, prompt for string
-                        let prompt_text = format!("{} [required]", description);
-                        let answer = ctx
-                            .input
-                            .text(&prompt_text, None)
-                            .context("Failed to get input")?;
-                        serde_json::Value::String(answer)
-                    }
-                }
+                Self::collect_input_by_value(ctx, &description, default_value)?
             };
 
             inputs.insert(input_def.name.clone(), value);
@@ -2721,7 +2713,7 @@ impl UpdateCommand {
 
             let exists = merged_refs.iter().any(|existing_ref| {
                 // Check if dependency already exists by matching the actual data_source_name
-                &existing_ref.data_source_name == &calculated_data_source_name
+                existing_ref.data_source_name == calculated_data_source_name
             });
 
             if !exists {
@@ -3129,8 +3121,40 @@ impl UpdateCommand {
                 None
             };
 
-            let value = if let Some(enum_values) = &input_def.enum_values {
-                // This is a select input
+            let value = if let Some(input_type) = &input_def.input_type {
+                // Handle based on input type
+                match input_type {
+                    crate::template::metadata::InputType::Select { options } => {
+                        // Build list of display labels
+                        let labels: Vec<String> = options.iter().map(|opt| opt.label.clone()).collect();
+
+                        // Get default value string
+                        let default_value_str = interpolated_default.as_ref().and_then(|v| v.as_str());
+
+                        // Find default index based on default value
+                        let default_idx = default_value_str
+                            .and_then(|val| options.iter().position(|opt| opt.value == val));
+
+                        let selected_label = ctx
+                            .input
+                            .select(&description, labels, default_idx)
+                            .context("Failed to get input")?;
+
+                        // Find the corresponding value
+                        let selected_option = options
+                            .iter()
+                            .find(|opt| opt.label == selected_label)
+                            .ok_or_else(|| anyhow::anyhow!("Selected option not found"))?;
+
+                        Value::String(selected_option.value.clone())
+                    }
+                    _ => {
+                        // For other input types, fall back to value-based handling
+                        Self::collect_input_by_value(ctx, &description, interpolated_default.as_ref())?
+                    }
+                }
+            } else if let Some(enum_values) = &input_def.enum_values {
+                // Deprecated: This is a select input using old format
                 // Sort enum values alphabetically for display
                 let mut sorted_enum_values = enum_values.clone();
                 sorted_enum_values.sort();
@@ -3426,6 +3450,56 @@ impl UpdateCommand {
         }
 
         Ok(inputs)
+    }
+
+    /// Helper method to collect input based on its value type
+    fn collect_input_by_value(
+        ctx: &crate::context::Context,
+        description: &str,
+        default_value: Option<&serde_json::Value>,
+    ) -> Result<serde_json::Value> {
+        match default_value {
+            Some(serde_json::Value::Bool(b)) => {
+                let answer = ctx
+                    .input
+                    .confirm(description, Some(*b))
+                    .context("Failed to get input")?;
+                Ok(serde_json::Value::Bool(answer))
+            }
+            Some(serde_json::Value::Number(n)) => {
+                let answer = ctx
+                    .input
+                    .text(description, Some(&n.to_string()))
+                    .context("Failed to get input")?;
+
+                // Try to parse as number
+                if let Ok(num) = answer.parse::<i64>() {
+                    Ok(serde_json::Value::Number(num.into()))
+                } else if let Ok(num) = answer.parse::<f64>() {
+                    Ok(serde_json::Value::Number(serde_json::Number::from_f64(num).unwrap()))
+                } else {
+                    Ok(serde_json::Value::String(answer))
+                }
+            }
+            Some(serde_json::Value::String(s)) => {
+                // Don't pass empty string as default to avoid "()" display
+                let default = if s.is_empty() { None } else { Some(s.as_str()) };
+                let answer = ctx
+                    .input
+                    .text(description, default)
+                    .context("Failed to get input")?;
+                Ok(serde_json::Value::String(answer))
+            }
+            _ => {
+                // No current value or default, prompt for string
+                let prompt_text = format!("{} [required]", description);
+                let answer = ctx
+                    .input
+                    .text(&prompt_text, None)
+                    .context("Failed to get input")?;
+                Ok(serde_json::Value::String(answer))
+            }
+        }
     }
 }
 

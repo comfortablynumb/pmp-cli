@@ -4,13 +4,37 @@ use crate::collection::CollectionDiscovery;
 use crate::executor::{Executor, ExecutorConfig, OpenTofuExecutor};
 use crate::hooks::{HookOutcome, HooksRunner};
 use crate::template::metadata::{
-    ProjectGroupProject, ProjectGroupReferenceProject, ProjectReference, TemplateReferenceProject,
+    PluginDependency, ProjectGroupInputConfig, ProjectGroupPluginReferenceProject,
+    ProjectGroupProject, ProjectGroupReferenceProject, ProjectReference,
+    TemplateReferenceProject,
 };
 use crate::template::{DynamicProjectEnvironmentResource, TemplateDiscovery};
 use anyhow::{Context, Result};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::Path;
+
+/// Pre-configured plugin data passed to create/update commands
+pub struct PreConfiguredPluginData {
+    /// Pre-resolved reference projects
+    pub resolved_references: Vec<(ProjectReference, DynamicProjectEnvironmentResource)>,
+
+    /// Dependencies that still need user selection
+    pub unresolved_dependencies: Vec<PluginDependency>,
+
+    /// Pre-configured input values
+    pub input_configs: HashMap<String, ProjectGroupInputConfig>,
+}
+
+/// Result of plugin reference resolution
+#[derive(Debug)]
+struct ResolvedPluginReferences {
+    /// Successfully resolved reference projects
+    resolved: Vec<(ProjectReference, DynamicProjectEnvironmentResource)>,
+
+    /// Plugin dependencies that still need user selection
+    unresolved_dependencies: Vec<PluginDependency>,
+}
 
 /// Handles project group operations
 pub struct ProjectGroupHandler;
@@ -278,6 +302,7 @@ impl ProjectGroupHandler {
             apply_command: None,
             destroy_command: None,
             refresh_command: None,
+            test_command: None,
             command_options,
         };
 
@@ -389,6 +414,20 @@ impl ProjectGroupHandler {
             Vec::new()
         };
 
+        // Prepare plugin configurations if present
+        let prepared_plugins = if !project_config.plugins.is_empty() {
+            Self::prepare_plugin_configurations(
+                ctx,
+                project_config,
+                environment_name,
+                template_packs_paths,
+                &infrastructure_root,
+                &existing_projects,
+            )?
+        } else {
+            HashMap::new()
+        };
+
         if project_exists {
             // Update existing project
             ctx.output.dimmed(&format!(
@@ -444,6 +483,7 @@ impl ProjectGroupHandler {
                 template_packs_paths,
                 &inputs,
                 &resolved_reference_projects,
+                &prepared_plugins,
             )?;
         }
 
@@ -586,6 +626,261 @@ impl ProjectGroupHandler {
         Ok(())
     }
 
+    /// Resolve plugin reference projects by name
+    /// Similar to resolve_reference_projects but for plugin dependencies
+    fn resolve_plugin_reference_projects(
+        ctx: &crate::context::Context,
+        plugin_ref_configs: &[ProjectGroupPluginReferenceProject],
+        plugin_dependencies: &[PluginDependency],
+        default_environment: &str,
+        infrastructure_root: &Path,
+        existing_projects: &[ProjectReference],
+    ) -> Result<ResolvedPluginReferences> {
+        let mut resolved = Vec::new();
+        let mut matched_dependencies = std::collections::HashSet::new();
+
+        for ref_config in plugin_ref_configs {
+            let project_ref = existing_projects
+                .iter()
+                .find(|p| p.name == ref_config.name)
+                .with_context(|| {
+                    format!(
+                        "Reference project '{}' not found for plugin",
+                        ref_config.name
+                    )
+                })?;
+
+            let ref_env_name = ref_config.environment.as_deref().unwrap_or(default_environment);
+
+            let project_path = infrastructure_root
+                .join("projects")
+                .join(&project_ref.name);
+            let env_path = project_path.join("environments").join(ref_env_name);
+            let env_file = env_path.join(".pmp.environment.yaml");
+
+            anyhow::ensure!(
+                ctx.fs.exists(&env_file),
+                "Environment '{}' not found for reference project '{}'",
+                ref_env_name,
+                ref_config.name
+            );
+
+            let env_resource = DynamicProjectEnvironmentResource::from_file(&*ctx.fs, &env_file)?;
+
+            let dep_idx = if let Some(dep_name) = &ref_config.dependency_name {
+                plugin_dependencies.iter().position(|d| {
+                    d.dependency_name.as_ref() == Some(dep_name)
+                })
+                .with_context(|| {
+                    format!(
+                        "Dependency with name '{}' not found in plugin dependencies",
+                        dep_name
+                    )
+                })?
+            } else {
+                plugin_dependencies.iter().position(|d| {
+                    d.project.api_version == env_resource.spec.resource.api_version
+                        && d.project.kind == env_resource.spec.resource.kind
+                })
+                .with_context(|| {
+                    format!(
+                        "No plugin dependency matches reference project '{}' (apiVersion: {}, kind: {})",
+                        ref_config.name,
+                        env_resource.spec.resource.api_version,
+                        env_resource.spec.resource.kind
+                    )
+                })?
+            };
+
+            let dependency = &plugin_dependencies[dep_idx];
+
+            anyhow::ensure!(
+                dependency.project.api_version == env_resource.spec.resource.api_version,
+                "API version mismatch for reference project '{}': expected '{}', found '{}'",
+                ref_config.name,
+                dependency.project.api_version,
+                env_resource.spec.resource.api_version
+            );
+
+            anyhow::ensure!(
+                dependency.project.kind == env_resource.spec.resource.kind,
+                "Kind mismatch for reference project '{}': expected '{}', found '{}'",
+                ref_config.name,
+                dependency.project.kind,
+                env_resource.spec.resource.kind
+            );
+
+            if !dependency.project.label_selector.is_empty() {
+                for (key, value) in &dependency.project.label_selector {
+                    let project_value = env_resource.metadata.labels.get(key);
+
+                    anyhow::ensure!(
+                        project_value == Some(value),
+                        "Label selector mismatch for reference project '{}': required {}={}, found {}",
+                        ref_config.name,
+                        key,
+                        value,
+                        project_value.map(|v| v.as_str()).unwrap_or("<not set>")
+                    );
+                }
+            }
+
+            matched_dependencies.insert(dep_idx);
+            resolved.push((project_ref.clone(), env_resource));
+        }
+
+        let unresolved_dependencies = plugin_dependencies
+            .iter()
+            .enumerate()
+            .filter(|(idx, _)| !matched_dependencies.contains(idx))
+            .map(|(_, dep)| dep.clone())
+            .collect();
+
+        Ok(ResolvedPluginReferences {
+            resolved,
+            unresolved_dependencies,
+        })
+    }
+
+    /// Prepare plugin configurations by resolving reference projects
+    /// Returns map of plugin_name -> PreConfiguredPluginData
+    fn prepare_plugin_configurations(
+        ctx: &crate::context::Context,
+        project_config: &ProjectGroupProject,
+        environment_name: &str,
+        template_packs_paths: Option<&str>,
+        infrastructure_root: &Path,
+        existing_projects: &[ProjectReference],
+    ) -> Result<HashMap<String, PreConfiguredPluginData>> {
+        let mut prepared = HashMap::new();
+
+        let flag_paths: Vec<String> = if let Some(paths) = template_packs_paths {
+            crate::template::discovery::parse_colon_separated_paths(paths)
+        } else {
+            vec![]
+        };
+
+        let env_paths: Vec<String> = std::env::var("PMP_TEMPLATE_PACKS_PATHS")
+            .ok()
+            .map(|p| crate::template::discovery::parse_colon_separated_paths(&p))
+            .unwrap_or_default();
+
+        let mut all_paths = flag_paths;
+        all_paths.extend(env_paths);
+        let custom_paths: Vec<&str> = all_paths.iter().map(|s| s.as_str()).collect();
+
+        let template_packs = TemplateDiscovery::discover_template_packs_with_custom_paths(
+            &*ctx.fs,
+            &*ctx.output,
+            &custom_paths,
+        )?;
+
+        let template_pack = template_packs
+            .iter()
+            .find(|p| p.resource.metadata.name == project_config.template_pack)
+            .with_context(|| {
+                format!(
+                    "Template pack '{}' not found",
+                    project_config.template_pack
+                )
+            })?;
+
+        // Discover templates to find the plugin configurations (installed/allowed)
+        let templates = TemplateDiscovery::discover_templates_in_pack(
+            &*ctx.fs,
+            &*ctx.output,
+            &template_pack.path,
+        )?;
+
+        let template = templates
+            .iter()
+            .find(|t| t.resource.metadata.name == project_config.template)
+            .with_context(|| {
+                format!(
+                    "Template '{}' not found in template pack '{}'",
+                    project_config.template, project_config.template_pack
+                )
+            })?;
+
+        // Build a map of plugin_name -> template_pack_name from installed and allowed plugins
+        let mut plugin_pack_map: HashMap<String, String> = HashMap::new();
+
+        if let Some(plugins_config) = &template.resource.spec.plugins {
+            for installed in &plugins_config.installed {
+                plugin_pack_map.insert(
+                    installed.plugin_name.clone(),
+                    installed.template_pack_name.clone(),
+                );
+            }
+
+            for allowed in &plugins_config.allowed {
+                plugin_pack_map.insert(
+                    allowed.plugin_name.clone(),
+                    allowed.template_pack_name.clone(),
+                );
+            }
+        }
+
+        for (plugin_name, plugin_config) in &project_config.plugins {
+            // Find the template pack that contains this plugin
+            let plugin_template_pack_name = plugin_pack_map.get(plugin_name).with_context(|| {
+                format!(
+                    "Plugin '{}' is not configured as installed or allowed in template '{}/{}'",
+                    plugin_name, project_config.template_pack, project_config.template
+                )
+            })?;
+
+            // Find the template pack for this plugin
+            let plugin_template_pack = template_packs
+                .iter()
+                .find(|p| p.resource.metadata.name == *plugin_template_pack_name)
+                .with_context(|| {
+                    format!(
+                        "Template pack '{}' (for plugin '{}') not found",
+                        plugin_template_pack_name, plugin_name
+                    )
+                })?;
+
+            // Discover plugins in the correct template pack
+            let plugins = TemplateDiscovery::discover_plugins_in_pack(
+                &*ctx.fs,
+                &*ctx.output,
+                &plugin_template_pack.path,
+                &plugin_template_pack.resource.metadata.name,
+            )?;
+
+            let plugin_info = plugins
+                .iter()
+                .find(|p| p.resource.metadata.name == *plugin_name)
+                .with_context(|| {
+                    format!(
+                        "Plugin '{}' not found in template pack '{}'",
+                        plugin_name, plugin_template_pack_name
+                    )
+                })?;
+
+            let resolved = Self::resolve_plugin_reference_projects(
+                ctx,
+                &plugin_config.reference_projects,
+                &plugin_info.resource.spec.dependencies,
+                environment_name,
+                infrastructure_root,
+                existing_projects,
+            )?;
+
+            prepared.insert(
+                plugin_name.clone(),
+                PreConfiguredPluginData {
+                    resolved_references: resolved.resolved,
+                    unresolved_dependencies: resolved.unresolved_dependencies,
+                    input_configs: plugin_config.inputs.clone(),
+                },
+            );
+        }
+
+        Ok(prepared)
+    }
+
     /// Build inputs for a project based on the project group configuration
     fn build_project_inputs(
         ctx: &crate::context::Context,
@@ -722,6 +1017,7 @@ impl ProjectGroupHandler {
         template_packs_paths: Option<&str>,
         inputs: &HashMap<String, Value>,
         reference_projects: &[TemplateReferenceProject],
+        plugin_configs: &HashMap<String, PreConfiguredPluginData>,
     ) -> Result<()> {
         // Use the non-interactive project creation from CreateCommand
         crate::commands::CreateCommand::create_project_non_interactive(
@@ -735,6 +1031,470 @@ impl ProjectGroupHandler {
             reference_projects,
             template_packs_paths,
             project_config.executor.as_ref(),
+            Some(plugin_configs),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::template::metadata::{PluginDependency, ProjectGroupPluginReferenceProject, ProjectReference};
+    use crate::traits::{FileSystem, MockFileSystem};
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    fn create_mock_project_reference(name: &str) -> ProjectReference {
+        ProjectReference {
+            name: name.to_string(),
+            path: format!("projects/{}", name),
+            kind: "TestResource".to_string(),
+            labels: HashMap::new(),
+        }
+    }
+
+    fn create_mock_env_resource(
+        api_version: &str,
+        kind: &str,
+        env_name: &str,
+        labels: HashMap<String, String>,
+    ) -> String {
+        let labels_yaml = if labels.is_empty() {
+            "labels: {}".to_string()
+        } else {
+            let label_lines = labels
+                .iter()
+                .map(|(k, v)| format!("    {}: {}", k, v))
+                .collect::<Vec<_>>()
+                .join("\n");
+            format!("labels:\n{}", label_lines)
+        };
+
+        format!(
+            r#"apiVersion: pmp.io/v1
+kind: ProjectEnvironment
+metadata:
+  name: test-project
+  environment_name: {}
+  {}
+spec:
+  resource:
+    apiVersion: {}
+    kind: {}
+  executor:
+    name: opentofu
+  inputs: {{}}"#,
+            env_name, labels_yaml, api_version, kind
+        )
+    }
+
+    fn create_mock_plugin_dependency(
+        api_version: &str,
+        kind: &str,
+        dependency_name: Option<&str>,
+        label_selector: HashMap<String, String>,
+    ) -> PluginDependency {
+        PluginDependency {
+            project: crate::template::metadata::PluginProjectRef {
+                api_version: api_version.to_string(),
+                kind: kind.to_string(),
+                label_selector,
+                description: None,
+                remote_state: Some(crate::template::metadata::PluginRemoteStateConfig {
+                    data_source_name: "test_data_source".to_string(),
+                    required_fields: HashMap::new(),
+                }),
+            },
+            dependency_name: dependency_name.map(|s| s.to_string()),
+        }
+    }
+
+    #[test]
+    fn test_resolve_plugin_references_by_dependency_name() {
+        let fs = Arc::new(MockFileSystem::new());
+        let ctx = create_test_context(fs.clone());
+        let infra_root = setup_test_infrastructure(&fs);
+
+        let existing_projects = vec![create_mock_project_reference("storage-project")];
+
+        setup_mock_project_environment(
+            &fs,
+            &infra_root,
+            "storage-project",
+            "dev",
+            "pmp.io/v1",
+            "ObjectStorage",
+            HashMap::new(),
+        );
+
+        let plugin_ref_configs = vec![ProjectGroupPluginReferenceProject {
+            name: "storage-project".to_string(),
+            environment: None,
+            dependency_name: Some("storage".to_string()),
+        }];
+
+        let plugin_dependencies = vec![create_mock_plugin_dependency(
+            "pmp.io/v1",
+            "ObjectStorage",
+            Some("storage"),
+            HashMap::new(),
+        )];
+
+        let result = ProjectGroupHandler::resolve_plugin_reference_projects(
+            &ctx,
+            &plugin_ref_configs,
+            &plugin_dependencies,
+            "dev",
+            &infra_root,
+            &existing_projects,
+        );
+
+        match &result {
+            Ok(_) => {},
+            Err(e) => {
+                eprintln!("ERROR: {}", e);
+                eprintln!("ERROR DEBUG: {:?}", e);
+            }
+        }
+
+        assert!(result.is_ok(), "Expected Ok but got: {:?}", result.as_ref().err());
+        let resolved = result.unwrap();
+        assert_eq!(resolved.resolved.len(), 1);
+        assert_eq!(resolved.unresolved_dependencies.len(), 0);
+        assert_eq!(resolved.resolved[0].0.name, "storage-project");
+    }
+
+    #[test]
+    fn test_resolve_plugin_references_by_api_version_kind() {
+        let fs = Arc::new(MockFileSystem::new());
+        let ctx = create_test_context(fs.clone());
+        let infra_root = setup_test_infrastructure(&fs);
+
+        let existing_projects = vec![create_mock_project_reference("db-project")];
+
+        setup_mock_project_environment(
+            &fs,
+            &infra_root,
+            "db-project",
+            "dev",
+            "pmp.io/v1",
+            "Database",
+            HashMap::new(),
+        );
+
+        let plugin_ref_configs = vec![ProjectGroupPluginReferenceProject {
+            name: "db-project".to_string(),
+            environment: None,
+            dependency_name: None,
+        }];
+
+        let plugin_dependencies = vec![create_mock_plugin_dependency(
+            "pmp.io/v1",
+            "Database",
+            None,
+            HashMap::new(),
+        )];
+
+        let result = ProjectGroupHandler::resolve_plugin_reference_projects(
+            &ctx,
+            &plugin_ref_configs,
+            &plugin_dependencies,
+            "dev",
+            &infra_root,
+            &existing_projects,
+        );
+
+        assert!(result.is_ok());
+        let resolved = result.unwrap();
+        assert_eq!(resolved.resolved.len(), 1);
+        assert_eq!(resolved.unresolved_dependencies.len(), 0);
+    }
+
+    #[test]
+    fn test_resolve_plugin_references_with_label_selector() {
+        let fs = Arc::new(MockFileSystem::new());
+        let ctx = create_test_context(fs.clone());
+        let infra_root = setup_test_infrastructure(&fs);
+
+        let existing_projects = vec![create_mock_project_reference("app-project")];
+
+        let mut labels = HashMap::new();
+        labels.insert("tier".to_string(), "backend".to_string());
+
+        setup_mock_project_environment(
+            &fs,
+            &infra_root,
+            "app-project",
+            "dev",
+            "pmp.io/v1",
+            "Application",
+            labels.clone(),
+        );
+
+        let plugin_ref_configs = vec![ProjectGroupPluginReferenceProject {
+            name: "app-project".to_string(),
+            environment: None,
+            dependency_name: None,
+        }];
+
+        let plugin_dependencies =
+            vec![create_mock_plugin_dependency("pmp.io/v1", "Application", None, labels)];
+
+        let result = ProjectGroupHandler::resolve_plugin_reference_projects(
+            &ctx,
+            &plugin_ref_configs,
+            &plugin_dependencies,
+            "dev",
+            &infra_root,
+            &existing_projects,
+        );
+
+        assert!(result.is_ok());
+        let resolved = result.unwrap();
+        assert_eq!(resolved.resolved.len(), 1);
+        assert_eq!(resolved.unresolved_dependencies.len(), 0);
+    }
+
+    #[test]
+    fn test_resolve_plugin_references_partial_configuration() {
+        let fs = Arc::new(MockFileSystem::new());
+        let ctx = create_test_context(fs.clone());
+        let infra_root = setup_test_infrastructure(&fs);
+
+        let existing_projects = vec![
+            create_mock_project_reference("storage-project"),
+            create_mock_project_reference("db-project"),
+        ];
+
+        setup_mock_project_environment(
+            &fs,
+            &infra_root,
+            "storage-project",
+            "dev",
+            "pmp.io/v1",
+            "ObjectStorage",
+            HashMap::new(),
+        );
+
+        let plugin_ref_configs = vec![ProjectGroupPluginReferenceProject {
+            name: "storage-project".to_string(),
+            environment: None,
+            dependency_name: Some("storage".to_string()),
+        }];
+
+        let plugin_dependencies = vec![
+            create_mock_plugin_dependency(
+                "pmp.io/v1",
+                "ObjectStorage",
+                Some("storage"),
+                HashMap::new(),
+            ),
+            create_mock_plugin_dependency("pmp.io/v1", "Database", Some("database"), HashMap::new()),
+        ];
+
+        let result = ProjectGroupHandler::resolve_plugin_reference_projects(
+            &ctx,
+            &plugin_ref_configs,
+            &plugin_dependencies,
+            "dev",
+            &infra_root,
+            &existing_projects,
+        );
+
+        assert!(result.is_ok());
+        let resolved = result.unwrap();
+        assert_eq!(resolved.resolved.len(), 1);
+        assert_eq!(resolved.unresolved_dependencies.len(), 1);
+        assert_eq!(
+            resolved.unresolved_dependencies[0].dependency_name.as_deref(),
+            Some("database")
+        );
+    }
+
+    #[test]
+    fn test_resolve_plugin_references_project_not_found() {
+        let fs = Arc::new(MockFileSystem::new());
+        let ctx = create_test_context(fs.clone());
+        let infra_root = setup_test_infrastructure(&fs);
+
+        let existing_projects = vec![];
+
+        let plugin_ref_configs = vec![ProjectGroupPluginReferenceProject {
+            name: "missing-project".to_string(),
+            environment: None,
+            dependency_name: Some("storage".to_string()),
+        }];
+
+        let plugin_dependencies = vec![create_mock_plugin_dependency(
+            "pmp.io/v1",
+            "ObjectStorage",
+            Some("storage"),
+            HashMap::new(),
+        )];
+
+        let result = ProjectGroupHandler::resolve_plugin_reference_projects(
+            &ctx,
+            &plugin_ref_configs,
+            &plugin_dependencies,
+            "dev",
+            &infra_root,
+            &existing_projects,
+        );
+
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Reference project 'missing-project' not found"));
+    }
+
+    #[test]
+    fn test_resolve_plugin_references_api_version_mismatch() {
+        let fs = Arc::new(MockFileSystem::new());
+        let ctx = create_test_context(fs.clone());
+        let infra_root = setup_test_infrastructure(&fs);
+
+        let existing_projects = vec![create_mock_project_reference("storage-project")];
+
+        setup_mock_project_environment(
+            &fs,
+            &infra_root,
+            "storage-project",
+            "dev",
+            "pmp.io/v2",
+            "ObjectStorage",
+            HashMap::new(),
+        );
+
+        let plugin_ref_configs = vec![ProjectGroupPluginReferenceProject {
+            name: "storage-project".to_string(),
+            environment: None,
+            dependency_name: Some("storage".to_string()),
+        }];
+
+        let plugin_dependencies = vec![create_mock_plugin_dependency(
+            "pmp.io/v1",
+            "ObjectStorage",
+            Some("storage"),
+            HashMap::new(),
+        )];
+
+        let result = ProjectGroupHandler::resolve_plugin_reference_projects(
+            &ctx,
+            &plugin_ref_configs,
+            &plugin_dependencies,
+            "dev",
+            &infra_root,
+            &existing_projects,
+        );
+
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("API version mismatch"));
+    }
+
+    #[test]
+    fn test_resolve_plugin_references_label_selector_mismatch() {
+        let fs = Arc::new(MockFileSystem::new());
+        let ctx = create_test_context(fs.clone());
+        let infra_root = setup_test_infrastructure(&fs);
+
+        let existing_projects = vec![create_mock_project_reference("app-project")];
+
+        let mut actual_labels = HashMap::new();
+        actual_labels.insert("tier".to_string(), "frontend".to_string());
+
+        setup_mock_project_environment(
+            &fs,
+            &infra_root,
+            "app-project",
+            "dev",
+            "pmp.io/v1",
+            "Application",
+            actual_labels,
+        );
+
+        let plugin_ref_configs = vec![ProjectGroupPluginReferenceProject {
+            name: "app-project".to_string(),
+            environment: None,
+            dependency_name: None,
+        }];
+
+        let mut required_labels = HashMap::new();
+        required_labels.insert("tier".to_string(), "backend".to_string());
+
+        let plugin_dependencies =
+            vec![create_mock_plugin_dependency("pmp.io/v1", "Application", None, required_labels)];
+
+        let result = ProjectGroupHandler::resolve_plugin_reference_projects(
+            &ctx,
+            &plugin_ref_configs,
+            &plugin_dependencies,
+            "dev",
+            &infra_root,
+            &existing_projects,
+        );
+
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Label selector mismatch"));
+    }
+
+    fn create_test_context(fs: Arc<MockFileSystem>) -> crate::context::Context {
+        use crate::executor::registry::DefaultExecutorRegistry;
+        use crate::traits::{MockCommandExecutor, MockOutput, MockUserInput};
+
+        crate::context::Context {
+            fs,
+            input: Arc::new(MockUserInput::new()),
+            output: Arc::new(MockOutput::new()),
+            command: Arc::new(MockCommandExecutor::new()),
+            executor_registry: Arc::new(DefaultExecutorRegistry::with_defaults()),
+        }
+    }
+
+    fn setup_test_infrastructure(fs: &MockFileSystem) -> PathBuf {
+        let current_dir = fs.current_dir().unwrap();
+
+        let infra_yaml = r#"apiVersion: pmp.io/v1
+kind: Infrastructure
+metadata:
+  name: test-infrastructure
+spec:
+  environments:
+    dev:
+      name: Development
+      description: Development environment
+  categories: []"#;
+
+        fs.write(&current_dir.join(".pmp.infrastructure.yaml"), infra_yaml)
+            .unwrap();
+
+        fs.create_dir_all(&current_dir.join("projects")).unwrap();
+
+        current_dir
+    }
+
+    fn setup_mock_project_environment(
+        fs: &MockFileSystem,
+        infra_root: &PathBuf,
+        project_name: &str,
+        env_name: &str,
+        api_version: &str,
+        kind: &str,
+        labels: HashMap<String, String>,
+    ) {
+        let project_path = infra_root.join("projects").join(project_name);
+        let env_path = project_path.join("environments").join(env_name);
+
+        let env_yaml = create_mock_env_resource(api_version, kind, env_name, labels);
+
+        fs.write(&env_path.join(".pmp.environment.yaml"), &env_yaml)
+            .unwrap();
     }
 }

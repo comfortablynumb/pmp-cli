@@ -531,7 +531,376 @@ inputs:
     default: "postgresql://${var:app_name}-db:5432/${var:app_name}"
 ```
 
-**Advanced Types**: password, multiselect, project_select, multiproject_select, path, url, date, datetime, json, yaml, list, email, ip, cidr, port
+**Advanced Types**: All input types are documented in detail below.
+
+### Complete Input Types Reference
+
+PMP supports 25+ input types for flexible and powerful template configuration:
+
+#### Basic Input Types
+
+**String** - Text input
+```yaml
+- name: app_name
+  type:
+    type: string
+  default: "my-app"
+```
+
+**Number** - Numeric input with validation
+```yaml
+- name: replicas
+  type:
+    type: number
+    min: 1
+    max: 10
+  default: 3
+```
+
+**Boolean** - True/false toggle
+```yaml
+- name: enable_monitoring
+  type:
+    type: boolean
+  default: true
+```
+
+**Password** - Sensitive text (hidden input)
+```yaml
+- name: admin_password
+  type:
+    type: password
+  default: ""
+```
+
+**Email** - Email validation
+```yaml
+- name: contact_email
+  type:
+    type: email
+  default: "admin@example.com"
+```
+
+**URL** - URL validation
+```yaml
+- name: webhook_url
+  type:
+    type: url
+  default: "https://example.com/hook"
+```
+
+**IP** - IP address validation
+```yaml
+- name: server_ip
+  type:
+    type: ip
+  default: "192.168.1.1"
+```
+
+**CIDR** - CIDR block validation
+```yaml
+- name: vpc_cidr
+  type:
+    type: cidr
+  default: "10.0.0.0/16"
+```
+
+**Path** - File/directory path
+```yaml
+- name: config_path
+  type:
+    type: path
+  default: "/etc/app/config.yaml"
+```
+
+**Port** - Network port number
+```yaml
+- name: service_port
+  type:
+    type: port
+  default: 8080
+```
+
+**JSON** - JSON format validation
+```yaml
+- name: custom_config
+  type:
+    type: json
+  default: "{}"
+```
+
+**YAML** - YAML format validation
+```yaml
+- name: config_yaml
+  type:
+    type: yaml
+  default: ""
+```
+
+**ARN** - AWS ARN validation
+```yaml
+- name: role_arn
+  type:
+    type: arn
+  default: ""
+```
+
+**DockerImage** - Docker image reference
+```yaml
+- name: container_image
+  type:
+    type: docker_image
+  default: "nginx:latest"
+```
+
+**Region** - Cloud region selection
+```yaml
+- name: aws_region
+  type:
+    type: region
+  default: "us-east-1"
+```
+
+#### Selection Input Types
+
+**Select** - Single choice from options
+```yaml
+- name: environment_type
+  type:
+    type: select
+    options:
+      - label: "Development"
+        value: "dev"
+      - label: "Production"
+        value: "prod"
+  default: "dev"
+```
+
+**MultiSelect** - Multiple choices from options
+```yaml
+- name: enabled_features
+  type:
+    type: multiselect
+    options:
+      - label: "Monitoring"
+        value: "monitoring"
+      - label: "Logging"
+        value: "logging"
+      - label: "Tracing"
+        value: "tracing"
+  default: ["monitoring"]
+```
+
+#### List and Object Input Types
+
+**List** - Comma-separated values
+```yaml
+- name: allowed_ips
+  type:
+    type: list
+  default: "10.0.0.1,10.0.0.2"
+```
+
+**Object** - Single structured object with named fields
+```yaml
+- name: database_config
+  type:
+    type: object
+    fields:
+      - name: host
+        type:
+          type: string
+        description: "Database host"
+        default: "localhost"
+      - name: port
+        type:
+          type: number
+        description: "Database port"
+        default: 5432
+      - name: ssl_enabled
+        type:
+          type: boolean
+        description: "Enable SSL"
+        default: true
+  description: "Database configuration"
+```
+
+**RepeatableObject** - Array of structured objects with repeatable prompts
+```yaml
+- name: team_members
+  type:
+    type: repeatable_object
+    min: 0
+    max: 50
+    add_another_prompt: "Add another team member?"
+    fields:
+      - name: username
+        type:
+          type: string
+        description: "GitHub username"
+      - name: role
+        type:
+          type: select
+          options:
+            - label: "Member"
+              value: "member"
+            - label: "Maintainer"
+              value: "maintainer"
+        description: "Member role"
+        default: "member"
+  description: "Team members with roles"
+```
+
+**Interactive flow:**
+```
+Team members with roles:
+  Add another team member? yes
+
+  Team member #1:
+    GitHub username: alice
+    Member role: maintainer
+
+  Add another team member? yes
+
+  Team member #2:
+    GitHub username: bob
+    Member role: member
+
+  Add another team member? no
+```
+
+**Template usage:**
+```handlebars
+{{#each team_members}}
+resource "github_team_membership" "member_{{@index}}" {
+  username = "{{username}}"
+  role     = "{{role}}"
+}
+{{/each}}
+```
+
+#### Specialized Input Types
+
+**Color** - Hex color with validation
+```yaml
+- name: brand_color
+  type:
+    type: color
+    allow_alpha: true
+  description: "Brand color"
+  default: "#3B82F6"
+```
+- Validates: `#RRGGBB` or `#RRGGBBAA` (with alpha)
+- Returns: String (e.g., "#3B82F6")
+
+**Duration** - Time duration parsing
+```yaml
+- name: cache_ttl
+  type:
+    type: duration
+    min_seconds: 60
+    max_seconds: 86400
+  description: "Cache time-to-live"
+  default: "1h"
+```
+- Accepts: "30s", "5m", "1h30m", "2d", "1w"
+- Units: s (seconds), m (minutes), h (hours), d (days), w (weeks)
+- Returns: Number (seconds)
+
+**Cron** - Cron expression validation
+```yaml
+- name: backup_schedule
+  type:
+    type: cron
+  description: "Backup schedule"
+  default: "0 2 * * *"
+```
+- Validates: 5 or 6 field cron expressions
+- Format: `minute hour day month weekday [year]`
+- Returns: String
+
+**KeyValue** - Key-value pairs
+```yaml
+- name: labels
+  type:
+    type: keyvalue
+    key_value_separator: "="
+    pair_separator: ","
+    min: 0
+    max: 20
+  description: "Resource labels"
+  default: ""
+```
+- Input: `env=prod,team=platform,version=1.0`
+- Returns: JSON object `{"env": "prod", "team": "platform", "version": "1.0"}`
+
+**Semver** - Semantic version validation
+```yaml
+- name: app_version
+  type:
+    type: semver
+    allow_prerelease: true
+    allow_build: true
+  description: "Application version"
+  default: "1.0.0"
+```
+- Validates: `MAJOR.MINOR.PATCH[-PRERELEASE][+BUILD]`
+- Examples: "1.0.0", "2.1.3-beta.1", "1.0.0+20230615"
+- Returns: String
+
+#### Project Reference Types
+
+**ProjectSelect** - Single project reference
+```yaml
+- name: vpc_project
+  type:
+    type: project_select
+    filter:
+      apiVersion: pmp.io/v1
+      kind: VPC
+  description: "VPC project to use"
+```
+
+**MultiProjectSelect** - Multiple project references
+```yaml
+- name: dependent_services
+  type:
+    type: multi_project_select
+    filter:
+      apiVersion: pmp.io/v1
+      kind: Service
+  description: "Dependent services"
+```
+
+#### Conditional Inputs
+
+Show/hide inputs based on other values:
+
+```yaml
+inputs:
+  - name: enable_ssl
+    type:
+      type: boolean
+    default: false
+
+  - name: ssl_certificate_path
+    type:
+      type: path
+    description: "SSL certificate path"
+    show_if:
+      - field: enable_ssl
+        condition: equals
+        value: true
+
+  - name: ssl_key_path
+    type:
+      type: path
+    description: "SSL key path"
+    show_if:
+      - field: enable_ssl
+        condition: equals
+        value: true
+```
 
 ### Create Template
 
@@ -763,6 +1132,288 @@ MIT License
 
 See [CLAUDE.md](CLAUDE.md) for design principles and implementation details.
 
+## Available Template Packs
+
+### GitHub Template Pack
+
+Manage GitHub resources including repositories and teams.
+
+**Templates:**
+- `repository` - Create and manage GitHub repositories
+
+**Plugins:**
+- `team` - Create GitHub teams with repeatable member management
+
+**Team Plugin Example:**
+
+The team plugin uses the `repeatable_object` input type to provide an intuitive interface for adding team members:
+
+```yaml
+apiVersion: pmp.io/v1
+kind: Plugin
+metadata:
+  name: team
+
+spec:
+  role: access-management
+
+  inputs:
+    - name: team_name
+      type: string
+      description: Name of the GitHub team
+      default: "${var:_project_name_hyphens}-team"
+
+    - name: privacy
+      type: select
+      options:
+        - label: "Secret (Only visible to organization owners and team members)"
+          value: "secret"
+        - label: "Closed (Visible to all organization members)"
+          value: "closed"
+      default: "secret"
+
+    - name: team_members
+      type: repeatable_object
+      description: Team members with roles
+      min: 0
+      max: 100
+      add_another_prompt: "Add another team member?"
+      fields:
+        - name: username
+          type: string
+          description: GitHub username
+        - name: role
+          type: select
+          description: Member role
+          options:
+            - label: "Member (Regular team member)"
+              value: "member"
+            - label: "Maintainer (Team admin)"
+              value: "maintainer"
+          default: "member"
+```
+
+**Usage:**
+```bash
+pmp create
+# Select: github template pack → team plugin
+# Interactive prompts for each team member
+```
+
+### Argo CD Template Pack
+
+Deploy and configure Argo CD with comprehensive SSO support.
+
+**Templates:**
+- `argo-cd` - Deploy Argo CD with optional SSO and RBAC configuration
+
+**Features:**
+- **Multiple SSO Providers:**
+  - External OIDC (Azure AD, Google, Okta, Keycloak, Auth0)
+  - Dex connectors (GitHub, GitLab, SAML, LDAP)
+
+- **Optional RBAC Configuration:**
+  - Pre-defined roles: Admin, Developer, Readonly
+  - SSO group mappings
+  - Custom policy CSV support
+
+- **Automatic Configuration:**
+  - Generates redirect URLs for SSO providers
+  - Configures Helm chart with proper secrets
+  - Provides detailed setup instructions in outputs
+
+**SSO Configuration Example:**
+
+```yaml
+# Template inputs (30+ SSO-related inputs available)
+
+# Core SSO
+- name: enable_sso
+  type: boolean
+  default: false
+
+- name: sso_provider_type
+  type: select
+  options:
+    - label: "External OIDC (Okta, Auth0, Azure AD, Google, Keycloak)"
+      value: "oidc"
+    - label: "Dex (for GitHub, GitLab, SAML, LDAP)"
+      value: "dex"
+  default: "oidc"
+
+# OIDC Configuration (when using OIDC provider)
+- name: oidc_issuer
+  type: url
+  description: "OIDC issuer URL (e.g., https://accounts.google.com)"
+
+- name: oidc_client_id
+  type: string
+  description: "OIDC client ID from your provider"
+
+- name: oidc_client_secret
+  type: password
+  description: "OIDC client secret"
+
+# Dex Configuration (when using Dex provider)
+- name: dex_connector_type
+  type: select
+  options:
+    - label: "GitHub"
+      value: "github"
+    - label: "GitLab"
+      value: "gitlab"
+    - label: "SAML"
+      value: "saml"
+    - label: "LDAP"
+      value: "ldap"
+
+# RBAC Configuration (optional)
+- name: enable_rbac_config
+  type: boolean
+  default: false
+
+- name: rbac_admin_group
+  type: string
+  description: "SSO group/email to map to admin role"
+
+- name: rbac_developer_group
+  type: string
+  description: "SSO group/email to map to developer role"
+
+- name: rbac_readonly_group
+  type: string
+  description: "SSO group/email to map to readonly role"
+```
+
+**Deployment Example:**
+
+```bash
+# Deploy Argo CD with Google OIDC SSO
+pmp create
+
+# Select: argo-cd template pack → argo-cd template
+
+# Configuration prompts:
+# - Namespace: argocd
+# - Enable SSO: yes
+# - SSO Provider: oidc
+# - OIDC Issuer: https://accounts.google.com
+# - OIDC Client ID: [your-client-id]
+# - OIDC Client Secret: [your-client-secret]
+# - Enable RBAC: yes
+# - Admin Group: admin@company.com
+# - Developer Group: developers@company.com
+
+# Outputs will include:
+# - SSO redirect URL to configure in Google
+# - RBAC configuration summary
+# - Access instructions
+```
+
+**Generated Outputs:**
+
+```hcl
+# SSO redirect URL for provider configuration
+output "sso_redirect_url" {
+  value = "https://argocd.example.com/auth/callback"
+}
+
+# Configuration summary
+output "sso_configuration_summary" {
+  value = <<-EOT
+    SSO Configuration:
+    - Provider Type: oidc
+    - OIDC Issuer: https://accounts.google.com
+    - Admin User: ENABLED (disable after confirming SSO works)
+    - RBAC: ENABLED
+      - Admin Group: admin@company.com
+      - Developer Group: developers@company.com
+      - Readonly Group: readonly@company.com
+  EOT
+}
+```
+
+## Real-World Examples
+
+### Example 1: Create GitHub Team
+
+```bash
+pmp create
+
+# Select GitHub template pack → team plugin
+# Provide inputs:
+
+Team Name: platform-team
+Description: Platform Engineering Team
+Privacy: secret
+
+Team members:
+  Add another team member? yes
+
+  Team member #1:
+    GitHub username: alice
+    Member role: maintainer
+
+  Add another team member? yes
+
+  Team member #2:
+    GitHub username: bob
+    Member role: member
+
+  Add another team member? yes
+
+  Team member #3:
+    GitHub username: charlie
+    Member role: member
+
+  Add another team member? no
+
+# Generated Terraform creates:
+# - GitHub team "platform-team"
+# - 3 team memberships (alice as maintainer, bob and charlie as members)
+```
+
+### Example 2: Deploy Argo CD with Azure AD SSO
+
+```bash
+pmp create
+
+# Select: argo-cd → argo-cd
+
+# Core Configuration:
+Namespace: argocd
+Chart Version: 5.51.0
+Create Namespace: yes
+Server Host: argocd.company.com
+Enable Ingress: yes
+Ingress Class: nginx
+
+# SSO Configuration:
+Enable SSO: yes
+SSO Provider Type: oidc
+OIDC Name: Azure AD
+OIDC Issuer: https://login.microsoftonline.com/{tenant-id}/v2.0
+OIDC Client ID: {azure-app-client-id}
+OIDC Client Secret: {azure-app-client-secret}
+OIDC Requested Scopes: openid,profile,email,groups
+
+# RBAC Configuration:
+Enable RBAC: yes
+RBAC Admin Group: ArgoCD-Admins
+RBAC Developer Group: ArgoCD-Developers
+RBAC Readonly Group: ArgoCD-Viewers
+Default Policy: role:readonly
+
+# Apply configuration:
+cd collection/projects/argocd/argocd/environments/prod
+pmp apply
+
+# Configure Azure AD:
+# - Add redirect URL: https://argocd.company.com/auth/callback
+# - Ensure groups claim is included in token
+# - Create Azure AD groups: ArgoCD-Admins, ArgoCD-Developers, ArgoCD-Viewers
+```
+
 ## Roadmap
 
 **Implemented** ✅
@@ -773,9 +1424,13 @@ See [CLAUDE.md](CLAUDE.md) for design principles and implementation details.
 - Environment management
 - State management & drift
 - CI/CD generation
+- 25+ input types including Object and RepeatableObject
+- GitHub team plugin with member management
+- Argo CD SSO configuration (OIDC, Dex, RBAC)
 
 **Planned** 🚧
 - Policy framework
 - Security scanning
 - Cost estimation
 - Template marketplace
+- Additional template packs (AWS, Azure, GCP, Kubernetes)

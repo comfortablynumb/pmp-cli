@@ -1,0 +1,128 @@
+apiVersion: pmp.io/v1
+kind: Template
+metadata:
+  name: "object-inputs-example"
+  description: "Example template demonstrating Object and RepeatableObject input types"
+spec:
+  resource:
+    apiVersion: pmp.io/v1
+    kind: ApplicationConfig
+  executor: opentofu
+  inputs:
+    # Example 1: Simple Object input - groups multiple related inputs
+    - name: database_config
+      type: object
+      description: Database configuration
+      fields:
+        - name: host
+          type: string
+          description: Database host
+          default: "localhost"
+        - name: port
+          type: number
+          description: Database port
+          default: 5432
+        - name: username
+          type: string
+          description: Database username
+          default: "admin"
+        - name: password
+          type: password
+          description: Database password
+        - name: ssl_enabled
+          type: boolean
+          description: Enable SSL connection
+          default: true
+
+    # Example 2: Object with nested inputs of various types
+    - name: application_config
+      type: object
+      description: Application configuration
+      fields:
+        - name: app_name
+          type: string
+          description: Application name
+          default: "my-app"
+        - name: environment
+          type: select
+          description: Environment type
+          options:
+            - label: "Development"
+              value: "dev"
+            - label: "Staging"
+              value: "staging"
+            - label: "Production"
+              value: "prod"
+          default: "dev"
+        - name: replicas
+          type: number
+          description: Number of replicas
+          default: 3
+        - name: resource_limits
+          type: object
+          description: Resource limits
+          fields:
+            - name: cpu
+              type: string
+              description: CPU limit
+              default: "500m"
+            - name: memory
+              type: string
+              description: Memory limit
+              default: "512Mi"
+
+    # Example 3: RepeatableObject - list of user objects with add/remove functionality
+    - name: users
+      type: repeatable_object
+      description: Application users
+      min: 1
+      max: 10
+      add_another_prompt: "Add another user?"
+      fields:
+        - name: username
+          type: string
+          description: Username
+        - name: email
+          type: email
+          description: Email address
+        - name: role
+          type: select
+          description: User role
+          options:
+            - label: "Admin"
+              value: "admin"
+            - label: "Developer"
+              value: "developer"
+            - label: "Viewer"
+              value: "viewer"
+          default: "viewer"
+        - name: active
+          type: boolean
+          description: User is active
+          default: true
+
+    # Example 4: RepeatableObject with nested objects
+    - name: services
+      type: repeatable_object
+      description: Microservices
+      min: 0
+      max: 20
+      add_another_prompt: "Add another service?"
+      fields:
+        - name: service_name
+          type: string
+          description: Service name
+        - name: port
+          type: port
+          description: Service port
+          default: 8080
+        - name: endpoints
+          type: list
+          description: API endpoints (comma-separated)
+          default: "/health,/metrics"
+        - name: environment_vars
+          type: keyvalue
+          description: Environment variables (key=value,key2=value2)
+          default: ""
+
+  environments: {}

@@ -92,8 +92,23 @@ pub fn generate_backend_config(
     let mut params: Vec<_> = params_map.iter().collect();
     params.sort_by_key(|(key, _)| *key);
 
+    // Create Handlebars context for rendering variables
+    let mut handlebars_data = serde_json::Map::new();
+    if let Some(proj) = project_name {
+        handlebars_data.insert("project_name".to_string(), serde_json::Value::String(proj.to_string()));
+    }
+    if let Some(env) = environment {
+        handlebars_data.insert("environment".to_string(), serde_json::Value::String(env.to_string()));
+    }
+    if let Some(api_ver) = api_version {
+        handlebars_data.insert("api_version".to_string(), serde_json::Value::String(api_ver.to_string()));
+    }
+    if let Some(knd) = kind {
+        handlebars_data.insert("kind".to_string(), serde_json::Value::String(knd.to_string()));
+    }
+
     for (key, value) in params {
-        let param_line = format_hcl_parameter(key, value)?;
+        let param_line = format_hcl_parameter(key, value, &handlebars_data)?;
         hcl.push_str(&format!("    {}\n", param_line));
     }
 
@@ -131,16 +146,34 @@ fn validate_backend_type(backend_type: &str) -> Result<()> {
 }
 
 /// Format a single HCL parameter based on its value type
-fn format_hcl_parameter(key: &str, value: &Value) -> Result<String> {
+fn format_hcl_parameter(key: &str, value: &Value, handlebars_data: &serde_json::Map<String, Value>) -> Result<String> {
     match value {
-        Value::String(s) => Ok(format!("{} = \"{}\"", key, escape_hcl_string(s))),
+        Value::String(s) => {
+            // Render Handlebars variables like {{project_name}} and {{environment}}
+            let rendered = if s.contains("{{") {
+                let hb = handlebars::Handlebars::new();
+                hb.render_template(s, &handlebars_data)
+                    .with_context(|| format!("Failed to render Handlebars template in backend config: {}", s))?
+            } else {
+                s.clone()
+            };
+            Ok(format!("{} = \"{}\"", key, escape_hcl_string(&rendered)))
+        }
         Value::Number(n) => Ok(format!("{} = {}", key, n)),
         Value::Bool(b) => Ok(format!("{} = {}", key, b)),
         Value::Array(arr) => {
             let items: Result<Vec<String>> = arr
                 .iter()
                 .map(|v| match v {
-                    Value::String(s) => Ok(format!("\"{}\"", escape_hcl_string(s))),
+                    Value::String(s) => {
+                        let rendered = if s.contains("{{") {
+                            let hb = handlebars::Handlebars::new();
+                            hb.render_template(s, &handlebars_data)?
+                        } else {
+                            s.clone()
+                        };
+                        Ok(format!("\"{}\"", escape_hcl_string(&rendered)))
+                    }
                     Value::Number(n) => Ok(n.to_string()),
                     Value::Bool(b) => Ok(b.to_string()),
                     _ => anyhow::bail!("Unsupported array element type in backend config"),
@@ -152,7 +185,7 @@ fn format_hcl_parameter(key: &str, value: &Value) -> Result<String> {
             // For nested objects, format as HCL blocks
             let mut items = Vec::new();
             for (k, v) in obj {
-                items.push(format!("{} = {}", k, format_hcl_value(v)?));
+                items.push(format!("{} = {}", k, format_hcl_value(v, handlebars_data)?));
             }
             Ok(format!("{} = {{ {} }}", key, items.join(", ")))
         }
@@ -161,19 +194,27 @@ fn format_hcl_parameter(key: &str, value: &Value) -> Result<String> {
 }
 
 /// Format a value for HCL (helper function)
-fn format_hcl_value(value: &Value) -> Result<String> {
+fn format_hcl_value(value: &Value, handlebars_data: &serde_json::Map<String, Value>) -> Result<String> {
     match value {
-        Value::String(s) => Ok(format!("\"{}\"", escape_hcl_string(s))),
+        Value::String(s) => {
+            let rendered = if s.contains("{{") {
+                let hb = handlebars::Handlebars::new();
+                hb.render_template(s, &handlebars_data)?
+            } else {
+                s.clone()
+            };
+            Ok(format!("\"{}\"", escape_hcl_string(&rendered)))
+        }
         Value::Number(n) => Ok(n.to_string()),
         Value::Bool(b) => Ok(b.to_string()),
         Value::Array(arr) => {
-            let items: Result<Vec<String>> = arr.iter().map(format_hcl_value).collect();
+            let items: Result<Vec<String>> = arr.iter().map(|v| format_hcl_value(v, handlebars_data)).collect();
             Ok(format!("[{}]", items?.join(", ")))
         }
         Value::Object(obj) => {
             let items: Result<Vec<String>> = obj
                 .iter()
-                .map(|(k, v)| Ok(format!("{} = {}", k, format_hcl_value(v)?)))
+                .map(|(k, v)| Ok(format!("{} = {}", k, format_hcl_value(v, handlebars_data)?)))
                 .collect();
             Ok(format!("{{ {} }}", items?.join(", ")))
         }
@@ -926,6 +967,47 @@ impl Executor for OpenTofuExecutor {
         "tofu refresh"
     }
 
+    fn test(
+        &self,
+        config: &ExecutorConfig,
+        working_dir: &str,
+        extra_args: &[String],
+    ) -> Result<()> {
+        let command = config
+            .test_command
+            .as_deref()
+            .unwrap_or(self.default_test_command());
+
+        // Parse the command string into command and args
+        let parts: Vec<&str> = command.split_whitespace().collect();
+
+        if parts.is_empty() {
+            anyhow::bail!("Empty command provided");
+        }
+
+        // Combine command args with template command options and extra args
+        let mut all_args: Vec<&str> = parts[1..].to_vec();
+
+        // Add command-specific options from template configuration
+        if let Some(options) = config.command_options.get("test") {
+            for opt in options {
+                all_args.push(opt.as_str());
+            }
+        }
+
+        let extra_args_refs: Vec<&str> = extra_args.iter().map(|s| s.as_str()).collect();
+        all_args.extend(extra_args_refs);
+
+        // Execute with signal handling
+        self.execute_with_signal_handling(parts[0], &all_args, working_dir)?;
+
+        Ok(())
+    }
+
+    fn default_test_command(&self) -> &str {
+        "tofu test"
+    }
+
     fn generate_common_file(
         &self,
         ctx: &crate::context::Context,
@@ -997,7 +1079,7 @@ impl Executor for OpenTofuExecutor {
 
         // Write to _common.tf file
         let common_tf_path = environment_path.join("_common.tf");
-        std::fs::write(&common_tf_path, combined_hcl)
+        ctx.fs.write(&common_tf_path, &combined_hcl)
             .with_context(|| format!("Failed to write _common.tf file: {:?}", common_tf_path))?;
 
         ctx.output

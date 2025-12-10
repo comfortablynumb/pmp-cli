@@ -250,6 +250,7 @@ impl PreviewCommand {
             apply_command: None,
             destroy_command: None,
             refresh_command: None,
+            test_command: None,
             command_options,
         };
 

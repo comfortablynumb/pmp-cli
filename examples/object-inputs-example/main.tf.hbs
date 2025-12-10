@@ -1,0 +1,73 @@
+# Example Terraform file using Object and RepeatableObject inputs
+
+# Database Configuration (from Object input)
+resource "null_resource" "database" {
+  provisioner "local-exec" {
+    command = "echo 'Connecting to database at {{database_config.host}}:{{database_config.port}}'"
+  }
+}
+
+locals {
+  database_config = {
+    host        = "{{database_config.host}}"
+    port        = {{database_config.port}}
+    username    = "{{database_config.username}}"
+    ssl_enabled = {{bool database_config.ssl_enabled}}
+  }
+
+  # Application Configuration (from nested Object input)
+  application_config = {
+    app_name    = "{{application_config.app_name}}"
+    environment = "{{application_config.environment}}"
+    replicas    = {{application_config.replicas}}
+
+    resource_limits = {
+      cpu    = "{{application_config.resource_limits.cpu}}"
+      memory = "{{application_config.resource_limits.memory}}"
+    }
+  }
+}
+
+# Users (from RepeatableObject input)
+{{#each users}}
+resource "null_resource" "user_{{@index}}" {
+  provisioner "local-exec" {
+    command = "echo 'Creating user: {{username}} ({{email}}) with role {{role}}'"
+  }
+
+  triggers = {
+    username = "{{username}}"
+    email    = "{{email}}"
+    role     = "{{role}}"
+    active   = "{{bool active}}"
+  }
+}
+{{/each}}
+
+# Services (from RepeatableObject input with nested fields)
+{{#each services}}
+resource "null_resource" "service_{{@index}}" {
+  provisioner "local-exec" {
+    command = "echo 'Deploying service: {{service_name}} on port {{port}}'"
+  }
+
+  triggers = {
+    service_name = "{{service_name}}"
+    port         = "{{port}}"
+    endpoints    = "{{endpoints}}"
+  }
+}
+{{/each}}
+
+# Output all configurations
+output "database_connection" {
+  value = "postgresql://{{database_config.username}}@{{database_config.host}}:{{database_config.port}}"
+}
+
+output "user_count" {
+  value = {{users.length}}
+}
+
+output "service_count" {
+  value = {{services.length}}
+}

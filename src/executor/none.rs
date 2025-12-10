@@ -68,6 +68,16 @@ impl Executor for NoneExecutor {
         Ok(())
     }
 
+    fn test(
+        &self,
+        _config: &ExecutorConfig,
+        _working_dir: &str,
+        _extra_args: &[String],
+    ) -> Result<()> {
+        // No-op for test
+        Ok(())
+    }
+
     fn get_name(&self) -> &str {
         "none"
     }
@@ -85,6 +95,10 @@ impl Executor for NoneExecutor {
     }
 
     fn default_refresh_command(&self) -> &str {
+        ""
+    }
+
+    fn default_test_command(&self) -> &str {
         ""
     }
 }
@@ -118,6 +132,7 @@ mod tests {
             apply_command: None,
             destroy_command: None,
             refresh_command: None,
+            test_command: None,
             command_options: std::collections::HashMap::new(),
         };
         assert!(executor.plan(&config, "/tmp", &[]).is_ok());
@@ -131,6 +146,7 @@ mod tests {
             apply_command: None,
             destroy_command: None,
             refresh_command: None,
+            test_command: None,
             command_options: std::collections::HashMap::new(),
         };
         assert!(executor.apply(&config, "/tmp", &[]).is_ok());
@@ -144,6 +160,7 @@ mod tests {
             apply_command: None,
             destroy_command: None,
             refresh_command: None,
+            test_command: None,
             command_options: std::collections::HashMap::new(),
         };
         assert!(executor.destroy(&config, "/tmp", &[]).is_ok());
@@ -157,9 +174,24 @@ mod tests {
             apply_command: None,
             destroy_command: None,
             refresh_command: None,
+            test_command: None,
             command_options: std::collections::HashMap::new(),
         };
         assert!(executor.refresh(&config, "/tmp", &[]).is_ok());
+    }
+
+    #[test]
+    fn test_none_executor_test() {
+        let executor = NoneExecutor::new();
+        let config = ExecutorConfig {
+            plan_command: None,
+            apply_command: None,
+            destroy_command: None,
+            refresh_command: None,
+            test_command: None,
+            command_options: std::collections::HashMap::new(),
+        };
+        assert!(executor.test(&config, "/tmp", &[]).is_ok());
     }
 
     #[test]
@@ -175,5 +207,6 @@ mod tests {
         assert_eq!(executor.default_apply_command(), "");
         assert_eq!(executor.default_destroy_command(), "");
         assert_eq!(executor.default_refresh_command(), "");
+        assert_eq!(executor.default_test_command(), "");
     }
 }

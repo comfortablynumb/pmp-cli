@@ -86,6 +86,129 @@ impl CreateCommand {
         items
     }
 
+    /// Prompt user to select a project that satisfies a plugin dependency
+    fn prompt_for_dependency_selection(
+        ctx: &crate::context::Context,
+        dependency: &crate::template::metadata::PluginDependency,
+        projects: &[crate::template::metadata::ProjectReference],
+        collection_root: &Path,
+    ) -> Result<(
+        crate::template::metadata::ProjectReference,
+        crate::template::metadata::DynamicProjectEnvironmentResource,
+    )> {
+        let dependency_ref = &dependency.project;
+
+        let compatible_projects: Vec<_> = projects
+            .iter()
+            .filter_map(|project| {
+                let project_path = collection_root.join(&project.path);
+                let environments_dir = project_path.join("environments");
+
+                if let Ok(env_entries) = ctx.fs.read_dir(&environments_dir) {
+                    for env_path in env_entries {
+                        let env_file = env_path.join(".pmp.environment.yaml");
+
+                        if ctx.fs.exists(&env_file)
+                            && let Ok(env_resource) =
+                                crate::template::metadata::DynamicProjectEnvironmentResource::from_file(
+                                    &*ctx.fs,
+                                    &env_file,
+                                )
+                            && env_resource.api_version == dependency_ref.api_version
+                            && env_resource.kind == dependency_ref.kind
+                        {
+                            if !dependency_ref.label_selector.is_empty() {
+                                if !env_resource.metadata.labels.is_empty() {
+                                    let matches = dependency_ref.label_selector.iter().all(
+                                        |(key, value)| {
+                                            env_resource
+                                                .metadata
+                                                .labels
+                                                .get(key)
+                                                .map(|v| v == value)
+                                                .unwrap_or(false)
+                                        },
+                                    );
+
+                                    if !matches {
+                                        continue;
+                                    }
+                                } else {
+                                    continue;
+                                }
+                            }
+
+                            return Some((project.clone(), env_resource));
+                        }
+                    }
+                }
+                None
+            })
+            .collect();
+
+        anyhow::ensure!(
+            !compatible_projects.is_empty(),
+            "No compatible projects found for dependency"
+        );
+
+        if let Some(description) = &dependency_ref.description {
+            ctx.output.dimmed(&format!("  {}", description));
+        } else {
+            let mut info_parts = vec![format!(
+                "Plugin requires a reference to a {} project",
+                dependency_ref.kind
+            )];
+
+            if !dependency_ref.label_selector.is_empty() {
+                let labels_str = dependency_ref
+                    .label_selector
+                    .iter()
+                    .map(|(k, v)| format!("{}={}", k, v))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                info_parts.push(format!("(labels: {})", labels_str));
+            }
+
+            if let Some(dep_name) = &dependency.dependency_name {
+                info_parts.push(format!("[dependency: {}]", dep_name));
+            }
+
+            ctx.output.dimmed(&format!("  {}:", info_parts.join(" ")));
+        }
+
+        let project_names: Vec<String> = compatible_projects
+            .iter()
+            .map(|(p, env)| {
+                let mut parts = vec![format!("{} ({})", p.name, env.metadata.environment_name)];
+
+                if !env.metadata.labels.is_empty() {
+                    let labels_str = env
+                        .metadata
+                        .labels
+                        .iter()
+                        .map(|(k, v)| format!("{}={}", k, v))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    parts.push(format!("[{}]", labels_str));
+                }
+
+                parts.join(" ")
+            })
+            .collect();
+
+        let selected_display =
+            ctx.input
+                .select("Select reference project:", project_names.clone(), None)?;
+
+        let selected_idx = project_names
+            .iter()
+            .position(|name| name == &selected_display)
+            .context("Selected project not found in list")?;
+
+        let (selected_project, selected_env) = &compatible_projects[selected_idx];
+        Ok((selected_project.clone(), selected_env.clone()))
+    }
+
     /// Collect inputs for a single installed plugin without rendering
     #[allow(clippy::too_many_arguments)]
     fn collect_plugin_info(
@@ -96,6 +219,7 @@ impl CreateCommand {
         collection_root: &Path,
         project_name: &str,
         environment_name: &str,
+        preconfigured_plugin: Option<&crate::commands::project_group::PreConfiguredPluginData>,
     ) -> Result<Option<CollectedPluginInfo>> {
         // Find the template pack containing this plugin
         let template_pack = template_packs
@@ -142,113 +266,59 @@ impl CreateCommand {
             if !plugin_info.resource.spec.dependencies.is_empty() {
                 let mut refs = Vec::new();
 
-                for dependency in &plugin_info.resource.spec.dependencies {
-                    let dependency_ref = &dependency.project;
+                if let Some(preconfig) = preconfigured_plugin {
+                    // Use pre-configured references
+                    refs.extend(preconfig.resolved_references.clone());
 
-                    // Find compatible projects for THIS dependency
-                    let compatible_projects: Vec<_> = projects.iter()
-                        .filter_map(|project| {
-                            let project_path = collection_root.join(&project.path);
-                            let environments_dir = project_path.join("environments");
-
-                            if let Ok(env_entries) = ctx.fs.read_dir(&environments_dir) {
-                                for env_path in env_entries {
-                                    let env_file = env_path.join(".pmp.environment.yaml");
-                                    if ctx.fs.exists(&env_file)
-                                        && let Ok(env_resource) = crate::template::metadata::DynamicProjectEnvironmentResource::from_file(&*ctx.fs, &env_file)
-                                            && env_resource.api_version == dependency_ref.api_version
-                                                && env_resource.kind == dependency_ref.kind
-                                        {
-                                            // Check label selectors if provided
-                                            if !dependency_ref.label_selector.is_empty() {
-                                                // Check labels from the environment resource
-                                                if !env_resource.metadata.labels.is_empty() {
-                                                    // All required labels must match
-                                                    let matches = dependency_ref.label_selector.iter().all(|(key, value)| {
-                                                        env_resource.metadata.labels.get(key).map(|v| v == value).unwrap_or(false)
-                                                    });
-                                                    if !matches {
-                                                        continue;
-                                                    }
-                                                } else {
-                                                    // Environment has no labels, can't match selector
-                                                    continue;
-                                                }
-                                            }
-
-                                            return Some((project.clone(), env_resource));
-                                        }
-                                }
+                    // Prompt only for unresolved dependencies
+                    for dependency in &preconfig.unresolved_dependencies {
+                        match Self::prompt_for_dependency_selection(
+                            ctx,
+                            dependency,
+                            projects,
+                            collection_root,
+                        ) {
+                            Ok(selected) => refs.push(selected),
+                            Err(_) => {
+                                let _dep_display = dependency.dependency_name.as_deref()
+                                    .unwrap_or(&dependency.project.kind);
+                                ctx.output.warning(&format!(
+                                    "  Plugin '{}' requires a {} project{}, but none found. Skipping.",
+                                    installed_config.plugin_name,
+                                    dependency.project.kind,
+                                    dependency.dependency_name.as_ref()
+                                        .map(|n| format!(" (dependency: {})", n))
+                                        .unwrap_or_default()
+                                ));
+                                return Ok(None);
                             }
-                            None
-                        })
-                        .collect();
-
-                    if compatible_projects.is_empty() {
-                        let _dep_display = dependency.dependency_name.as_deref()
-                            .unwrap_or(&dependency_ref.kind);
-                        ctx.output.warning(&format!(
-                            "  Plugin '{}' requires a {} project{}, but none found. Skipping.",
-                            installed_config.plugin_name,
-                            dependency_ref.kind,
-                            dependency.dependency_name.as_ref()
-                                .map(|n| format!(" (dependency: {})", n))
-                                .unwrap_or_default()
-                        ));
-                        return Ok(None);
-                    }
-
-                    // Show description if available, otherwise show kind and label selectors
-                    if let Some(description) = &dependency_ref.description {
-                        ctx.output.dimmed(&format!("  {}", description));
-                    } else {
-                        let mut info_parts = vec![format!(
-                            "Plugin requires a reference to a {} project",
-                            dependency_ref.kind
-                        )];
-                        if !dependency_ref.label_selector.is_empty() {
-                            let labels_str = dependency_ref.label_selector
-                                .iter()
-                                .map(|(k, v)| format!("{}={}", k, v))
-                                .collect::<Vec<_>>()
-                                .join(", ");
-                            info_parts.push(format!("(labels: {})", labels_str));
                         }
-                        if let Some(dep_name) = &dependency.dependency_name {
-                            info_parts.push(format!("[dependency: {}]", dep_name));
-                        }
-                        ctx.output.dimmed(&format!("  {}:", info_parts.join(" ")));
                     }
-
-                    let project_names: Vec<String> = compatible_projects
-                        .iter()
-                        .map(|(p, env)| {
-                            let mut parts = vec![format!("{} ({})", p.name, env.metadata.environment_name)];
-                            if !env.metadata.labels.is_empty() {
-                                let labels_str = env
-                                    .metadata
-                                    .labels
-                                    .iter()
-                                    .map(|(k, v)| format!("{}={}", k, v))
-                                    .collect::<Vec<_>>()
-                                    .join(", ");
-                                parts.push(format!("[{}]", labels_str));
+                } else {
+                    // Original flow - prompt for all dependencies
+                    for dependency in &plugin_info.resource.spec.dependencies {
+                        match Self::prompt_for_dependency_selection(
+                            ctx,
+                            dependency,
+                            projects,
+                            collection_root,
+                        ) {
+                            Ok(selected) => refs.push(selected),
+                            Err(_) => {
+                                let _dep_display = dependency.dependency_name.as_deref()
+                                    .unwrap_or(&dependency.project.kind);
+                                ctx.output.warning(&format!(
+                                    "  Plugin '{}' requires a {} project{}, but none found. Skipping.",
+                                    installed_config.plugin_name,
+                                    dependency.project.kind,
+                                    dependency.dependency_name.as_ref()
+                                        .map(|n| format!(" (dependency: {})", n))
+                                        .unwrap_or_default()
+                                ));
+                                return Ok(None);
                             }
-                            parts.join(" ")
-                        })
-                        .collect();
-
-                    let selected_display = ctx
-                        .input
-                        .select("Select reference project:", project_names.clone(), None)?;
-
-                    let selected_idx = project_names
-                        .iter()
-                        .position(|name| name == &selected_display)
-                        .context("Selected project not found in list")?;
-
-                    let (selected_project, selected_env) = &compatible_projects[selected_idx];
-                    refs.push((selected_project.clone(), selected_env.clone()));
+                        }
+                    }
                 }
 
                 refs
@@ -271,6 +341,18 @@ impl CreateCommand {
             // Use defaults without asking
             ctx.output.dimmed("  Using default values...");
             Self::build_default_inputs(&merged_inputs, project_name, Some(environment_name))?
+        } else if let Some(preconfig) = preconfigured_plugin
+            && !preconfig.input_configs.is_empty()
+        {
+            // Use pre-configured inputs
+            ctx.output.dimmed("  Using pre-configured values...");
+            Self::build_inputs_with_preconfig(
+                ctx,
+                &merged_inputs,
+                &preconfig.input_configs,
+                project_name,
+                environment_name,
+            )?
         } else {
             // Ask user if they want to customize inputs
             let customize = ctx
@@ -469,6 +551,85 @@ impl CreateCommand {
             && s.is_empty()
         {
             // Leave empty for now - description would need to be passed as a parameter
+            inputs.insert(
+                "project_description".to_string(),
+                Value::String(String::new()),
+            );
+        }
+
+        Ok(inputs)
+    }
+
+    /// Build inputs merging pre-configured values with defaults
+    fn build_inputs_with_preconfig(
+        _ctx: &crate::context::Context,
+        inputs_spec: &[crate::template::metadata::InputDefinition],
+        preconfig_inputs: &HashMap<String, crate::template::metadata::ProjectGroupInputConfig>,
+        project_name: &str,
+        environment_name: &str,
+    ) -> Result<HashMap<String, Value>> {
+        let mut inputs = HashMap::new();
+
+        // Add project name variables
+        let project_name_underscores = project_name.replace('-', "_");
+        let project_name_hyphens = project_name.replace('_', "-");
+        inputs.insert(
+            "_project_name_underscores".to_string(),
+            Value::String(project_name_underscores),
+        );
+        inputs.insert(
+            "_project_name_hyphens".to_string(),
+            Value::String(project_name_hyphens),
+        );
+
+        for input_def in inputs_spec {
+            if input_def.name == "_project_name_underscores"
+                || input_def.name == "_project_name_hyphens"
+            {
+                continue;
+            }
+
+            if let Some(config) = preconfig_inputs.get(&input_def.name) {
+                if let Some(value) = &config.value {
+                    inputs.insert(input_def.name.clone(), value.clone());
+                } else if config.use_default
+                    && let Some(default) = &input_def.default
+                {
+                    let vars = Self::get_interpolation_variables(
+                        &inputs,
+                        project_name,
+                        Some(environment_name),
+                    );
+                    let interpolated_value =
+                        crate::template::utils::interpolate_value_all(default, &vars)?;
+                    inputs.insert(input_def.name.clone(), interpolated_value);
+                }
+            } else if let Some(default) = &input_def.default {
+                let vars = Self::get_interpolation_variables(
+                    &inputs,
+                    project_name,
+                    Some(environment_name),
+                );
+                let interpolated_value =
+                    crate::template::utils::interpolate_value_all(default, &vars)?;
+                inputs.insert(input_def.name.clone(), interpolated_value);
+            }
+        }
+
+        // Auto-populate project_name if empty
+        if let Some(Value::String(s)) = inputs.get("project_name")
+            && s.is_empty()
+        {
+            inputs.insert(
+                "project_name".to_string(),
+                Value::String(project_name.to_string()),
+            );
+        }
+
+        // Auto-populate project_description if empty
+        if let Some(Value::String(s)) = inputs.get("project_description")
+            && s.is_empty()
+        {
             inputs.insert(
                 "project_description".to_string(),
                 Value::String(String::new()),
@@ -1568,6 +1729,7 @@ impl CreateCommand {
                         &infrastructure_root,
                         &project_name,
                         &selected_environment,
+                        None,
                     )? {
                         collected_plugins.push(plugin_info);
                     }
@@ -2332,6 +2494,49 @@ impl CreateCommand {
                 ipv6_only,
             } => Self::prompt_for_cidr(ctx, description, default_str, *ipv4_only, *ipv6_only),
             InputType::Port => Self::prompt_for_port(ctx, description, default_str),
+            InputType::Object { fields } => {
+                Self::prompt_for_object(ctx, description, fields, default)
+            }
+            InputType::RepeatableObject {
+                fields,
+                min,
+                max,
+                add_another_prompt,
+            } => Self::prompt_for_repeatable_object(
+                ctx,
+                description,
+                fields,
+                *min,
+                *max,
+                add_another_prompt.as_deref(),
+                default,
+            ),
+            InputType::Color { allow_alpha } => {
+                Self::prompt_for_color(ctx, description, default_str, *allow_alpha)
+            }
+            InputType::Duration {
+                min_seconds,
+                max_seconds,
+            } => Self::prompt_for_duration(ctx, description, default_str, *min_seconds, *max_seconds),
+            InputType::Cron => Self::prompt_for_cron(ctx, description, default_str),
+            InputType::KeyValue {
+                key_value_separator,
+                pair_separator,
+                min,
+                max,
+            } => Self::prompt_for_keyvalue(
+                ctx,
+                description,
+                default_str,
+                key_value_separator,
+                pair_separator,
+                *min,
+                *max,
+            ),
+            InputType::Semver {
+                allow_prerelease,
+                allow_build,
+            } => Self::prompt_for_semver(ctx, description, default_str, *allow_prerelease, *allow_build),
         }
     }
 
@@ -2401,7 +2606,7 @@ impl CreateCommand {
         _allow_multiple: bool,
     ) -> Result<Value> {
         // Get collection root
-        let collection_root = std::env::current_dir().context("Failed to get current directory")?;
+        let collection_root = ctx.fs.current_dir().context("Failed to get current directory")?;
 
         // Discover all projects
         let all_projects =
@@ -2480,7 +2685,7 @@ impl CreateCommand {
         max: Option<usize>,
     ) -> Result<Value> {
         // Get collection root
-        let collection_root = std::env::current_dir().context("Failed to get current directory")?;
+        let collection_root = ctx.fs.current_dir().context("Failed to get current directory")?;
 
         // Discover all projects
         let all_projects =
@@ -2855,6 +3060,230 @@ impl CreateCommand {
         }
     }
 
+    /// Prompt for object input (structured object with named fields)
+    fn prompt_for_object(
+        ctx: &crate::context::Context,
+        description: &str,
+        fields: &[crate::template::metadata::InputDefinition],
+        _default: Option<&Value>,
+    ) -> Result<Value> {
+        ctx.output.info(&format!("{} (object with {} fields)", description, fields.len()));
+
+        let mut object = serde_json::Map::new();
+
+        for field in fields {
+            // Interpolate field description and default
+            let field_desc = field
+                .description
+                .as_deref()
+                .unwrap_or(&field.name);
+
+            let field_label = format!("  {} → {}", field.name, field_desc);
+
+            // Get the default value for this field
+            let field_default = field.default.as_ref();
+
+            // Determine input type and prompt for value
+            let value = if let Some(ref input_type) = field.input_type {
+                Self::prompt_for_typed_input(ctx, &field_label, input_type, field_default)?
+            } else {
+                // Fallback to string input
+                Self::prompt_for_typed_input(
+                    ctx,
+                    &field_label,
+                    &crate::template::metadata::InputType::String,
+                    field_default,
+                )?
+            };
+
+            object.insert(field.name.clone(), value);
+        }
+
+        Ok(Value::Object(object))
+    }
+
+    /// Prompt for repeatable object input (array of structured objects)
+    #[allow(clippy::too_many_arguments)]
+    fn prompt_for_repeatable_object(
+        ctx: &crate::context::Context,
+        description: &str,
+        fields: &[crate::template::metadata::InputDefinition],
+        min: Option<usize>,
+        max: Option<usize>,
+        add_another_prompt: Option<&str>,
+        _default: Option<&Value>,
+    ) -> Result<Value> {
+        let mut items = Vec::new();
+        let min_items = min.unwrap_or(0);
+        let max_items = max.unwrap_or(100);
+
+        let item_description = add_another_prompt
+            .and_then(|p| p.strip_suffix('?'))
+            .and_then(|p| p.strip_prefix("Add another "))
+            .unwrap_or("item");
+
+        loop {
+            let current_count = items.len();
+
+            // Show current items count if any exist
+            if current_count > 0 {
+                ctx.output.info(&format!(
+                    "Current {} count: {}",
+                    item_description,
+                    current_count
+                ));
+            }
+
+            // Check if we've reached the maximum
+            if current_count >= max_items {
+                ctx.output.info(&format!("Maximum of {} items reached", max_items));
+                break;
+            }
+
+            // Build action options
+            let mut options = Vec::new();
+
+            // Always allow adding if we haven't reached max and minimum not yet met
+            if current_count < max_items {
+                if current_count < min_items {
+                    // Must add more items to meet minimum
+                    options.push(format!("Add new {}", item_description));
+                } else {
+                    // Can add, remove, or finish
+                    options.push(format!("Add new {}", item_description));
+
+                    if current_count > min_items {
+                        options.push(format!("Remove {}", item_description));
+                    }
+
+                    options.push("Done".to_string());
+                }
+            }
+
+            // If only one option (must add), don't show menu
+            if options.len() == 1 && current_count < min_items {
+                // Must add items to meet minimum
+                let item_label = format!("{} #{}", description, current_count + 1);
+                let object = Self::prompt_for_object(ctx, &item_label, fields, None)?;
+                items.push(object);
+                continue;
+            }
+
+            // Show action menu
+            let action_prompt = format!("What would you like to do with {}?", item_description);
+            let selected_action = ctx
+                .input
+                .select(&action_prompt, options.clone(), Some(0))
+                .context("Failed to get action selection")?;
+
+            if selected_action.starts_with("Add new") {
+                // Add new item
+                let item_label = format!("{} #{}", description, current_count + 1);
+                let object = Self::prompt_for_object(ctx, &item_label, fields, None)?;
+                items.push(object);
+            } else if selected_action.starts_with("Remove") {
+                // Remove existing item
+                Self::remove_item_from_list(ctx, &mut items, item_description)?;
+            } else if selected_action == "Done" {
+                break;
+            }
+        }
+
+        // Validate minimum items
+        if items.len() < min_items {
+            return Err(anyhow::anyhow!(
+                "Minimum {} items required, only {} provided",
+                min_items,
+                items.len()
+            ));
+        }
+
+        Ok(Value::Array(items))
+    }
+
+    /// Helper function to remove an item from a list
+    fn remove_item_from_list(
+        ctx: &crate::context::Context,
+        items: &mut Vec<Value>,
+        item_description: &str,
+    ) -> Result<()> {
+        if items.is_empty() {
+            ctx.output
+                .warning(&format!("No {} to remove", item_description));
+            return Ok(());
+        }
+
+        // Build list of items to display
+        let item_options: Vec<String> = items
+            .iter()
+            .enumerate()
+            .map(|(idx, item)| {
+                // Try to create a summary of the object
+                let summary = Self::summarize_item(item);
+                format!("#{} - {}", idx + 1, summary)
+            })
+            .collect();
+
+        // Add cancel option
+        let mut options_with_cancel = item_options.clone();
+        options_with_cancel.push("Cancel".to_string());
+
+        let prompt = format!("Select {} to remove:", item_description);
+        let selected = ctx
+            .input
+            .select(&prompt, options_with_cancel, Some(0))
+            .context("Failed to get selection")?;
+
+        if selected == "Cancel" {
+            return Ok(());
+        }
+
+        // Find the selected index and remove it
+        if let Some(selected_idx) = item_options.iter().position(|opt| opt == &selected) {
+            items.remove(selected_idx);
+            ctx.output.info(&format!(
+                "Removed {} #{}",
+                item_description,
+                selected_idx + 1
+            ));
+        }
+
+        Ok(())
+    }
+
+    /// Create a summary string for a Value (used for displaying items)
+    fn summarize_item(value: &Value) -> String {
+        match value {
+            Value::Object(obj) => {
+                // Show first few key-value pairs
+                let pairs: Vec<String> = obj
+                    .iter()
+                    .take(3)
+                    .map(|(k, v)| {
+                        let val_str = match v {
+                            Value::String(s) => s.clone(),
+                            Value::Number(n) => n.to_string(),
+                            Value::Bool(b) => b.to_string(),
+                            _ => "...".to_string(),
+                        };
+                        format!("{}: {}", k, val_str)
+                    })
+                    .collect();
+
+                if pairs.is_empty() {
+                    "empty object".to_string()
+                } else {
+                    pairs.join(", ")
+                }
+            }
+            Value::String(s) => s.clone(),
+            Value::Number(n) => n.to_string(),
+            Value::Bool(b) => b.to_string(),
+            Value::Array(arr) => format!("[{} items]", arr.len()),
+            Value::Null => "null".to_string(),
+        }
+    }
+
     /// Prompt for email input
     fn prompt_for_email(
         ctx: &crate::context::Context,
@@ -3014,6 +3443,396 @@ impl CreateCommand {
                 }
             }
         }
+    }
+
+    /// Prompt for hex color input
+    fn prompt_for_color(
+        ctx: &crate::context::Context,
+        description: &str,
+        default: Option<&str>,
+        allow_alpha: bool,
+    ) -> Result<Value> {
+        let pattern_desc = if allow_alpha {
+            "#RRGGBB or #RRGGBBAA"
+        } else {
+            "#RRGGBB"
+        };
+        let prompt = format!("{} [color: {}]", description, pattern_desc);
+
+        loop {
+            let answer = ctx
+                .input
+                .text(&prompt, default)
+                .context("Failed to get input")?;
+
+            // Validate hex color format
+            if !answer.starts_with('#') {
+                ctx.output.error("Color must start with '#'");
+                continue;
+            }
+
+            let hex = &answer[1..];
+            let expected_len = if allow_alpha { vec![6, 8] } else { vec![6] };
+
+            if !expected_len.contains(&hex.len()) {
+                ctx.output.error(&format!(
+                    "Invalid color format. Expected {}",
+                    pattern_desc
+                ));
+                continue;
+            }
+
+            if !hex.chars().all(|c| c.is_ascii_hexdigit()) {
+                ctx.output.error("Color must contain only hex digits (0-9, A-F)");
+                continue;
+            }
+
+            return Ok(Value::String(answer.to_uppercase()));
+        }
+    }
+
+    /// Prompt for duration input
+    fn prompt_for_duration(
+        ctx: &crate::context::Context,
+        description: &str,
+        default: Option<&str>,
+        min_seconds: Option<u64>,
+        max_seconds: Option<u64>,
+    ) -> Result<Value> {
+        let mut prompt = format!("{} [duration: e.g., 1h30m, 5d, 2w]", description);
+
+        if let Some(min) = min_seconds {
+            prompt.push_str(&format!(" (min: {}s)", min));
+        }
+        if let Some(max) = max_seconds {
+            prompt.push_str(&format!(" (max: {}s)", max));
+        }
+
+        loop {
+            let answer = ctx
+                .input
+                .text(&prompt, default)
+                .context("Failed to get input")?;
+
+            // Parse duration string (supports: s, m, h, d, w)
+            match Self::parse_duration(&answer) {
+                Ok(seconds) => {
+                    // Validate range
+                    if let Some(min) = min_seconds
+                        && seconds < min
+                    {
+                        ctx.output
+                            .error(&format!("Duration must be at least {} seconds", min));
+                        continue;
+                    }
+
+                    if let Some(max) = max_seconds
+                        && seconds > max
+                    {
+                        ctx.output
+                            .error(&format!("Duration must be at most {} seconds", max));
+                        continue;
+                    }
+
+                    return Ok(Value::Number(serde_json::Number::from(seconds)));
+                }
+                Err(e) => {
+                    ctx.output.error(&format!("Invalid duration: {}", e));
+                    continue;
+                }
+            }
+        }
+    }
+
+    /// Parse duration string into seconds
+    fn parse_duration(input: &str) -> Result<u64> {
+        let mut total_seconds: u64 = 0;
+        let mut current_num = String::new();
+
+        for ch in input.chars() {
+            if ch.is_ascii_digit() {
+                current_num.push(ch);
+            } else if ch.is_ascii_alphabetic() {
+                if current_num.is_empty() {
+                    return Err(anyhow::anyhow!("Invalid duration format"));
+                }
+
+                let num: u64 = current_num.parse()?;
+                current_num.clear();
+
+                let multiplier = match ch {
+                    's' => 1,
+                    'm' => 60,
+                    'h' => 3600,
+                    'd' => 86400,
+                    'w' => 604800,
+                    _ => {
+                        return Err(anyhow::anyhow!(
+                            "Unknown unit '{}'. Use: s, m, h, d, w",
+                            ch
+                        ))
+                    }
+                };
+
+                total_seconds += num * multiplier;
+            } else if !ch.is_whitespace() {
+                return Err(anyhow::anyhow!("Invalid character: '{}'", ch));
+            }
+        }
+
+        if !current_num.is_empty() {
+            return Err(anyhow::anyhow!(
+                "Duration must include a unit (s, m, h, d, w)"
+            ));
+        }
+
+        if total_seconds == 0 {
+            return Err(anyhow::anyhow!("Duration must be greater than 0"));
+        }
+
+        Ok(total_seconds)
+    }
+
+    /// Prompt for cron expression input
+    fn prompt_for_cron(
+        ctx: &crate::context::Context,
+        description: &str,
+        default: Option<&str>,
+    ) -> Result<Value> {
+        let prompt = format!("{} [cron: e.g., */5 * * * *]", description);
+
+        loop {
+            let answer = ctx
+                .input
+                .text(&prompt, default)
+                .context("Failed to get input")?;
+
+            // Basic cron validation (5 or 6 fields)
+            let fields: Vec<&str> = answer.split_whitespace().collect();
+            if fields.len() != 5 && fields.len() != 6 {
+                ctx.output.error(
+                    "Cron expression must have 5 fields (minute hour day month weekday) or 6 fields (with seconds)",
+                );
+                continue;
+            }
+
+            // Validate each field contains valid characters
+            let valid_chars = "0123456789*,-/";
+            let mut is_valid = true;
+            for field in &fields {
+                if !field.chars().all(|c| valid_chars.contains(c) || c.is_alphabetic()) {
+                    ctx.output.error(&format!("Invalid characters in field: {}", field));
+                    is_valid = false;
+                    break;
+                }
+            }
+
+            if is_valid {
+                return Ok(Value::String(answer));
+            }
+        }
+    }
+
+    /// Prompt for key-value pairs input
+    #[allow(clippy::too_many_arguments)]
+    fn prompt_for_keyvalue(
+        ctx: &crate::context::Context,
+        description: &str,
+        default: Option<&str>,
+        key_value_separator: &str,
+        pair_separator: &str,
+        min: Option<usize>,
+        max: Option<usize>,
+    ) -> Result<Value> {
+        let mut prompt = format!(
+            "{} [key-value pairs, e.g., key1{}value1{}key2{}value2]",
+            description, key_value_separator, pair_separator, key_value_separator
+        );
+
+        if let Some(min_val) = min {
+            prompt.push_str(&format!(" (min: {})", min_val));
+        }
+        if let Some(max_val) = max {
+            prompt.push_str(&format!(" (max: {})", max_val));
+        }
+
+        loop {
+            let answer = ctx
+                .input
+                .text(&prompt, default)
+                .context("Failed to get input")?;
+
+            let mut pairs = serde_json::Map::new();
+
+            if answer.trim().is_empty() {
+                if let Some(min_val) = min
+                    && min_val > 0
+                {
+                    ctx.output
+                        .error(&format!("At least {} pairs required", min_val));
+                    continue;
+                }
+                return Ok(Value::Object(pairs));
+            }
+
+            let pair_strings: Vec<&str> = answer.split(pair_separator).collect();
+
+            // Validate count
+            if let Some(min_val) = min
+                && pair_strings.len() < min_val
+            {
+                ctx.output
+                    .error(&format!("At least {} pairs required", min_val));
+                continue;
+            }
+
+            if let Some(max_val) = max
+                && pair_strings.len() > max_val
+            {
+                ctx.output
+                    .error(&format!("At most {} pairs allowed", max_val));
+                continue;
+            }
+
+            let mut valid = true;
+            for pair in pair_strings {
+                let kv: Vec<&str> = pair.splitn(2, key_value_separator).collect();
+                if kv.len() != 2 {
+                    ctx.output.error(&format!(
+                        "Invalid pair format: '{}'. Expected 'key{}value'",
+                        pair.trim(),
+                        key_value_separator
+                    ));
+                    valid = false;
+                    break;
+                }
+
+                let key = kv[0].trim();
+                let value = kv[1].trim();
+
+                if key.is_empty() {
+                    ctx.output.error("Key cannot be empty");
+                    valid = false;
+                    break;
+                }
+
+                pairs.insert(key.to_string(), Value::String(value.to_string()));
+            }
+
+            if valid {
+                return Ok(Value::Object(pairs));
+            }
+        }
+    }
+
+    /// Prompt for semantic version input
+    fn prompt_for_semver(
+        ctx: &crate::context::Context,
+        description: &str,
+        default: Option<&str>,
+        allow_prerelease: bool,
+        allow_build: bool,
+    ) -> Result<Value> {
+        let mut examples = vec!["1.2.3"];
+        if allow_prerelease {
+            examples.push("2.0.0-beta.1");
+        }
+        if allow_build {
+            examples.push("1.0.0+build.123");
+        }
+
+        let prompt = format!(
+            "{} [semver: e.g., {}]",
+            description,
+            examples.join(", ")
+        );
+
+        loop {
+            let answer = ctx
+                .input
+                .text(&prompt, default)
+                .context("Failed to get input")?;
+
+            // Parse semver: MAJOR.MINOR.PATCH[-PRERELEASE][+BUILD]
+            match Self::parse_semver(&answer, allow_prerelease, allow_build) {
+                Ok(_) => return Ok(Value::String(answer)),
+                Err(e) => {
+                    ctx.output.error(&format!("Invalid semver: {}", e));
+                    continue;
+                }
+            }
+        }
+    }
+
+    /// Parse and validate semantic version
+    fn parse_semver(input: &str, allow_prerelease: bool, allow_build: bool) -> Result<()> {
+        // Split on + for build metadata
+        let (version_and_pre, build) = if let Some(pos) = input.find('+') {
+            if !allow_build {
+                return Err(anyhow::anyhow!("Build metadata not allowed"));
+            }
+            (&input[..pos], Some(&input[pos + 1..]))
+        } else {
+            (input, None)
+        };
+
+        // Validate build metadata if present
+        if let Some(b) = build
+            && (b.is_empty() || !b.chars().all(|c| c.is_alphanumeric() || c == '.' || c == '-'))
+        {
+            return Err(anyhow::anyhow!("Invalid build metadata"));
+        }
+
+        // Split on - for prerelease
+        let (version, prerelease) = if let Some(pos) = version_and_pre.find('-') {
+            if !allow_prerelease {
+                return Err(anyhow::anyhow!("Prerelease versions not allowed"));
+            }
+            (&version_and_pre[..pos], Some(&version_and_pre[pos + 1..]))
+        } else {
+            (version_and_pre, None)
+        };
+
+        // Validate prerelease if present
+        if let Some(pre) = prerelease
+            && (pre.is_empty()
+                || !pre
+                    .chars()
+                    .all(|c| c.is_alphanumeric() || c == '.' || c == '-'))
+        {
+            return Err(anyhow::anyhow!("Invalid prerelease identifier"));
+        }
+
+        // Parse MAJOR.MINOR.PATCH
+        let parts: Vec<&str> = version.split('.').collect();
+        if parts.len() != 3 {
+            return Err(anyhow::anyhow!(
+                "Version must have exactly 3 parts: MAJOR.MINOR.PATCH"
+            ));
+        }
+
+        for (i, part) in parts.iter().enumerate() {
+            if part.is_empty() {
+                return Err(anyhow::anyhow!("Version part cannot be empty"));
+            }
+
+            // Check for leading zeros (not allowed except for "0")
+            if part.len() > 1 && part.starts_with('0') {
+                return Err(anyhow::anyhow!("Version parts cannot have leading zeros"));
+            }
+
+            if part.parse::<u32>().is_err() {
+                let label = match i {
+                    0 => "MAJOR",
+                    1 => "MINOR",
+                    2 => "PATCH",
+                    _ => "version part",
+                };
+                return Err(anyhow::anyhow!("{} must be a valid number", label));
+            }
+        }
+
+        Ok(())
     }
 
     /// Recursively collect all templates from the category tree
@@ -3259,6 +4078,7 @@ impl CreateCommand {
         reference_projects: &[crate::template::metadata::TemplateReferenceProject],
         template_packs_paths: Option<&str>,
         executor_override: Option<&crate::template::metadata::ExecutorConfigOverride>,
+        plugin_configs: Option<&HashMap<String, crate::commands::project_group::PreConfiguredPluginData>>,
     ) -> Result<()> {
         use crate::template::renderer::TemplateRenderer;
 
@@ -3375,6 +4195,10 @@ impl CreateCommand {
                 let mut plugin_config = installed_plugin.clone();
                 plugin_config.disable_user_input_override = true;
 
+                // Get pre-configured data for this plugin if available
+                let preconfig = plugin_configs
+                    .and_then(|configs| configs.get(&installed_plugin.plugin_name));
+
                 if let Some(plugin_info) = Self::collect_plugin_info(
                     ctx,
                     &plugin_config,
@@ -3383,6 +4207,7 @@ impl CreateCommand {
                     &infrastructure_root,
                     project_name,
                     environment_name,
+                    preconfig,
                 )? {
                     collected_plugins.push(plugin_info);
                 }
@@ -3412,7 +4237,15 @@ impl CreateCommand {
             Vec::new()
         };
 
-        // Step 9: Render template files
+        // Step 9: Add _plugins to inputs for template rendering
+        if !added_plugins.is_empty() {
+            let plugins_data = serde_json::json!({
+                "added": added_plugins
+            });
+            final_inputs.insert("_plugins".to_string(), plugins_data);
+        }
+
+        // Step 10: Render template files
         let template_src = &template.path;
         let renderer = TemplateRenderer::new();
         renderer
@@ -3425,7 +4258,7 @@ impl CreateCommand {
             )
             .context("Failed to render template")?;
 
-        // Step 10: Generate _common.tf if needed (only opentofu executor does this)
+        // Step 11: Generate _common.tf if needed (only opentofu executor does this)
         let template_executor_name = template.resource.spec.executor.name();
         if let Some(executor_config) = &infrastructure.spec.executor
             && !executor_config.config.is_empty()
@@ -3454,7 +4287,7 @@ impl CreateCommand {
                 .context("Failed to generate common file")?;
         }
 
-        // Step 11: Generate .pmp.project.yaml
+        // Step 12: Generate .pmp.project.yaml
         Self::generate_project_identifier_yaml(
             ctx,
             &project_root,
@@ -3463,7 +4296,7 @@ impl CreateCommand {
             &template.resource.metadata.labels,
         )?;
 
-        // Step 12: Generate .pmp.environment.yaml
+        // Step 13: Generate .pmp.environment.yaml
         Self::generate_project_environment_yaml(
             ctx,
             &environment_path,
@@ -5166,6 +5999,2245 @@ spec:
         assert!(
             env_content.contains("app_name: myapp"),
             "Environment file should contain input values"
+        );
+    }
+
+    #[test]
+    fn test_helper_module_creates_files() {
+        use crate::test_helpers::{create_comprehensive_template_pack, create_test_infrastructure};
+
+        // Set up mock filesystem
+        let fs = Arc::new(MockFileSystem::new());
+
+        // Create comprehensive template pack
+        create_comprehensive_template_pack(&fs);
+
+        // Create infrastructure
+        create_test_infrastructure(&fs, &["dev", "staging", "prod"]);
+
+        // Verify infrastructure file was created
+        let current_dir = fs.current_dir().unwrap();
+        let infra_file = current_dir.join(".pmp.infrastructure.yaml");
+        assert!(
+            fs.has_file(&infra_file),
+            "Infrastructure file should exist at {:?}",
+            infra_file
+        );
+
+        // Verify template pack was created
+        let template_pack_file = current_dir
+            .join(".pmp/template-packs/comprehensive-pack/.pmp.template-pack.yaml");
+        assert!(
+            fs.has_file(&template_pack_file),
+            "Template pack file should exist at {:?}",
+            template_pack_file
+        );
+
+        // Verify template was created
+        let template_file = current_dir.join(
+            ".pmp/template-packs/comprehensive-pack/templates/full-featured-template/.pmp.template.yaml",
+        );
+        assert!(
+            fs.has_file(&template_file),
+            "Template file should exist at {:?}",
+            template_file
+        );
+
+        // Verify plugin was created
+        let plugin_file = current_dir.join(
+            ".pmp/template-packs/comprehensive-pack/plugins/monitoring-plugin/.pmp.plugin.yaml",
+        );
+        assert!(
+            fs.has_file(&plugin_file),
+            "Plugin file should exist at {:?}",
+            plugin_file
+        );
+    }
+
+    #[test]
+    fn test_comprehensive_template_pack_features() {
+        use crate::test_helpers::{create_comprehensive_template_pack, create_test_infrastructure};
+
+        // Set up mock filesystem
+        let fs = Arc::new(MockFileSystem::new());
+
+        // Create comprehensive template pack with all features
+        create_comprehensive_template_pack(&fs);
+
+        // Create infrastructure configuration
+        create_test_infrastructure(&fs, &["dev", "staging", "prod"]);
+
+        // Set up mock user input - use the simple template for this test
+        // NOTE: full-featured-template has dependencies which require existing projects,
+        // so we use simple-template here. The comprehensive template pack still demonstrates
+        // all features through its structure.
+        let input = MockUserInput::new();
+        input.add_response(MockResponse::Select(
+            "📁 Applications - Application templates".to_string(),
+        )); // category
+        input.add_response(MockResponse::Select(
+            "📄 simple-template - Simple template for basic tests".to_string(),
+        )); // template
+        input.add_response(MockResponse::Select("Dev - Dev environment".to_string())); // environment
+        input.add_response(MockResponse::Text("test-app".to_string())); // project name
+
+        // Input responses for simple template
+        input.add_response(MockResponse::Text("simple-resource".to_string())); // name
+
+        input.add_response(MockResponse::Confirm(false)); // apply after create
+
+        let ctx = create_test_context(Arc::clone(&fs), input);
+
+        // Run create command
+        let result = CreateCommand::execute(
+            &ctx,
+            None,  // output_path
+            None,  // template_packs_paths
+            None,  // inputs_str
+            None,  // template_spec
+            false, // auto_apply
+            None,  // project_name
+            None,  // environment_name
+        );
+
+        // Verify command succeeded
+        assert!(
+            result.is_ok(),
+            "Create command should succeed with comprehensive template: {:?}",
+            result
+        );
+
+        // Verify project files were created
+        let current_dir = fs.current_dir().unwrap();
+        let project_yaml_path =
+            current_dir.join("projects/test-app/.pmp.project.yaml");
+        let env_yaml_path =
+            current_dir.join("projects/test-app/environments/dev/.pmp.environment.yaml");
+
+        assert!(
+            fs.has_file(&project_yaml_path),
+            ".pmp.project.yaml should be created"
+        );
+        assert!(
+            fs.has_file(&env_yaml_path),
+            ".pmp.environment.yaml should be created"
+        );
+
+        // Verify template was rendered
+        let simple_tf_path = current_dir.join("projects/test-app/environments/dev/simple.tf");
+        assert!(
+            fs.has_file(&simple_tf_path),
+            "simple.tf should be created from template"
+        );
+
+        let simple_tf_content = fs.get_file_contents(&simple_tf_path).unwrap();
+        assert!(
+            simple_tf_content.contains("Simple resource: simple-resource"),
+            "Template should be rendered with name variable"
+        );
+
+        // Verify environment file contains input
+        let env_content = fs.get_file_contents(&env_yaml_path).unwrap();
+        assert!(
+            env_content.contains("name: simple-resource"),
+            "Environment should contain name input"
+        );
+
+        // Verify the comprehensive template pack structure exists (even if not used in this test)
+        let full_template_path = current_dir.join(
+            ".pmp/template-packs/comprehensive-pack/templates/full-featured-template/.pmp.template.yaml"
+        );
+        assert!(
+            fs.has_file(&full_template_path),
+            "Full-featured template should exist in the template pack"
+        );
+
+        let full_template_content = fs.get_file_contents(&full_template_path).unwrap();
+        assert!(
+            full_template_content.contains("type: number"),
+            "Full template should have number input type"
+        );
+        assert!(
+            full_template_content.contains("type: boolean"),
+            "Full template should have boolean input type"
+        );
+        assert!(
+            full_template_content.contains("type: select"),
+            "Full template should have select input type"
+        );
+        assert!(
+            full_template_content.contains("type: project_reference"),
+            "Full template should have project_reference input type"
+        );
+        assert!(
+            full_template_content.contains("type: projects_reference"),
+            "Full template should have projects_reference input type"
+        );
+        assert!(
+            full_template_content.contains("show_if"),
+            "Full template should have conditional inputs"
+        );
+        assert!(
+            full_template_content.contains("environments:"),
+            "Full template should have environment-specific inputs"
+        );
+
+        // Verify plugins exist
+        let monitoring_plugin_path = current_dir.join(
+            ".pmp/template-packs/comprehensive-pack/plugins/monitoring-plugin/.pmp.plugin.yaml"
+        );
+        assert!(
+            fs.has_file(&monitoring_plugin_path),
+            "Monitoring plugin should exist"
+        );
+
+        let backup_plugin_path = current_dir.join(
+            ".pmp/template-packs/comprehensive-pack/plugins/backup-plugin/.pmp.plugin.yaml"
+        );
+        assert!(
+            fs.has_file(&backup_plugin_path),
+            "Backup plugin should exist"
+        );
+
+        let backup_plugin_content = fs.get_file_contents(&backup_plugin_path).unwrap();
+        assert!(
+            backup_plugin_content.contains("dependencies:"),
+            "Backup plugin should have dependencies"
+        );
+    }
+
+    #[test]
+    fn test_create_project_with_opentofu_and_plugins() {
+        use crate::test_helpers::{create_opentofu_infrastructure, create_opentofu_template_pack};
+
+        // Set up mock filesystem
+        let fs = Arc::new(MockFileSystem::new());
+
+        // Create OpenTofu template pack
+        create_opentofu_template_pack(&fs);
+
+        // Create infrastructure configuration
+        create_opentofu_infrastructure(&fs, &["dev", "staging", "prod"]);
+
+        // Set up mock user input for project creation
+        let input = MockUserInput::new();
+        input.add_response(MockResponse::Select(
+            "📁 Web Applications - Web application templates".to_string(),
+        )); // category
+        input.add_response(MockResponse::Select(
+            "📄 webapp - Web application with monitoring".to_string(),
+        )); // template
+        input.add_response(MockResponse::Select("Dev - Dev environment".to_string())); // environment
+        input.add_response(MockResponse::Text("my-webapp".to_string())); // project name
+
+        // Pre-installed monitoring plugin inputs (order=50, comes first)
+        input.add_response(MockResponse::Confirm(false)); // "Do you want to customize inputs for this plugin?" - use defaults
+
+        // Template inputs (order=100, comes second)
+        input.add_response(MockResponse::Text("awesome-app".to_string())); // app_name
+        input.add_response(MockResponse::Text("3000".to_string())); // port
+        input.add_response(MockResponse::Select("Yes".to_string())); // enable_tls (boolean type is implemented as Yes/No select)
+        input.add_response(MockResponse::Select("Production".to_string())); // environment_type - select by LABEL, not value
+
+        input.add_response(MockResponse::Confirm(false)); // apply after create
+
+        let ctx = create_test_context(Arc::clone(&fs), input);
+
+        // Run create command
+        let result = CreateCommand::execute(
+            &ctx,
+            None,  // output_path
+            None,  // template_packs_paths
+            None,  // inputs_str
+            None,  // template_spec
+            false, // auto_apply
+            None,  // project_name
+            None,  // environment_name
+        );
+
+        // Verify command succeeded
+        assert!(
+            result.is_ok(),
+            "Create command should succeed: {:?}",
+            result
+        );
+
+        // Verify project structure
+        let current_dir = fs.current_dir().unwrap();
+        let project_path = current_dir.join("projects/my-webapp");
+        let env_path = project_path.join("environments/dev");
+
+        // Check .pmp.project.yaml exists
+        assert!(
+            fs.has_file(&project_path.join(".pmp.project.yaml")),
+            "Project YAML should exist"
+        );
+
+        // Check .pmp.environment.yaml exists
+        let env_yaml_path = env_path.join(".pmp.environment.yaml");
+        assert!(fs.has_file(&env_yaml_path), "Environment YAML should exist");
+
+        // Verify environment YAML contains our inputs
+        let env_content = fs.get_file_contents(&env_yaml_path).unwrap();
+        assert!(
+            env_content.contains("app_name: awesome-app"),
+            "Environment YAML should contain app_name"
+        );
+        assert!(
+            env_content.contains("port: 3000"),
+            "Environment YAML should contain port"
+        );
+        assert!(
+            env_content.contains("enable_tls: true"),
+            "Environment YAML should contain enable_tls"
+        );
+        assert!(
+            env_content.contains("environment_type: production"),
+            "Environment YAML should contain environment_type"
+        );
+
+        // Check main.tf was generated
+        let main_tf_path = env_path.join("main.tf");
+        assert!(fs.has_file(&main_tf_path), "main.tf should exist");
+
+        let main_tf_content = fs.get_file_contents(&main_tf_path).unwrap();
+        assert!(
+            main_tf_content.contains("# Web Application: awesome-app"),
+            "main.tf should contain app name"
+        );
+        assert!(
+            main_tf_content.contains("# Port: 3000"),
+            "main.tf should contain port"
+        );
+        assert!(
+            main_tf_content.contains("# TLS: true"),
+            "main.tf should contain TLS setting"
+        );
+        assert!(
+            main_tf_content.contains("# Environment: production"),
+            "main.tf should contain environment type"
+        );
+        assert!(
+            main_tf_content.contains("container_port = 3000"),
+            "main.tf should use port variable"
+        );
+        assert!(
+            main_tf_content.contains("type = \"LoadBalancer\""),
+            "main.tf should use LoadBalancer for production"
+        );
+
+        // Check _common.tf was generated with S3 backend
+        let common_tf_path = env_path.join("_common.tf");
+        assert!(fs.has_file(&common_tf_path), "_common.tf should exist");
+
+        let common_tf_content = fs.get_file_contents(&common_tf_path).unwrap();
+        assert!(
+            common_tf_content.contains("backend \"s3\""),
+            "_common.tf should contain S3 backend configuration"
+        );
+        assert!(
+            common_tf_content.contains("bucket = \"my-terraform-state\""),
+            "_common.tf should contain bucket name"
+        );
+        assert!(
+            common_tf_content.contains("key = \"my-webapp/dev/terraform.tfstate\""),
+            "_common.tf should contain interpolated key with project and environment"
+        );
+        assert!(
+            common_tf_content.contains("region = \"us-east-1\""),
+            "_common.tf should contain region"
+        );
+        assert!(
+            common_tf_content.contains("encrypt = true"),
+            "_common.tf should contain encrypt setting"
+        );
+
+        // Check monitoring plugin module was generated
+        let monitoring_tf_path = env_path.join("modules").join("opentofu-pack").join("monitoring").join("monitoring.tf");
+        assert!(
+            fs.has_file(&monitoring_tf_path),
+            "monitoring.tf from pre-installed plugin should exist in modules directory"
+        );
+
+        let monitoring_content = fs.get_file_contents(&monitoring_tf_path).unwrap();
+        assert!(
+            monitoring_content.contains("# Metrics: true"),
+            "monitoring.tf should show metrics enabled"
+        );
+        assert!(
+            monitoring_content.contains("# Scrape interval: 30s"),
+            "monitoring.tf should use plugin default scrape interval"
+        );
+        assert!(
+            monitoring_content.contains("scrape_interval: 30s"),
+            "monitoring.tf should contain scrape interval in config"
+        );
+        assert!(
+            monitoring_content.contains("resource \"kubernetes_config_map\" \"prometheus\""),
+            "monitoring.tf should contain prometheus config map"
+        );
+        assert!(
+            monitoring_content.contains("resource \"kubernetes_deployment\" \"prometheus\""),
+            "monitoring.tf should contain prometheus deployment"
+        );
+
+        // Verify logging and backup plugins were NOT installed (they're only allowed)
+        assert!(
+            !fs.has_file(&env_path.join("modules").join("opentofu-pack").join("logging").join("logging.tf")),
+            "logging.tf should NOT exist (not pre-installed)"
+        );
+        assert!(
+            !fs.has_file(&env_path.join("modules").join("opentofu-pack").join("backup").join("backup.tf")),
+            "backup.tf should NOT exist (not pre-installed)"
+        );
+    }
+
+    #[test]
+    fn test_update_project_change_inputs() {
+        use crate::commands::update::UpdateCommand;
+        use crate::test_helpers::{create_opentofu_infrastructure, create_opentofu_template_pack};
+
+        // Set up mock filesystem
+        let fs = Arc::new(MockFileSystem::new());
+
+        // Create OpenTofu template pack and infrastructure
+        create_opentofu_template_pack(&fs);
+        create_opentofu_infrastructure(&fs, &["dev", "staging", "prod"]);
+
+        // === STEP 1: Create initial project ===
+        let input_create = MockUserInput::new();
+        input_create.add_response(MockResponse::Select(
+            "📁 Web Applications - Web application templates".to_string(),
+        ));
+        input_create.add_response(MockResponse::Select(
+            "📄 webapp - Web application with monitoring".to_string(),
+        ));
+        input_create.add_response(MockResponse::Select("Dev - Dev environment".to_string()));
+        input_create.add_response(MockResponse::Text("my-webapp".to_string()));
+        // Plugin inputs first (order=50)
+        input_create.add_response(MockResponse::Confirm(true)); // "Do you want to customize inputs for this plugin?"
+        input_create.add_response(MockResponse::Confirm(true)); // metrics_enabled
+        input_create.add_response(MockResponse::Text("15s".to_string())); // scrape_interval
+        // Template inputs second (order=100)
+        input_create.add_response(MockResponse::Text("awesome-app".to_string())); // app_name
+        input_create.add_response(MockResponse::Text("3000".to_string())); // port
+        input_create.add_response(MockResponse::Select("Yes".to_string())); // enable_tls (boolean = Yes/No select)
+        input_create.add_response(MockResponse::Select("Production".to_string())); // environment_type - select by LABEL
+        input_create.add_response(MockResponse::Confirm(false)); // apply
+
+        let ctx_create = create_test_context(Arc::clone(&fs), input_create);
+        CreateCommand::execute(&ctx_create, None, None, None, None, false, None, None).unwrap();
+
+        // === STEP 2: Update project with changed inputs ===
+        let input_update = MockUserInput::new();
+        // First, select "Update the project" action
+        input_update.add_response(MockResponse::Select("Update the project".to_string()));
+        // Update TEMPLATE inputs only (plugin inputs are not re-collected during update unless new plugins are added)
+        input_update.add_response(MockResponse::Text("awesome-app".to_string())); // app_name
+        input_update.add_response(MockResponse::Text("8080".to_string())); // port (changed from 3000)
+        input_update.add_response(MockResponse::Confirm(false)); // enable_tls (changed from true to false)
+        input_update.add_response(MockResponse::Select("Staging".to_string())); // environment_type (changed from Production) - select by LABEL
+        input_update.add_response(MockResponse::Confirm(true)); // "Regenerate environment files with these inputs?"
+        input_update.add_response(MockResponse::Confirm(false)); // "Do you want to execute 'apply' now?" - no, just regenerate files
+
+        let ctx_update = create_test_context(Arc::clone(&fs), input_update);
+
+        // Run update command
+        let current_dir = fs.current_dir().unwrap();
+        let env_path_str = current_dir.join("projects/my-webapp/environments/dev");
+        let result = UpdateCommand::execute(
+            &ctx_update,
+            Some(env_path_str.to_str().unwrap()), // absolute path to environment
+            None,                                   // template_packs_paths
+            None,                                   // inputs_str
+        );
+
+        assert!(
+            result.is_ok(),
+            "Update command should succeed: {:?}",
+            result
+        );
+
+        // === STEP 3: Verify updated files ===
+        let current_dir = fs.current_dir().unwrap();
+        let env_path = current_dir.join("projects/my-webapp/environments/dev");
+
+        // Verify environment YAML was updated
+        let env_yaml_path = env_path.join(".pmp.environment.yaml");
+        let env_content = fs.get_file_contents(&env_yaml_path).unwrap();
+        assert!(
+            env_content.contains("port: 8080"),
+            "Environment YAML should have updated port"
+        );
+        assert!(
+            env_content.contains("enable_tls: false"),
+            "Environment YAML should have updated enable_tls"
+        );
+        assert!(
+            env_content.contains("environment_type: staging"),
+            "Environment YAML should have updated environment_type"
+        );
+
+        // Verify main.tf was regenerated with new values
+        let main_tf_path = env_path.join("main.tf");
+        let main_tf_content = fs.get_file_contents(&main_tf_path).unwrap();
+        assert!(
+            main_tf_content.contains("# Port: 8080"),
+            "main.tf should have updated port"
+        );
+        assert!(
+            main_tf_content.contains("# TLS: false"),
+            "main.tf should have updated TLS setting"
+        );
+        assert!(
+            main_tf_content.contains("# Environment: staging"),
+            "main.tf should have updated environment type"
+        );
+        assert!(
+            main_tf_content.contains("container_port = 8080"),
+            "main.tf should use updated port variable"
+        );
+        assert!(
+            main_tf_content.contains("type = \"ClusterIP\""),
+            "main.tf should use ClusterIP for staging (not production)"
+        );
+        assert!(
+            !main_tf_content.contains("# TLS configuration"),
+            "main.tf should not include TLS configuration when disabled"
+        );
+
+        // Verify monitoring.tf was regenerated but kept original plugin input values
+        let monitoring_tf_path = env_path.join("modules").join("opentofu-pack").join("monitoring").join("monitoring.tf");
+        let monitoring_content = fs.get_file_contents(&monitoring_tf_path).unwrap();
+        assert!(
+            monitoring_content.contains("# Scrape interval: 15s"),
+            "monitoring.tf should keep original scrape interval (15s) when only template inputs are updated"
+        );
+        assert!(
+            monitoring_content.contains("scrape_interval: 15s"),
+            "monitoring.tf should contain original interval in config"
+        );
+
+        // Verify _common.tf still exists and has correct backend config
+        let common_tf_path = env_path.join("_common.tf");
+        let common_tf_content = fs.get_file_contents(&common_tf_path).unwrap();
+        assert!(
+            common_tf_content.contains("backend \"s3\""),
+            "_common.tf should still have S3 backend after update"
+        );
+    }
+
+    #[test]
+    fn test_update_project_add_new_plugin() {
+        use crate::commands::update::UpdateCommand;
+        use crate::test_helpers::{create_opentofu_infrastructure, create_opentofu_template_pack};
+
+        // Set up mock filesystem
+        let fs = Arc::new(MockFileSystem::new());
+
+        // Create OpenTofu template pack and infrastructure
+        create_opentofu_template_pack(&fs);
+        create_opentofu_infrastructure(&fs, &["dev", "staging", "prod"]);
+
+        // === STEP 1: Create initial project ===
+        let input_create = MockUserInput::new();
+        input_create.add_response(MockResponse::Select(
+            "📁 Web Applications - Web application templates".to_string(),
+        ));
+        input_create.add_response(MockResponse::Select(
+            "📄 webapp - Web application with monitoring".to_string(),
+        ));
+        input_create.add_response(MockResponse::Select("Dev - Dev environment".to_string()));
+        input_create.add_response(MockResponse::Text("my-webapp".to_string()));
+        // Plugin inputs first (order=50)
+        input_create.add_response(MockResponse::Confirm(true)); // "Do you want to customize inputs for this plugin?"
+        input_create.add_response(MockResponse::Confirm(true)); // metrics_enabled
+        input_create.add_response(MockResponse::Text("15s".to_string())); // scrape_interval
+        // Template inputs second (order=100)
+        input_create.add_response(MockResponse::Text("awesome-app".to_string())); // app_name
+        input_create.add_response(MockResponse::Text("3000".to_string())); // port
+        input_create.add_response(MockResponse::Select("Yes".to_string())); // enable_tls (boolean = Yes/No select)
+        input_create.add_response(MockResponse::Select("Development".to_string())); // environment_type - select by LABEL
+        input_create.add_response(MockResponse::Confirm(false)); // apply
+
+        let ctx_create = create_test_context(Arc::clone(&fs), input_create);
+        CreateCommand::execute(&ctx_create, None, None, None, None, false, None, None).unwrap();
+
+        // === STEP 2: Update project - add logging plugin ===
+        let input_update = MockUserInput::new();
+        // First, select "Add Plugin" action
+        input_update.add_response(MockResponse::Select("Add Plugin".to_string()));
+
+        // Select logging plugin to add (single select, not multi-select)
+        input_update.add_response(MockResponse::Select(
+            "logging - Centralized logging".to_string(),
+        ));
+
+        // Logging plugin inputs
+        input_update.add_response(MockResponse::Text("debug".to_string())); // log_level - treated as text input
+        input_update.add_response(MockResponse::Text("90".to_string())); // retention_days
+
+        input_update.add_response(MockResponse::Confirm(false)); // apply
+
+        let ctx_update = create_test_context(Arc::clone(&fs), input_update);
+
+        // Run update command to add logging plugin
+        let current_dir = fs.current_dir().unwrap();
+        let env_path_str = current_dir.join("projects/my-webapp/environments/dev");
+        let result = UpdateCommand::execute(
+            &ctx_update,
+            Some(env_path_str.to_str().unwrap()), // absolute path to environment
+            None,                                   // template_packs_paths
+            None,                                   // inputs_str
+        );
+
+        assert!(
+            result.is_ok(),
+            "Update command should succeed when adding plugin: {:?}",
+            result
+        );
+
+        // === STEP 3: Verify new plugin was added ===
+        let current_dir = fs.current_dir().unwrap();
+        let env_path = current_dir.join("projects/my-webapp/environments/dev");
+
+        // Verify logging.tf was created
+        let logging_tf_path = env_path.join("modules").join("opentofu-pack").join("logging").join("logging.tf");
+        assert!(
+            fs.has_file(&logging_tf_path),
+            "logging.tf should be created after adding plugin"
+        );
+
+        let logging_content = fs.get_file_contents(&logging_tf_path).unwrap();
+        assert!(
+            logging_content.contains("# Log level: debug"),
+            "logging.tf should contain configured log level"
+        );
+        assert!(
+            logging_content.contains("# Retention: 90 days"),
+            "logging.tf should contain configured retention"
+        );
+        assert!(
+            logging_content.contains("log_level debug"),
+            "logging.tf should use log level in fluent config"
+        );
+        assert!(
+            logging_content.contains("resource \"kubernetes_config_map\" \"fluentd\""),
+            "logging.tf should contain fluentd config map"
+        );
+        assert!(
+            logging_content.contains("resource \"kubernetes_daemonset\" \"fluentd\""),
+            "logging.tf should contain fluentd daemonset"
+        );
+
+        // Verify environment YAML includes logging plugin inputs
+        let env_yaml_path = env_path.join(".pmp.environment.yaml");
+        let env_content = fs.get_file_contents(&env_yaml_path).unwrap();
+        assert!(
+            env_content.contains("log_level: debug"),
+            "Environment YAML should include logging plugin inputs"
+        );
+        assert!(
+            env_content.contains("retention_days: 90"),
+            "Environment YAML should include retention days"
+        );
+
+        // Verify monitoring.tf still exists (pre-installed plugin should remain)
+        let monitoring_tf_path = env_path.join("modules").join("opentofu-pack").join("monitoring").join("monitoring.tf");
+        assert!(
+            fs.has_file(&monitoring_tf_path),
+            "monitoring.tf should still exist after update"
+        );
+
+        // Verify main.tf still exists with original content
+        let main_tf_path = env_path.join("main.tf");
+        assert!(fs.has_file(&main_tf_path), "main.tf should still exist");
+
+        // Verify _common.tf still exists
+        let common_tf_path = env_path.join("_common.tf");
+        assert!(
+            fs.has_file(&common_tf_path),
+            "_common.tf should still exist"
+        );
+
+        // === STEP 4: Add another plugin (backup) ===
+        let input_update2 = MockUserInput::new();
+        // First, select "Add Plugin" action
+        input_update2.add_response(MockResponse::Select("Add Plugin".to_string()));
+
+        // Select backup plugin to add (single select, not multi-select)
+        input_update2.add_response(MockResponse::Select(
+            "backup - Automated backups".to_string(),
+        ));
+
+        // Backup plugin inputs
+        input_update2.add_response(MockResponse::Text("0 3 * * *".to_string())); // backup_schedule
+        input_update2.add_response(MockResponse::Text("14".to_string())); // backup_retention
+
+        input_update2.add_response(MockResponse::Confirm(false)); // apply
+
+        let ctx_update2 = create_test_context(Arc::clone(&fs), input_update2);
+
+        let current_dir = fs.current_dir().unwrap();
+        let env_path_str = current_dir.join("projects/my-webapp/environments/dev");
+        let result2 = UpdateCommand::execute(
+            &ctx_update2,
+            Some(env_path_str.to_str().unwrap()), // absolute path to environment
+            None,                                   // template_packs_paths
+            None,                                   // inputs_str
+        );
+
+        assert!(
+            result2.is_ok(),
+            "Update command should succeed when adding second plugin: {:?}",
+            result2
+        );
+
+        // Verify backup.tf was created
+        let backup_tf_path = env_path.join("modules").join("opentofu-pack").join("backup").join("backup.tf");
+        assert!(
+            fs.has_file(&backup_tf_path),
+            "backup.tf should be created after adding backup plugin"
+        );
+
+        let backup_content = fs.get_file_contents(&backup_tf_path).unwrap();
+        assert!(
+            backup_content.contains("# Schedule: 0 3 * * *"),
+            "backup.tf should contain configured schedule"
+        );
+        assert!(
+            backup_content.contains("# Retention: 14 backups"),
+            "backup.tf should contain configured retention"
+        );
+        assert!(
+            backup_content.contains("schedule = \"0 3 * * *\""),
+            "backup.tf should use schedule in cron job"
+        );
+        assert!(
+            backup_content.contains("value = \"14\""),
+            "backup.tf should use retention in env var"
+        );
+
+        // Verify all three plugin files now exist
+        assert!(
+            fs.has_file(&monitoring_tf_path),
+            "All plugins should coexist: monitoring.tf"
+        );
+        assert!(
+            fs.has_file(&logging_tf_path),
+            "All plugins should coexist: logging.tf"
+        );
+        assert!(
+            fs.has_file(&backup_tf_path),
+            "All plugins should coexist: backup.tf"
+        );
+    }
+
+    // ============================================================================
+    // New Input Types Tests
+    // ============================================================================
+
+    #[test]
+    fn test_yaml_deserialization_duration() {
+        // Test that Duration type can be deserialized from YAML
+        let yaml = r##"
+name: test_duration
+type: duration
+description: Test duration
+min_seconds: 60
+max_seconds: 86400
+default: "1h"
+"##;
+
+        let result: Result<crate::template::metadata::InputDefinition, _> = serde_yaml::from_str(yaml);
+        assert!(result.is_ok(), "Failed to deserialize duration input: {:?}", result);
+
+        let input_def = result.unwrap();
+        assert_eq!(input_def.name, "test_duration");
+        assert!(input_def.input_type.is_some(), "Input type should be Some");
+
+        match input_def.input_type.unwrap() {
+            crate::template::metadata::InputType::Duration { min_seconds, max_seconds } => {
+                assert_eq!(min_seconds, Some(60));
+                assert_eq!(max_seconds, Some(86400));
+            }
+            other => panic!("Expected Duration, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_input_type_object() {
+        // Set up mock filesystem
+        let fs = Arc::new(MockFileSystem::new());
+
+        // Set up template pack with Object input type
+        let current_dir = std::env::current_dir().unwrap();
+        let pack_path = current_dir.join(".pmp/template-packs/test-pack");
+
+        let pack_yaml = r#"apiVersion: pmp.io/v1
+kind: TemplatePack
+metadata:
+  name: test-pack
+spec: {}"#;
+        fs.write(&pack_path.join(".pmp.template-pack.yaml"), pack_yaml)
+            .unwrap();
+
+        let template_dir = pack_path.join("templates/test-template");
+        let template_yaml = r#"apiVersion: pmp.io/v1
+kind: Template
+metadata:
+  name: test-template
+  description: Test template
+spec:
+  apiVersion: pmp.io/v1
+  kind: TestResource
+  executor: opentofu
+  inputs:
+    - name: database_config
+      type: object
+      description: Database configuration
+      fields:
+        - name: host
+          type: string
+          description: Database host
+          default: "localhost"
+        - name: port
+          type: number
+          description: Database port
+          default: 5432
+        - name: ssl_enabled
+          type: boolean
+          description: Enable SSL
+          default: true"#;
+        fs.write(&template_dir.join(".pmp.template.yaml"), template_yaml)
+            .unwrap();
+
+        let template_content = r#"# Database Configuration
+# Host: {{database_config.host}}
+# Port: {{database_config.port}}
+# SSL: {{database_config.ssl_enabled}}
+
+resource "database" "main" {
+  host        = "{{database_config.host}}"
+  port        = {{database_config.port}}
+  ssl_enabled = {{bool database_config.ssl_enabled}}
+}"#;
+        fs.write(&template_dir.join("src/main.tf.hbs"), template_content)
+            .unwrap();
+
+        setup_infrastructure(
+            &fs,
+            r#"    - apiVersion: pmp.io/v1
+      kind: TestResource"#,
+        );
+
+        // Set up mock user input
+        let input = MockUserInput::new();
+        input.add_response(MockResponse::Select(
+            "📁 TestResource (pmp.io/v1) - Test resource type".to_string(),
+        ));
+        input.add_response(MockResponse::Select(
+            "📄 test-template - Test template".to_string(),
+        ));
+        input.add_response(MockResponse::Text("test-project".to_string()));
+
+        // Object field inputs
+        input.add_response(MockResponse::Text("db.example.com".to_string())); // host
+        input.add_response(MockResponse::Text("5432".to_string())); // port
+        input.add_response(MockResponse::Select("Yes".to_string())); // ssl_enabled
+
+        input.add_response(MockResponse::Confirm(false)); // apply after create
+
+        let ctx = create_test_context(Arc::clone(&fs), input);
+
+        // Run create command
+        let result = CreateCommand::execute(
+            &ctx, None, None, None, None, false, None, None,
+        );
+
+        assert!(
+            result.is_ok(),
+            "Create command should succeed: {:?}",
+            result
+        );
+
+        // Verify rendered template
+        let main_tf_path =
+            current_dir.join("projects/test-project/environments/dev/main.tf");
+        assert!(
+            fs.has_file(&main_tf_path),
+            "main.tf should be created"
+        );
+
+        let main_tf_content = fs.get_file_contents(&main_tf_path).unwrap();
+        assert!(
+            main_tf_content.contains("# Host: db.example.com"),
+            "Template should render object field: host"
+        );
+        assert!(
+            main_tf_content.contains("# Port: 5432"),
+            "Template should render object field: port"
+        );
+        assert!(
+            main_tf_content.contains("# SSL: true"),
+            "Template should render object field: ssl_enabled"
+        );
+        assert!(
+            main_tf_content.contains("host        = \"db.example.com\""),
+            "Template should use object field in resource"
+        );
+        assert!(
+            main_tf_content.contains("port        = 5432"),
+            "Template should use numeric object field"
+        );
+        assert!(
+            main_tf_content.contains("ssl_enabled = true"),
+            "Template should use boolean object field"
+        );
+    }
+
+    #[test]
+    fn test_input_type_repeatable_object() {
+        // Set up mock filesystem
+        let fs = Arc::new(MockFileSystem::new());
+
+        let current_dir = std::env::current_dir().unwrap();
+        let pack_path = current_dir.join(".pmp/template-packs/test-pack");
+
+        let pack_yaml = r#"apiVersion: pmp.io/v1
+kind: TemplatePack
+metadata:
+  name: test-pack
+spec: {}"#;
+        fs.write(&pack_path.join(".pmp.template-pack.yaml"), pack_yaml)
+            .unwrap();
+
+        let template_dir = pack_path.join("templates/test-template");
+        let template_yaml = r#"apiVersion: pmp.io/v1
+kind: Template
+metadata:
+  name: test-template
+  description: Test template
+spec:
+  apiVersion: pmp.io/v1
+  kind: TestResource
+  executor: opentofu
+  inputs:
+    - name: team_members
+      type: repeatable_object
+      description: Team members with roles
+      min: 0
+      max: 50
+      add_another_prompt: "Add another team member?"
+      fields:
+        - name: username
+          type: string
+          description: Username
+        - name: role
+          type: select
+          description: Role
+          options:
+            - label: "Member"
+              value: "member"
+            - label: "Maintainer"
+              value: "maintainer"
+          default: "member""#;
+        fs.write(&template_dir.join(".pmp.template.yaml"), template_yaml)
+            .unwrap();
+
+        let template_content = r#"# Team Members
+{{#each team_members}}
+resource "team_membership" "member_{{@index}}" {
+  username = "{{username}}"
+  role     = "{{role}}"
+}
+{{/each}}"#;
+        fs.write(&template_dir.join("src/main.tf.hbs"), template_content)
+            .unwrap();
+
+        setup_infrastructure(
+            &fs,
+            r#"    - apiVersion: pmp.io/v1
+      kind: TestResource"#,
+        );
+
+        // Set up mock user input
+        let input = MockUserInput::new();
+        input.add_response(MockResponse::Select(
+            "📁 TestResource (pmp.io/v1) - Test resource type".to_string(),
+        ));
+        input.add_response(MockResponse::Select(
+            "📄 test-template - Test template".to_string(),
+        ));
+        input.add_response(MockResponse::Text("test-project".to_string()));
+
+        // First team member
+        input.add_response(MockResponse::Confirm(true)); // Add another?
+        input.add_response(MockResponse::Text("alice".to_string())); // username
+        input.add_response(MockResponse::Select("Maintainer".to_string())); // role
+
+        // Second team member
+        input.add_response(MockResponse::Confirm(true)); // Add another?
+        input.add_response(MockResponse::Text("bob".to_string())); // username
+        input.add_response(MockResponse::Select("Member".to_string())); // role
+
+        // Third team member
+        input.add_response(MockResponse::Confirm(true)); // Add another?
+        input.add_response(MockResponse::Text("charlie".to_string())); // username
+        input.add_response(MockResponse::Select("Member".to_string())); // role
+
+        // Stop adding members
+        input.add_response(MockResponse::Confirm(false)); // No more
+
+        input.add_response(MockResponse::Confirm(false)); // apply after create
+
+        let ctx = create_test_context(Arc::clone(&fs), input);
+
+        // Run create command
+        let result = CreateCommand::execute(
+            &ctx, None, None, None, None, false, None, None,
+        );
+
+        assert!(
+            result.is_ok(),
+            "Create command should succeed: {:?}",
+            result
+        );
+
+        // Verify rendered template
+        let main_tf_path =
+            current_dir.join("projects/test-project/environments/dev/main.tf");
+        assert!(
+            fs.has_file(&main_tf_path),
+            "main.tf should be created"
+        );
+
+        let main_tf_content = fs.get_file_contents(&main_tf_path).unwrap();
+
+        // Verify all three team members are rendered
+        assert!(
+            main_tf_content.contains("resource \"team_membership\" \"member_0\""),
+            "Template should render first member"
+        );
+        assert!(
+            main_tf_content.contains("username = \"alice\""),
+            "Template should render alice"
+        );
+        assert!(
+            main_tf_content.contains("role     = \"maintainer\""),
+            "Template should render maintainer role"
+        );
+
+        assert!(
+            main_tf_content.contains("resource \"team_membership\" \"member_1\""),
+            "Template should render second member"
+        );
+        assert!(
+            main_tf_content.contains("username = \"bob\""),
+            "Template should render bob"
+        );
+
+        assert!(
+            main_tf_content.contains("resource \"team_membership\" \"member_2\""),
+            "Template should render third member"
+        );
+        assert!(
+            main_tf_content.contains("username = \"charlie\""),
+            "Template should render charlie"
+        );
+
+        // Count member blocks
+        let member_count = main_tf_content.matches("resource \"team_membership\"").count();
+        assert_eq!(
+            member_count, 3,
+            "Should have exactly 3 team members"
+        );
+    }
+
+    #[test]
+    fn test_input_type_color() {
+        // Set up mock filesystem
+        let fs = Arc::new(MockFileSystem::new());
+
+        setup_template_pack(
+            &fs,
+            "test-pack",
+            "test-template",
+            "TestResource",
+            r##"    brand_color:
+      type: color
+      description: Brand color
+      allow_alpha: true
+      default: "#3B82F6""##,
+        );
+
+        // Add template file
+        let current_dir = std::env::current_dir().unwrap();
+        let template_content = r#"# Brand Color: {{brand_color}}
+
+resource "theme" "main" {
+  primary_color = "{{brand_color}}"
+}"#;
+        fs.write(
+            &current_dir.join(".pmp/template-packs/test-pack/templates/test-template/src/main.tf.hbs"),
+            template_content,
+        )
+        .unwrap();
+
+        setup_infrastructure(
+            &fs,
+            r#"    - apiVersion: pmp.io/v1
+      kind: TestResource"#,
+        );
+
+        let input = MockUserInput::new();
+        input.add_response(MockResponse::Select(
+            "📁 TestResource (pmp.io/v1) - Test resource type".to_string(),
+        ));
+        input.add_response(MockResponse::Select(
+            "📄 test-template - Test template".to_string(),
+        ));
+        input.add_response(MockResponse::Text("test-project".to_string()));
+        input.add_response(MockResponse::Text("#FF5733".to_string())); // brand_color
+        input.add_response(MockResponse::Confirm(false));
+
+        let ctx = create_test_context(Arc::clone(&fs), input);
+
+        let result = CreateCommand::execute(
+            &ctx, None, None, None, None, false, None, None,
+        );
+
+        assert!(result.is_ok(), "Create should succeed: {:?}", result);
+
+        let main_tf_path =
+            current_dir.join("projects/test-project/environments/dev/main.tf");
+        let main_tf_content = fs.get_file_contents(&main_tf_path).unwrap();
+
+        assert!(
+            main_tf_content.contains("# Brand Color: #FF5733"),
+            "Template should render color value"
+        );
+        assert!(
+            main_tf_content.contains("primary_color = \"#FF5733\""),
+            "Template should use color in resource"
+        );
+    }
+
+    #[test]
+    fn test_input_type_duration() {
+        let fs = Arc::new(MockFileSystem::new());
+
+        setup_template_pack(
+            &fs,
+            "test-pack",
+            "test-template",
+            "TestResource",
+            r##"    cache_ttl:
+      type: duration
+      description: Cache TTL
+      min_seconds: 60
+      max_seconds: 86400
+      default: "1h""##,
+        );
+
+        let current_dir = std::env::current_dir().unwrap();
+        let template_content = r#"# Cache TTL: {{cache_ttl}} seconds
+
+resource "cache" "main" {
+  ttl_seconds = {{cache_ttl}}
+}"#;
+        fs.write(
+            &current_dir.join(".pmp/template-packs/test-pack/templates/test-template/src/main.tf.hbs"),
+            template_content,
+        )
+        .unwrap();
+
+        setup_infrastructure(&fs, r#"    - apiVersion: pmp.io/v1
+      kind: TestResource"#);
+
+        let input = MockUserInput::new();
+        input.add_response(MockResponse::Select(
+            "📁 TestResource (pmp.io/v1) - Test resource type".to_string(),
+        ));
+        input.add_response(MockResponse::Select(
+            "📄 test-template - Test template".to_string(),
+        ));
+        input.add_response(MockResponse::Text("test-project".to_string()));
+        input.add_response(MockResponse::Text("2h30m".to_string())); // cache_ttl = 9000 seconds
+        input.add_response(MockResponse::Confirm(false));
+
+        let ctx = create_test_context(Arc::clone(&fs), input);
+        let result = CreateCommand::execute(&ctx, None, None, None, None, false, None, None);
+
+        assert!(result.is_ok(), "Create should succeed: {:?}", result);
+
+        // Check environment file first
+        let env_yaml_path = current_dir.join("projects/test-project/environments/dev/.pmp.environment.yaml");
+        let env_content = fs.get_file_contents(&env_yaml_path).unwrap();
+        assert!(
+            env_content.contains("cache_ttl: 9000"),
+            "Environment file should contain parsed duration in seconds. Actual:\n{}",
+            env_content
+        );
+
+        let main_tf_path = current_dir.join("projects/test-project/environments/dev/main.tf");
+        let main_tf_content = fs.get_file_contents(&main_tf_path).unwrap();
+
+        assert!(
+            main_tf_content.contains("# Cache TTL: 9000 seconds"),
+            "Template should render duration as seconds. Actual content:\n{}",
+            main_tf_content
+        );
+        assert!(
+            main_tf_content.contains("ttl_seconds = 9000"),
+            "Template should use duration value. Actual content:\n{}",
+            main_tf_content
+        );
+    }
+
+    #[test]
+    fn test_input_type_cron() {
+        let fs = Arc::new(MockFileSystem::new());
+
+        setup_template_pack(
+            &fs,
+            "test-pack",
+            "test-template",
+            "TestResource",
+            r##"    backup_schedule:
+      type: cron
+      description: Backup schedule
+      default: "0 2 * * *""##,
+        );
+
+        let current_dir = std::env::current_dir().unwrap();
+        let template_content = r#"# Backup Schedule: {{backup_schedule}}
+
+resource "backup" "main" {
+  schedule = "{{backup_schedule}}"
+}"#;
+        fs.write(
+            &current_dir.join(".pmp/template-packs/test-pack/templates/test-template/src/main.tf.hbs"),
+            template_content,
+        )
+        .unwrap();
+
+        setup_infrastructure(&fs, r#"    - apiVersion: pmp.io/v1
+      kind: TestResource"#);
+
+        let input = MockUserInput::new();
+        input.add_response(MockResponse::Select(
+            "📁 TestResource (pmp.io/v1) - Test resource type".to_string(),
+        ));
+        input.add_response(MockResponse::Select(
+            "📄 test-template - Test template".to_string(),
+        ));
+        input.add_response(MockResponse::Text("test-project".to_string()));
+        input.add_response(MockResponse::Text("0 3 * * *".to_string())); // backup_schedule
+        input.add_response(MockResponse::Confirm(false));
+
+        let ctx = create_test_context(Arc::clone(&fs), input);
+        let result = CreateCommand::execute(&ctx, None, None, None, None, false, None, None);
+
+        assert!(result.is_ok(), "Create should succeed: {:?}", result);
+
+        let main_tf_path = current_dir.join("projects/test-project/environments/dev/main.tf");
+        let main_tf_content = fs.get_file_contents(&main_tf_path).unwrap();
+
+        assert!(
+            main_tf_content.contains("# Backup Schedule: 0 3 * * *"),
+            "Template should render cron expression"
+        );
+        assert!(
+            main_tf_content.contains("schedule = \"0 3 * * *\""),
+            "Template should use cron expression"
+        );
+    }
+
+    #[test]
+    fn test_input_type_keyvalue() {
+        let fs = Arc::new(MockFileSystem::new());
+
+        setup_template_pack(
+            &fs,
+            "test-pack",
+            "test-template",
+            "TestResource",
+            r##"    labels:
+      type: keyvalue
+      description: Resource labels
+      key_value_separator: "="
+      pair_separator: ","
+      min: 0
+      max: 20
+      default: """##,
+        );
+
+        let current_dir = std::env::current_dir().unwrap();
+        let template_content = r#"# Labels
+{{#each labels}}
+# - {{@key}}: {{this}}
+{{/each}}
+
+resource "app" "main" {
+  labels = {
+{{#each labels}}
+    {{@key}} = "{{this}}"
+{{/each}}
+  }
+}"#;
+        fs.write(
+            &current_dir.join(".pmp/template-packs/test-pack/templates/test-template/src/main.tf.hbs"),
+            template_content,
+        )
+        .unwrap();
+
+        setup_infrastructure(&fs, r#"    - apiVersion: pmp.io/v1
+      kind: TestResource"#);
+
+        let input = MockUserInput::new();
+        input.add_response(MockResponse::Select(
+            "📁 TestResource (pmp.io/v1) - Test resource type".to_string(),
+        ));
+        input.add_response(MockResponse::Select(
+            "📄 test-template - Test template".to_string(),
+        ));
+        input.add_response(MockResponse::Text("test-project".to_string()));
+        input.add_response(MockResponse::Text("env=prod,team=platform,version=1.0".to_string())); // labels
+        input.add_response(MockResponse::Confirm(false));
+
+        let ctx = create_test_context(Arc::clone(&fs), input);
+        let result = CreateCommand::execute(&ctx, None, None, None, None, false, None, None);
+
+        assert!(result.is_ok(), "Create should succeed: {:?}", result);
+
+        let main_tf_path = current_dir.join("projects/test-project/environments/dev/main.tf");
+        let main_tf_content = fs.get_file_contents(&main_tf_path).unwrap();
+
+        assert!(
+            main_tf_content.contains("# - env: prod"),
+            "Template should render label: env"
+        );
+        assert!(
+            main_tf_content.contains("# - team: platform"),
+            "Template should render label: team"
+        );
+        assert!(
+            main_tf_content.contains("# - version: 1.0"),
+            "Template should render label: version"
+        );
+        assert!(
+            main_tf_content.contains("env = \"prod\""),
+            "Template should use label in resource"
+        );
+        assert!(
+            main_tf_content.contains("team = \"platform\""),
+            "Template should use team label"
+        );
+    }
+
+    #[test]
+    fn test_input_type_semver() {
+        let fs = Arc::new(MockFileSystem::new());
+
+        setup_template_pack(
+            &fs,
+            "test-pack",
+            "test-template",
+            "TestResource",
+            r##"    app_version:
+      type: semver
+      description: Application version
+      allow_prerelease: true
+      allow_build: true
+      default: "1.0.0""##,
+        );
+
+        let current_dir = std::env::current_dir().unwrap();
+        let template_content = r#"# Application Version: {{app_version}}
+
+resource "deployment" "main" {
+  version = "{{app_version}}"
+}"#;
+        fs.write(
+            &current_dir.join(".pmp/template-packs/test-pack/templates/test-template/src/main.tf.hbs"),
+            template_content,
+        )
+        .unwrap();
+
+        setup_infrastructure(&fs, r#"    - apiVersion: pmp.io/v1
+      kind: TestResource"#);
+
+        let input = MockUserInput::new();
+        input.add_response(MockResponse::Select(
+            "📁 TestResource (pmp.io/v1) - Test resource type".to_string(),
+        ));
+        input.add_response(MockResponse::Select(
+            "📄 test-template - Test template".to_string(),
+        ));
+        input.add_response(MockResponse::Text("test-project".to_string()));
+        input.add_response(MockResponse::Text("2.1.3-beta.1+20230615".to_string())); // app_version
+        input.add_response(MockResponse::Confirm(false));
+
+        let ctx = create_test_context(Arc::clone(&fs), input);
+        let result = CreateCommand::execute(&ctx, None, None, None, None, false, None, None);
+
+        assert!(result.is_ok(), "Create should succeed: {:?}", result);
+
+        let main_tf_path = current_dir.join("projects/test-project/environments/dev/main.tf");
+        let main_tf_content = fs.get_file_contents(&main_tf_path).unwrap();
+
+        assert!(
+            main_tf_content.contains("# Application Version: 2.1.3-beta.1+20230615"),
+            "Template should render semver with prerelease and build"
+        );
+        assert!(
+            main_tf_content.contains("version = \"2.1.3-beta.1+20230615\""),
+            "Template should use semver in resource"
+        );
+    }
+
+    // =====================================================================
+    // COMPREHENSIVE INTEGRATION TESTS
+    // Testing full project lifecycle with templates, plugins, and updates
+    // =====================================================================
+
+    #[test]
+    #[ignore] // TODO: Template pack discovery needs refinement for custom test packs
+    fn test_create_project_with_installed_plugin_team_members() {
+        let fs = Arc::new(MockFileSystem::new());
+        let current_dir = std::env::current_dir().unwrap();
+
+        // Use standard template pack setup with a plugin reference
+        let pack_path = current_dir.join(".pmp/template-packs/test-pack");
+
+        // Create template pack file
+        fs.write(
+            &pack_path.join(".pmp.template-pack.yaml"),
+            r#"apiVersion: pmp.io/v1
+kind: TemplatePack
+metadata:
+  name: test-pack
+  description: Test template pack
+spec: {}"#,
+        )
+        .unwrap();
+
+        // Create template with installed plugin
+        let template_dir = pack_path.join("templates/test-template");
+        fs.write(
+            &template_dir.join(".pmp.template.yaml"),
+            r#"apiVersion: pmp.io/v1
+kind: Template
+metadata:
+  name: test-template
+  description: Test template
+spec:
+  apiVersion: pmp.io/v1
+  kind: TestResource
+  executor:
+    name: opentofu
+
+  inputs:
+    - name: app_name
+      type: string
+      description: Application name
+      default: "myapp"
+
+  plugins:
+    installed:
+      - name: team
+        template_pack: test-pack
+        plugin: team"#,
+        )
+        .unwrap();
+
+        fs.write(
+            &template_dir.join("src/main.tf.hbs"),
+            r#"resource "app" "main" {
+  name = "{{app_name}}"
+}"#,
+        )
+        .unwrap();
+
+        // Create team plugin with repeatable_object input
+        let plugin_dir = pack_path.join("plugins/team");
+        fs.write(
+            &plugin_dir.join(".pmp.plugin.yaml"),
+            r#"apiVersion: pmp.io/v1
+kind: Plugin
+metadata:
+  name: team
+  description: Team management
+spec:
+  role: access-management
+
+  inputs:
+    - name: team_name
+      type: string
+      description: Team name
+      default: "my-team"
+
+    - name: team_members
+      type: repeatable_object
+      description: Team members
+      min: 0
+      max: 10
+      add_another_prompt: "Add another member?"
+      fields:
+        - name: username
+          type: string
+          description: Username
+        - name: role
+          type: select
+          description: Member role
+          options:
+            - label: "Member"
+              value: "member"
+            - label: "Maintainer"
+              value: "maintainer"
+          default: "member""#,
+        )
+        .unwrap();
+
+        fs.write(
+            &plugin_dir.join("src/plugin.tf.hbs"),
+            r#"resource "team" "main" {
+  name = "{{team_name}}"
+}
+
+{{#each team_members}}
+resource "team_membership" "member_{{@index}}" {
+  team_id  = team.main.id
+  username = "{{username}}"
+  role     = "{{role}}"
+}
+{{/each}}"#,
+        )
+        .unwrap();
+
+        // Setup infrastructure
+        setup_infrastructure(&fs, r#"    - apiVersion: pmp.io/v1
+      kind: TestResource"#);
+
+        let input = MockUserInput::new();
+        input.add_response(MockResponse::Select(
+            "📁 TestResource (pmp.io/v1) - Test resource type".to_string(),
+        ));
+        input.add_response(MockResponse::Select(
+            "📄 test-template - Test template".to_string(),
+        ));
+        input.add_response(MockResponse::Text("plugin-test-project".to_string()));
+        input.add_response(MockResponse::Text("awesome-app".to_string())); // app_name
+
+        // Plugin: team_name
+        input.add_response(MockResponse::Text("platform-team".to_string()));
+
+        // Plugin: team_members (add 3 members)
+        input.add_response(MockResponse::Confirm(true)); // Add first member
+        input.add_response(MockResponse::Text("alice".to_string())); // username
+        input.add_response(MockResponse::Select("Maintainer".to_string())); // role
+
+        input.add_response(MockResponse::Confirm(true)); // Add second member
+        input.add_response(MockResponse::Text("bob".to_string()));
+        input.add_response(MockResponse::Select("Member".to_string()));
+
+        input.add_response(MockResponse::Confirm(true)); // Add third member
+        input.add_response(MockResponse::Text("charlie".to_string()));
+        input.add_response(MockResponse::Select("Member".to_string()));
+
+        input.add_response(MockResponse::Confirm(false)); // No more members
+
+        input.add_response(MockResponse::Confirm(false)); // No more environments
+
+        let ctx = create_test_context(Arc::clone(&fs), input);
+        let result = CreateCommand::execute(&ctx, None, None, None, None, false, None, None);
+
+        assert!(result.is_ok(), "Project creation should succeed: {:?}", result);
+
+        // Verify main template file
+        let main_tf_path = current_dir.join("projects/plugin-test-project/environments/dev/main.tf");
+        let main_tf_content = fs.get_file_contents(&main_tf_path).unwrap();
+        assert!(
+            main_tf_content.contains("name = \"awesome-app\""),
+            "Main template should have app name"
+        );
+
+        // Verify plugin file exists and has correct content
+        let plugin_tf_path = current_dir.join("projects/plugin-test-project/environments/dev/plugin_team.tf");
+        let plugin_tf_content = fs.get_file_contents(&plugin_tf_path).unwrap();
+
+        assert!(
+            plugin_tf_content.contains("name = \"platform-team\""),
+            "Plugin should have team name"
+        );
+        assert!(
+            plugin_tf_content.contains("username = \"alice\""),
+            "Plugin should have alice as member"
+        );
+        assert!(
+            plugin_tf_content.contains("role     = \"maintainer\""),
+            "Alice should be maintainer"
+        );
+        assert!(
+            plugin_tf_content.contains("username = \"bob\""),
+            "Plugin should have bob as member"
+        );
+        assert!(
+            plugin_tf_content.contains("username = \"charlie\""),
+            "Plugin should have charlie as member"
+        );
+        assert_eq!(
+            plugin_tf_content.matches("team_membership").count(),
+            3,
+            "Should have exactly 3 team memberships"
+        );
+
+        // Verify environment file has plugin inputs stored
+        let env_yaml_path = current_dir.join("projects/plugin-test-project/environments/dev/.pmp.environment.yaml");
+        let env_content = fs.get_file_contents(&env_yaml_path).unwrap();
+        assert!(
+            env_content.contains("team_name: platform-team"),
+            "Environment should store team_name"
+        );
+        assert!(
+            env_content.contains("username: alice"),
+            "Environment should store alice in team_members"
+        );
+    }
+
+    #[test]
+    fn test_create_project_with_backend_configuration() {
+        let fs = Arc::new(MockFileSystem::new());
+        let current_dir = std::env::current_dir().unwrap();
+
+        setup_template_pack(
+            &fs,
+            "test-pack",
+            "test-template",
+            "TestResource",
+            r#"    app_name:
+      type: string
+      description: Application name
+      default: "myapp""#,
+        );
+
+        fs.write(
+            &current_dir.join(".pmp/template-packs/test-pack/templates/test-template/src/main.tf.hbs"),
+            r#"resource "app" "main" {
+  name = "{{app_name}}"
+}"#,
+        )
+        .unwrap();
+
+        // Setup infrastructure with backend configuration
+        let infra_yaml = format!(
+            r#"apiVersion: pmp.io/v1
+kind: Infrastructure
+metadata:
+  name: Test Infrastructure
+  description: Test infrastructure
+spec:
+  executor:
+    name: opentofu
+    config:
+      backend:
+        type: s3
+        bucket: my-terraform-state
+        region: us-west-2
+        key_prefix: projects
+
+  categories:
+    - id: pmp_io_v1_testresource
+      name: TestResource
+      templates:
+        - template_pack: test-pack
+          template: test-template
+  template_packs:
+
+  environments:
+    dev:
+      name: Development
+      description: Development environment"#
+        );
+
+        fs.write(
+            &current_dir.join(".pmp.infrastructure.yaml"),
+            &infra_yaml,
+        )
+        .unwrap();
+
+        let input = MockUserInput::new();
+        input.add_response(MockResponse::Select(
+            "📁 TestResource".to_string(),
+        ));
+        input.add_response(MockResponse::Select(
+            "📄 test-template - Test template".to_string(),
+        ));
+        input.add_response(MockResponse::Text("backend-test-project".to_string()));
+        input.add_response(MockResponse::Text("coolapp".to_string())); // app_name
+        input.add_response(MockResponse::Confirm(false));
+
+        let ctx = create_test_context(Arc::clone(&fs), input);
+        let result = CreateCommand::execute(&ctx, None, None, None, None, false, None, None);
+
+        assert!(result.is_ok(), "Project creation should succeed: {:?}", result);
+
+        // Verify _common.tf exists with backend configuration
+        let common_tf_path = current_dir.join("projects/backend-test-project/environments/dev/_common.tf");
+        assert!(
+            fs.exists(&common_tf_path),
+            "_common.tf should be generated with backend config"
+        );
+
+        let common_tf_content = fs.get_file_contents(&common_tf_path).unwrap();
+        assert!(
+            common_tf_content.contains("backend \"s3\""),
+            "Should have s3 backend configuration"
+        );
+        assert!(
+            common_tf_content.contains("bucket = \"my-terraform-state\""),
+            "Should have correct bucket name"
+        );
+        assert!(
+            common_tf_content.contains("region = \"us-west-2\""),
+            "Should have correct region"
+        );
+        // S3 backend uses key_prefix which gets combined with project/environment at runtime
+        assert!(
+            common_tf_content.contains("key_prefix = \"projects\""),
+            "Should have correct key_prefix for state files"
+        );
+    }
+
+    #[test]
+    fn test_create_project_with_multiple_input_types() {
+        let fs = Arc::new(MockFileSystem::new());
+        let current_dir = std::env::current_dir().unwrap();
+
+        // Create a comprehensive template with various input types
+        let template_yaml = r##"apiVersion: pmp.io/v1
+kind: Template
+metadata:
+  name: comprehensive
+  description: Template with all input types
+spec:
+  apiVersion: pmp.io/v1
+  kind: TestResource
+  executor:
+    name: opentofu
+
+  inputs:
+    - name: app_name
+      type: string
+      description: Application name
+      default: "myapp"
+
+    - name: replicas
+      type: number
+      description: Number of replicas
+      default: 3
+      min: 1
+      max: 10
+
+    - name: enable_monitoring
+      type: boolean
+      description: Enable monitoring
+      default: true
+
+    - name: environment_type
+      type: select
+      description: Environment type
+      options:
+        - label: "Development"
+          value: "dev"
+        - label: "Production"
+          value: "prod"
+      default: "dev"
+
+    - name: theme_color
+      type: color
+      description: Theme color
+      default: "#3B82F6"
+
+    - name: cache_ttl
+      type: duration
+      description: Cache TTL
+      default: "1h"
+
+    - name: backup_schedule
+      type: cron
+      description: Backup schedule
+      default: "0 2 * * *"
+
+    - name: labels
+      type: keyvalue
+      description: Resource labels
+      default: "env=dev,team=platform"
+
+    - name: app_version
+      type: semver
+      description: App version
+      default: "1.0.0"
+
+    - name: database
+      type: object
+      description: Database configuration
+      fields:
+        - name: host
+          type: string
+          default: "localhost"
+        - name: port
+          type: number
+          default: 5432
+        - name: ssl_enabled
+          type: boolean
+          default: true"##;
+
+        fs.write(
+            &current_dir.join(".pmp/template-packs/test-pack/.pmp.template-pack.yaml"),
+            r#"apiVersion: pmp.io/v1
+kind: TemplatePack
+metadata:
+  name: test-pack
+spec: {}"#,
+        )
+        .unwrap();
+
+        fs.write(
+            &current_dir.join(".pmp/template-packs/test-pack/templates/comprehensive/.pmp.template.yaml"),
+            template_yaml,
+        )
+        .unwrap();
+
+        let template_content = r#"# Application: {{app_name}}
+# Replicas: {{replicas}}
+# Monitoring: {{bool enable_monitoring}}
+# Environment: {{environment_type}}
+# Color: {{theme_color}}
+# Cache TTL: {{cache_ttl}} seconds
+# Backup: {{backup_schedule}}
+# Version: {{app_version}}
+
+resource "app" "main" {
+  name     = "{{app_name}}"
+  replicas = {{replicas}}
+  monitoring_enabled = {{bool enable_monitoring}}
+  environment = "{{environment_type}}"
+  theme_color = "{{theme_color}}"
+  cache_ttl_seconds = {{cache_ttl}}
+  backup_cron = "{{backup_schedule}}"
+  version = "{{app_version}}"
+
+  {{#each labels}}
+  label_{{@key}} = "{{this}}"
+  {{/each}}
+
+  database {
+    host = "{{database.host}}"
+    port = {{database.port}}
+    ssl_enabled = {{bool database.ssl_enabled}}
+  }
+}"#;
+
+        fs.write(
+            &current_dir.join(".pmp/template-packs/test-pack/templates/comprehensive/src/main.tf.hbs"),
+            template_content,
+        )
+        .unwrap();
+
+        // Setup infrastructure for comprehensive template
+        setup_infrastructure_with_categories(
+            &fs,
+            r#"    - id: pmp_io_v1_testresource
+      name: TestResource (pmp.io/v1)
+      description: Test resource type
+      templates:
+        - template_pack: test-pack
+          template: comprehensive"#,
+            "",
+        );
+
+        let input = MockUserInput::new();
+        input.add_response(MockResponse::Select(
+            "📁 TestResource (pmp.io/v1) - Test resource type".to_string(),
+        ));
+        input.add_response(MockResponse::Select(
+            "📄 comprehensive - Template with all input types".to_string(),
+        ));
+        input.add_response(MockResponse::Text("comprehensive-project".to_string()));
+
+        // Inputs in order
+        input.add_response(MockResponse::Text("awesome-app".to_string())); // app_name
+        input.add_response(MockResponse::Text("5".to_string())); // replicas
+        input.add_response(MockResponse::Select("Yes".to_string())); // enable_monitoring
+        input.add_response(MockResponse::Select("Production".to_string())); // environment_type
+        input.add_response(MockResponse::Text("#FF5733".to_string())); // theme_color
+        input.add_response(MockResponse::Text("2h30m".to_string())); // cache_ttl = 9000
+        input.add_response(MockResponse::Text("0 3 * * *".to_string())); // backup_schedule
+        input.add_response(MockResponse::Text("env=prod,team=backend".to_string())); // labels
+        input.add_response(MockResponse::Text("2.5.1".to_string())); // app_version
+
+        // Object: database
+        input.add_response(MockResponse::Text("db.example.com".to_string())); // database.host
+        input.add_response(MockResponse::Text("5432".to_string())); // database.port
+        input.add_response(MockResponse::Select("Yes".to_string())); // database.ssl_enabled
+
+        input.add_response(MockResponse::Confirm(false)); // No more environments
+
+        let ctx = create_test_context(Arc::clone(&fs), input);
+        let result = CreateCommand::execute(&ctx, None, None, None, None, false, None, None);
+
+        assert!(result.is_ok(), "Project creation should succeed: {:?}", result);
+
+        let main_tf_path = current_dir.join("projects/comprehensive-project/environments/dev/main.tf");
+        let main_tf_content = fs.get_file_contents(&main_tf_path).unwrap();
+
+        // Verify all input types rendered correctly
+        assert!(main_tf_content.contains("name     = \"awesome-app\""), "String input");
+        assert!(main_tf_content.contains("replicas = 5"), "Number input");
+        assert!(main_tf_content.contains("monitoring_enabled = true"), "Boolean input");
+        assert!(main_tf_content.contains("environment = \"prod\""), "Select input");
+        assert!(main_tf_content.contains("theme_color = \"#FF5733\""), "Color input");
+        assert!(main_tf_content.contains("cache_ttl_seconds = 9000"), "Duration input (parsed)");
+        assert!(main_tf_content.contains("backup_cron = \"0 3 * * *\""), "Cron input");
+        assert!(main_tf_content.contains("version = \"2.5.1\""), "Semver input");
+        assert!(main_tf_content.contains("label_env = \"prod\""), "KeyValue input");
+        assert!(main_tf_content.contains("label_team = \"backend\""), "KeyValue input");
+        assert!(main_tf_content.contains("host = \"db.example.com\""), "Object input");
+        assert!(main_tf_content.contains("port = 5432"), "Object input");
+        assert!(main_tf_content.contains("ssl_enabled = true"), "Object input");
+    }
+
+    #[test]
+    #[ignore] // TODO: Mock executor needs to be used to avoid running real tofu commands
+    fn test_create_project_multiple_environments() {
+        let fs = Arc::new(MockFileSystem::new());
+        let current_dir = std::env::current_dir().unwrap();
+
+        setup_template_pack(
+            &fs,
+            "test-pack",
+            "test-template",
+            "TestResource",
+            r#"    app_name:
+      type: string
+      description: Application name
+      default: "myapp""#,
+        );
+
+        fs.write(
+            &current_dir.join(".pmp/template-packs/test-pack/templates/test-template/src/main.tf.hbs"),
+            r#"resource "app" "main" {
+  name = "{{app_name}}"
+  environment = "{{_environment_name}}"
+}"#,
+        )
+        .unwrap();
+
+        // Infrastructure with multiple environments
+        let infra_yaml = format!(
+            r#"apiVersion: pmp.io/v1
+kind: Infrastructure
+metadata:
+  name: Test Infrastructure
+  description: Test infrastructure
+spec:
+  categories:
+    - id: pmp_io_v1_testresource
+      name: TestResource
+      templates:
+        - template_pack: test-pack
+          template: test-template
+  template_packs:
+
+  environments:
+    dev:
+      name: Development
+      description: Development environment
+    staging:
+      name: Staging
+      description: Staging environment
+    prod:
+      name: Production
+      description: Production environment"#
+        );
+
+        fs.write(
+            &current_dir.join(".pmp.infrastructure.yaml"),
+            &infra_yaml,
+        )
+        .unwrap();
+
+        let input = MockUserInput::new();
+        input.add_response(MockResponse::Select(
+            "📁 TestResource".to_string(),
+        ));
+        input.add_response(MockResponse::Select(
+            "📄 test-template - Test template".to_string(),
+        ));
+        input.add_response(MockResponse::Select("Development - Development environment".to_string())); // Initial environment
+        input.add_response(MockResponse::Text("multi-env-project".to_string()));
+        input.add_response(MockResponse::Text("myapp".to_string())); // app_name for dev
+
+        // Add staging environment
+        input.add_response(MockResponse::Confirm(true));
+        input.add_response(MockResponse::Select("Staging - Staging environment".to_string()));
+        input.add_response(MockResponse::Text("myapp".to_string())); // app_name for staging
+
+        // Add prod environment
+        input.add_response(MockResponse::Confirm(true));
+        input.add_response(MockResponse::Select("Production - Production environment".to_string()));
+        input.add_response(MockResponse::Text("myapp".to_string())); // app_name for prod
+
+        input.add_response(MockResponse::Confirm(false)); // No more environments
+
+        let ctx = create_test_context(Arc::clone(&fs), input);
+        let result = CreateCommand::execute(&ctx, None, None, None, None, false, None, None);
+
+        assert!(result.is_ok(), "Project creation should succeed: {:?}", result);
+
+        // Verify dev environment
+        let dev_tf_path = current_dir.join("projects/multi-env-project/environments/dev/main.tf");
+        let dev_tf_content = fs.get_file_contents(&dev_tf_path).unwrap();
+        assert!(
+            dev_tf_content.contains("environment = \"dev\""),
+            "Dev environment should have correct env variable"
+        );
+
+        // Verify staging environment
+        let staging_tf_path = current_dir.join("projects/multi-env-project/environments/staging/main.tf");
+        let staging_tf_content = fs.get_file_contents(&staging_tf_path).unwrap();
+        assert!(
+            staging_tf_content.contains("environment = \"staging\""),
+            "Staging environment should have correct env variable"
+        );
+
+        // Verify prod environment
+        let prod_tf_path = current_dir.join("projects/multi-env-project/environments/prod/main.tf");
+        let prod_tf_content = fs.get_file_contents(&prod_tf_path).unwrap();
+        assert!(
+            prod_tf_content.contains("environment = \"prod\""),
+            "Prod environment should have correct env variable"
+        );
+
+        // Verify project file
+        let project_yaml_path = current_dir.join("projects/multi-env-project/.pmp.project.yaml");
+        let project_content = fs.get_file_contents(&project_yaml_path).unwrap();
+        assert!(
+            project_content.contains("kind: TestResource"),
+            "Project should have correct kind"
+        );
+    }
+
+    #[test]
+    fn test_create_project_with_infrastructure_defaults() {
+        let fs = Arc::new(MockFileSystem::new());
+        let current_dir = std::env::current_dir().unwrap();
+
+        setup_template_pack(
+            &fs,
+            "test-pack",
+            "test-template",
+            "TestResource",
+            r#"    app_name:
+      type: string
+      description: Application name
+      default: "myapp"
+
+    replicas:
+      type: number
+      description: Number of replicas
+      default: 1"#,
+        );
+
+        fs.write(
+            &current_dir.join(".pmp/template-packs/test-pack/templates/test-template/src/main.tf.hbs"),
+            r#"resource "app" "main" {
+  name = "{{app_name}}"
+  replicas = {{replicas}}
+}"#,
+        )
+        .unwrap();
+
+        // Infrastructure with template defaults
+        setup_infrastructure_with_categories(
+            &fs,
+            r#"    - id: pmp_io_v1_testresource
+      name: TestResource
+      templates:
+        - template_pack: test-pack
+          template: test-template"#,
+            r#"    test-pack:
+      templates:
+        test-template:
+          defaults:
+            inputs:
+              replicas:
+                value: 5
+                show_as_default: false"#,
+        );
+
+        let input = MockUserInput::new();
+        input.add_response(MockResponse::Select(
+            "📁 TestResource".to_string(),
+        ));
+        input.add_response(MockResponse::Select(
+            "📄 test-template - Test template".to_string(),
+        ));
+        input.add_response(MockResponse::Text("defaults-project".to_string()));
+        input.add_response(MockResponse::Text("coolapp".to_string())); // app_name
+        // Note: replicas should NOT be prompted because show_as_default: false
+        input.add_response(MockResponse::Confirm(false));
+
+        let ctx = create_test_context(Arc::clone(&fs), input);
+        let result = CreateCommand::execute(&ctx, None, None, None, None, false, None, None);
+
+        assert!(result.is_ok(), "Project creation should succeed: {:?}", result);
+
+        let main_tf_path = current_dir.join("projects/defaults-project/environments/dev/main.tf");
+        let main_tf_content = fs.get_file_contents(&main_tf_path).unwrap();
+
+        assert!(
+            main_tf_content.contains("replicas = 5"),
+            "Should use infrastructure default value (5) not template default (1)"
+        );
+
+        let env_yaml_path = current_dir.join("projects/defaults-project/environments/dev/.pmp.environment.yaml");
+        let env_content = fs.get_file_contents(&env_yaml_path).unwrap();
+        assert!(
+            env_content.contains("replicas: 5"),
+            "Environment file should have infrastructure default"
+        );
+    }
+
+    #[test]
+    fn test_create_project_with_conditional_inputs() {
+        let fs = Arc::new(MockFileSystem::new());
+        let current_dir = std::env::current_dir().unwrap();
+
+        let template_yaml = r#"apiVersion: pmp.io/v1
+kind: Template
+metadata:
+  name: conditional
+  description: Template with conditional inputs
+spec:
+  apiVersion: pmp.io/v1
+  kind: TestResource
+  executor:
+    name: opentofu
+
+  inputs:
+    - name: enable_monitoring
+      type: boolean
+      description: Enable monitoring
+      default: false
+
+    - name: monitoring_endpoint
+      type: string
+      description: Monitoring endpoint URL
+      default: "http://localhost:9090"
+      show_if:
+        - field: enable_monitoring
+          condition: equals
+          value: true
+
+    - name: environment_type
+      type: select
+      description: Environment type
+      options:
+        - label: "Development"
+          value: "dev"
+        - label: "Production"
+          value: "prod"
+      default: "dev"
+
+    - name: production_replicas
+      type: number
+      description: Number of replicas for production
+      default: 5
+      show_if:
+        - field: environment_type
+          condition: equals
+          value: "prod""#;
+
+        fs.write(
+            &current_dir.join(".pmp/template-packs/test-pack/.pmp.template-pack.yaml"),
+            r#"apiVersion: pmp.io/v1
+kind: TemplatePack
+metadata:
+  name: test-pack
+spec: {}"#,
+        )
+        .unwrap();
+
+        fs.write(
+            &current_dir.join(".pmp/template-packs/test-pack/templates/conditional/.pmp.template.yaml"),
+            template_yaml,
+        )
+        .unwrap();
+
+        fs.write(
+            &current_dir.join(".pmp/template-packs/test-pack/templates/conditional/src/main.tf.hbs"),
+            r#"resource "app" "main" {
+{{#if enable_monitoring}}
+  monitoring_endpoint = "{{monitoring_endpoint}}"
+{{/if}}
+  environment = "{{environment_type}}"
+{{#if (eq environment_type "prod")}}
+  replicas = {{production_replicas}}
+{{/if}}
+}"#,
+        )
+        .unwrap();
+
+        // Setup infrastructure for conditional template
+        setup_infrastructure_with_categories(
+            &fs,
+            r#"    - id: pmp_io_v1_testresource
+      name: TestResource (pmp.io/v1)
+      description: Test resource type
+      templates:
+        - template_pack: test-pack
+          template: conditional"#,
+            "",
+        );
+
+        let input = MockUserInput::new();
+        input.add_response(MockResponse::Select(
+            "📁 TestResource (pmp.io/v1) - Test resource type".to_string(),
+        ));
+        input.add_response(MockResponse::Select(
+            "📄 conditional - Template with conditional inputs".to_string(),
+        ));
+        input.add_response(MockResponse::Text("conditional-project".to_string()));
+
+        input.add_response(MockResponse::Select("Yes".to_string())); // enable_monitoring = true
+        input.add_response(MockResponse::Text("http://monitoring.example.com".to_string())); // monitoring_endpoint (shown)
+        input.add_response(MockResponse::Select("Production".to_string())); // environment_type = prod
+        input.add_response(MockResponse::Text("10".to_string())); // production_replicas (shown)
+
+        input.add_response(MockResponse::Confirm(false));
+
+        let ctx = create_test_context(Arc::clone(&fs), input);
+        let result = CreateCommand::execute(&ctx, None, None, None, None, false, None, None);
+
+        assert!(result.is_ok(), "Project creation should succeed: {:?}", result);
+
+        let main_tf_path = current_dir.join("projects/conditional-project/environments/dev/main.tf");
+        let main_tf_content = fs.get_file_contents(&main_tf_path).unwrap();
+
+        assert!(
+            main_tf_content.contains("monitoring_endpoint = \"http://monitoring.example.com\""),
+            "Conditional input should be rendered when condition is met"
+        );
+        assert!(
+            main_tf_content.contains("environment = \"prod\""),
+            "Should have prod environment"
+        );
+        assert!(
+            main_tf_content.contains("replicas = 10"),
+            "Conditional production_replicas should be rendered"
         );
     }
 }
