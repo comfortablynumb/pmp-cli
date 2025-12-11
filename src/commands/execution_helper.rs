@@ -396,7 +396,8 @@ impl ExecutionHelper {
         // Run test
         ctx.output
             .dimmed(&format!("Executing {} test...", executor.get_name()));
-        ctx.output.dimmed("This will validate the configuration without creating infrastructure.");
+        ctx.output
+            .dimmed("This will validate the configuration without creating infrastructure.");
         executor.test(execution_config, env_dir_str, extra_args)?;
 
         // Run post-test hooks

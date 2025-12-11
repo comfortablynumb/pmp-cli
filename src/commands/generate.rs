@@ -397,9 +397,7 @@ impl GenerateCommand {
                 .or_else(|| sorted_enum_values.first().map(|s| s.as_str()));
 
             let selected = if let Some(default) = default_str {
-                let starting_cursor = sorted_enum_values
-                    .iter()
-                    .position(|v| v == default);
+                let starting_cursor = sorted_enum_values.iter().position(|v| v == default);
                 ctx.input
                     .select(description, sorted_enum_values.clone(), starting_cursor)
                     .context("Failed to get input")?

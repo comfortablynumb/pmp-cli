@@ -47,7 +47,11 @@ impl TemplateMatcher {
     }
 
     /// Calculate similarity score between template and resources
-    fn calculate_similarity(&self, _template: &TemplateResource, resources: &[ResourceInfo]) -> f64 {
+    fn calculate_similarity(
+        &self,
+        _template: &TemplateResource,
+        resources: &[ResourceInfo],
+    ) -> f64 {
         // For now, return a simple score
         // TODO: Implement proper similarity calculation based on:
         // - Resource types match
@@ -171,9 +175,6 @@ mod tests {
         assert_eq!(ResourceTypeMapper::get_canonical_type("aws_alb"), "aws_lb");
         assert!(ResourceTypeMapper::are_compatible("aws_alb", "aws_lb"));
         assert!(ResourceTypeMapper::are_compatible("aws_vpc", "aws_vpc"));
-        assert!(!ResourceTypeMapper::are_compatible(
-            "aws_vpc",
-            "aws_subnet"
-        ));
+        assert!(!ResourceTypeMapper::are_compatible("aws_vpc", "aws_subnet"));
     }
 }

@@ -344,9 +344,7 @@ impl<'a> ProjectImporter<'a> {
             return Ok(!self.args.dry_run);
         }
 
-        self.ctx
-            .input
-            .confirm("? Proceed with import?", Some(true))
+        self.ctx.input.confirm("? Proceed with import?", Some(true))
     }
 
     fn execute_import(&self, _config: &ProjectConfig) -> Result<()> {
@@ -367,7 +365,9 @@ impl<'a> ProjectImporter<'a> {
             "   1. Review generated files in: collection/projects/{}",
             config.name
         ));
-        self.ctx.output.info("   2. Run 'pmp preview' to verify state");
+        self.ctx
+            .output
+            .info("   2. Run 'pmp preview' to verify state");
         self.ctx
             .output
             .info("   3. Run 'pmp apply' to manage with PMP");

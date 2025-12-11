@@ -47,9 +47,9 @@ impl CloneCommand {
                 .map(|p| format!("{} ({})", p.name, p.kind))
                 .collect();
 
-            let selected = ctx
-                .input
-                .select("Select project to clone:", project_options.clone(), None)?;
+            let selected =
+                ctx.input
+                    .select("Select project to clone:", project_options.clone(), None)?;
 
             // Find the selected project by matching the display string
             let selected_idx = project_options.iter().position(|s| s == &selected).unwrap();

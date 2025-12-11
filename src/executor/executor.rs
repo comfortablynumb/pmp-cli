@@ -83,12 +83,8 @@ pub trait Executor: Send + Sync {
     /// For OpenTofu, this runs 'tofu test' to validate the configuration
     /// Runs interactively with inherited stdio for user interaction
     /// Additional args can be passed via extra_args (e.g., from -- separator)
-    fn test(
-        &self,
-        config: &ExecutorConfig,
-        working_dir: &str,
-        extra_args: &[String],
-    ) -> Result<()>;
+    fn test(&self, config: &ExecutorConfig, working_dir: &str, extra_args: &[String])
+    -> Result<()>;
 
     /// Get the name of this executor (e.g., "opentofu", "terraform")
     fn get_name(&self) -> &str;

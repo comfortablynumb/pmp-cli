@@ -95,16 +95,28 @@ pub fn generate_backend_config(
     // Create Handlebars context for rendering variables
     let mut handlebars_data = serde_json::Map::new();
     if let Some(proj) = project_name {
-        handlebars_data.insert("project_name".to_string(), serde_json::Value::String(proj.to_string()));
+        handlebars_data.insert(
+            "project_name".to_string(),
+            serde_json::Value::String(proj.to_string()),
+        );
     }
     if let Some(env) = environment {
-        handlebars_data.insert("environment".to_string(), serde_json::Value::String(env.to_string()));
+        handlebars_data.insert(
+            "environment".to_string(),
+            serde_json::Value::String(env.to_string()),
+        );
     }
     if let Some(api_ver) = api_version {
-        handlebars_data.insert("api_version".to_string(), serde_json::Value::String(api_ver.to_string()));
+        handlebars_data.insert(
+            "api_version".to_string(),
+            serde_json::Value::String(api_ver.to_string()),
+        );
     }
     if let Some(knd) = kind {
-        handlebars_data.insert("kind".to_string(), serde_json::Value::String(knd.to_string()));
+        handlebars_data.insert(
+            "kind".to_string(),
+            serde_json::Value::String(knd.to_string()),
+        );
     }
 
     for (key, value) in params {
@@ -146,14 +158,22 @@ fn validate_backend_type(backend_type: &str) -> Result<()> {
 }
 
 /// Format a single HCL parameter based on its value type
-fn format_hcl_parameter(key: &str, value: &Value, handlebars_data: &serde_json::Map<String, Value>) -> Result<String> {
+fn format_hcl_parameter(
+    key: &str,
+    value: &Value,
+    handlebars_data: &serde_json::Map<String, Value>,
+) -> Result<String> {
     match value {
         Value::String(s) => {
             // Render Handlebars variables like {{project_name}} and {{environment}}
             let rendered = if s.contains("{{") {
                 let hb = handlebars::Handlebars::new();
-                hb.render_template(s, &handlebars_data)
-                    .with_context(|| format!("Failed to render Handlebars template in backend config: {}", s))?
+                hb.render_template(s, &handlebars_data).with_context(|| {
+                    format!(
+                        "Failed to render Handlebars template in backend config: {}",
+                        s
+                    )
+                })?
             } else {
                 s.clone()
             };
@@ -194,7 +214,10 @@ fn format_hcl_parameter(key: &str, value: &Value, handlebars_data: &serde_json::
 }
 
 /// Format a value for HCL (helper function)
-fn format_hcl_value(value: &Value, handlebars_data: &serde_json::Map<String, Value>) -> Result<String> {
+fn format_hcl_value(
+    value: &Value,
+    handlebars_data: &serde_json::Map<String, Value>,
+) -> Result<String> {
     match value {
         Value::String(s) => {
             let rendered = if s.contains("{{") {
@@ -208,7 +231,10 @@ fn format_hcl_value(value: &Value, handlebars_data: &serde_json::Map<String, Val
         Value::Number(n) => Ok(n.to_string()),
         Value::Bool(b) => Ok(b.to_string()),
         Value::Array(arr) => {
-            let items: Result<Vec<String>> = arr.iter().map(|v| format_hcl_value(v, handlebars_data)).collect();
+            let items: Result<Vec<String>> = arr
+                .iter()
+                .map(|v| format_hcl_value(v, handlebars_data))
+                .collect();
             Ok(format!("[{}]", items?.join(", ")))
         }
         Value::Object(obj) => {
@@ -287,12 +313,12 @@ pub fn generate_plugin_override_variables(plugins: &[AddedPlugin]) -> String {
                     field_name.to_lowercase()
                 );
 
-            if !has_variables {
-                hcl.push_str(
-                    "\n# Plugin override variables (set via TF_VAR_* environment variables)\n",
-                );
-                has_variables = true;
-            }
+                if !has_variables {
+                    hcl.push_str(
+                        "\n# Plugin override variables (set via TF_VAR_* environment variables)\n",
+                    );
+                    has_variables = true;
+                }
 
                 hcl.push_str(&format!("variable \"{}\" {{\n", var_name));
                 hcl.push_str("  type    = string\n");
@@ -347,31 +373,32 @@ pub fn generate_module_blocks(plugins: &[AddedPlugin]) -> String {
 
         // Check if the first reference project name is different from the plugin name
         let should_append_ref_name = has_valid_dependencies
-            && plugin.reference_projects.first()
+            && plugin
+                .reference_projects
+                .first()
                 .map(|first_ref| first_ref.name != plugin.name)
                 .unwrap_or(false);
 
-        let (module_name, source_path) = if should_append_ref_name
-            && let Some(first_ref) = plugin.reference_projects.first()
-        {
-            // Plugin has dependencies and ref name differs - use reference project name in path
-            (
-                format!(
-                    "{}_{}_{}",
-                    plugin.template_pack_name, plugin.name, first_ref.name
-                ),
-                format!(
-                    "./modules/{}/{}/{}",
-                    plugin.template_pack_name, plugin.name, first_ref.name
-                ),
-            )
-        } else {
-            // Plugin has no dependencies OR ref name matches plugin name - no suffix needed
-            (
-                format!("{}_{}", plugin.template_pack_name, plugin.name),
-                format!("./modules/{}/{}", plugin.template_pack_name, plugin.name),
-            )
-        };
+        let (module_name, source_path) =
+            if should_append_ref_name && let Some(first_ref) = plugin.reference_projects.first() {
+                // Plugin has dependencies and ref name differs - use reference project name in path
+                (
+                    format!(
+                        "{}_{}_{}",
+                        plugin.template_pack_name, plugin.name, first_ref.name
+                    ),
+                    format!(
+                        "./modules/{}/{}/{}",
+                        plugin.template_pack_name, plugin.name, first_ref.name
+                    ),
+                )
+            } else {
+                // Plugin has no dependencies OR ref name matches plugin name - no suffix needed
+                (
+                    format!("{}_{}", plugin.template_pack_name, plugin.name),
+                    format!("./modules/{}/{}", plugin.template_pack_name, plugin.name),
+                )
+            };
 
         hcl.push_str(&format!("module \"{}\" {{\n", module_name));
         hcl.push_str(&format!("  source = \"{}\"\n", source_path));
@@ -411,9 +438,7 @@ pub fn generate_module_blocks(plugins: &[AddedPlugin]) -> String {
                 // Terraform data source name
                 let tf_data_source_name = format!(
                     "plugin_{}_{}_{}",
-                    plugin.template_pack_name,
-                    plugin.name,
-                    plugin_ref.data_source_name
+                    plugin.template_pack_name, plugin.name, plugin_ref.data_source_name
                 );
 
                 // Add comment if dependency_name exists
@@ -424,10 +449,7 @@ pub fn generate_module_blocks(plugins: &[AddedPlugin]) -> String {
                 // Generate module parameters for each required field
                 for (field_name, field_config) in &remote_state.required_fields {
                     // Use alias if provided, otherwise original field name
-                    let param_name = field_config
-                        .alias
-                        .as_ref()
-                        .unwrap_or(field_name);
+                    let param_name = field_config.alias.as_ref().unwrap_or(field_name);
 
                     // Override variable name
                     let var_name = format!(
@@ -481,16 +503,18 @@ pub fn generate_data_source_backends(
     }
 
     // Flatten all plugin references into (plugin, ref) pairs
-    let plugin_refs: Vec<(&AddedPlugin, &crate::template::metadata::AddedPluginReference)> =
-        plugins
-            .iter()
-            .flat_map(|plugin| {
-                plugin
-                    .reference_projects
-                    .iter()
-                    .map(move |plugin_ref| (plugin, plugin_ref))
-            })
-            .collect();
+    let plugin_refs: Vec<(
+        &AddedPlugin,
+        &crate::template::metadata::AddedPluginReference,
+    )> = plugins
+        .iter()
+        .flat_map(|plugin| {
+            plugin
+                .reference_projects
+                .iter()
+                .map(move |plugin_ref| (plugin, plugin_ref))
+        })
+        .collect();
 
     if plugin_refs.is_empty() {
         return Ok(String::new());
@@ -1079,7 +1103,8 @@ impl Executor for OpenTofuExecutor {
 
         // Write to _common.tf file
         let common_tf_path = environment_path.join("_common.tf");
-        ctx.fs.write(&common_tf_path, &combined_hcl)
+        ctx.fs
+            .write(&common_tf_path, &combined_hcl)
             .with_context(|| format!("Failed to write _common.tf file: {:?}", common_tf_path))?;
 
         ctx.output

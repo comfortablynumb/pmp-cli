@@ -5,8 +5,7 @@ use crate::executor::{Executor, ExecutorConfig, OpenTofuExecutor};
 use crate::hooks::{HookOutcome, HooksRunner};
 use crate::template::metadata::{
     PluginDependency, ProjectGroupInputConfig, ProjectGroupPluginReferenceProject,
-    ProjectGroupProject, ProjectGroupReferenceProject, ProjectReference,
-    TemplateReferenceProject,
+    ProjectGroupProject, ProjectGroupReferenceProject, ProjectReference, TemplateReferenceProject,
 };
 use crate::template::{DynamicProjectEnvironmentResource, TemplateDiscovery};
 use anyhow::{Context, Result};
@@ -650,11 +649,12 @@ impl ProjectGroupHandler {
                     )
                 })?;
 
-            let ref_env_name = ref_config.environment.as_deref().unwrap_or(default_environment);
+            let ref_env_name = ref_config
+                .environment
+                .as_deref()
+                .unwrap_or(default_environment);
 
-            let project_path = infrastructure_root
-                .join("projects")
-                .join(&project_ref.name);
+            let project_path = infrastructure_root.join("projects").join(&project_ref.name);
             let env_path = project_path.join("environments").join(ref_env_name);
             let env_file = env_path.join(".pmp.environment.yaml");
 
@@ -668,15 +668,15 @@ impl ProjectGroupHandler {
             let env_resource = DynamicProjectEnvironmentResource::from_file(&*ctx.fs, &env_file)?;
 
             let dep_idx = if let Some(dep_name) = &ref_config.dependency_name {
-                plugin_dependencies.iter().position(|d| {
-                    d.dependency_name.as_ref() == Some(dep_name)
-                })
-                .with_context(|| {
-                    format!(
-                        "Dependency with name '{}' not found in plugin dependencies",
-                        dep_name
-                    )
-                })?
+                plugin_dependencies
+                    .iter()
+                    .position(|d| d.dependency_name.as_ref() == Some(dep_name))
+                    .with_context(|| {
+                        format!(
+                            "Dependency with name '{}' not found in plugin dependencies",
+                            dep_name
+                        )
+                    })?
             } else {
                 plugin_dependencies.iter().position(|d| {
                     d.project.api_version == env_resource.spec.resource.api_version
@@ -779,10 +779,7 @@ impl ProjectGroupHandler {
             .iter()
             .find(|p| p.resource.metadata.name == project_config.template_pack)
             .with_context(|| {
-                format!(
-                    "Template pack '{}' not found",
-                    project_config.template_pack
-                )
+                format!("Template pack '{}' not found", project_config.template_pack)
             })?;
 
         // Discover templates to find the plugin configurations (installed/allowed)
@@ -823,12 +820,13 @@ impl ProjectGroupHandler {
 
         for (plugin_name, plugin_config) in &project_config.plugins {
             // Find the template pack that contains this plugin
-            let plugin_template_pack_name = plugin_pack_map.get(plugin_name).with_context(|| {
-                format!(
-                    "Plugin '{}' is not configured as installed or allowed in template '{}/{}'",
-                    plugin_name, project_config.template_pack, project_config.template
-                )
-            })?;
+            let plugin_template_pack_name =
+                plugin_pack_map.get(plugin_name).with_context(|| {
+                    format!(
+                        "Plugin '{}' is not configured as installed or allowed in template '{}/{}'",
+                        plugin_name, project_config.template_pack, project_config.template
+                    )
+                })?;
 
             // Find the template pack for this plugin
             let plugin_template_pack = template_packs
@@ -1039,7 +1037,9 @@ impl ProjectGroupHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::template::metadata::{PluginDependency, ProjectGroupPluginReferenceProject, ProjectReference};
+    use crate::template::metadata::{
+        PluginDependency, ProjectGroupPluginReferenceProject, ProjectReference,
+    };
     use crate::traits::{FileSystem, MockFileSystem};
     use std::collections::HashMap;
     use std::path::PathBuf;
@@ -1151,14 +1151,18 @@ spec:
         );
 
         match &result {
-            Ok(_) => {},
+            Ok(_) => {}
             Err(e) => {
                 eprintln!("ERROR: {}", e);
                 eprintln!("ERROR DEBUG: {:?}", e);
             }
         }
 
-        assert!(result.is_ok(), "Expected Ok but got: {:?}", result.as_ref().err());
+        assert!(
+            result.is_ok(),
+            "Expected Ok but got: {:?}",
+            result.as_ref().err()
+        );
         let resolved = result.unwrap();
         assert_eq!(resolved.resolved.len(), 1);
         assert_eq!(resolved.unresolved_dependencies.len(), 0);
@@ -1238,8 +1242,12 @@ spec:
             dependency_name: None,
         }];
 
-        let plugin_dependencies =
-            vec![create_mock_plugin_dependency("pmp.io/v1", "Application", None, labels)];
+        let plugin_dependencies = vec![create_mock_plugin_dependency(
+            "pmp.io/v1",
+            "Application",
+            None,
+            labels,
+        )];
 
         let result = ProjectGroupHandler::resolve_plugin_reference_projects(
             &ctx,
@@ -1290,7 +1298,12 @@ spec:
                 Some("storage"),
                 HashMap::new(),
             ),
-            create_mock_plugin_dependency("pmp.io/v1", "Database", Some("database"), HashMap::new()),
+            create_mock_plugin_dependency(
+                "pmp.io/v1",
+                "Database",
+                Some("database"),
+                HashMap::new(),
+            ),
         ];
 
         let result = ProjectGroupHandler::resolve_plugin_reference_projects(
@@ -1307,7 +1320,9 @@ spec:
         assert_eq!(resolved.resolved.len(), 1);
         assert_eq!(resolved.unresolved_dependencies.len(), 1);
         assert_eq!(
-            resolved.unresolved_dependencies[0].dependency_name.as_deref(),
+            resolved.unresolved_dependencies[0]
+                .dependency_name
+                .as_deref(),
             Some("database")
         );
     }
@@ -1343,10 +1358,12 @@ spec:
         );
 
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Reference project 'missing-project' not found"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Reference project 'missing-project' not found")
+        );
     }
 
     #[test]
@@ -1390,10 +1407,12 @@ spec:
         );
 
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("API version mismatch"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("API version mismatch")
+        );
     }
 
     #[test]
@@ -1426,8 +1445,12 @@ spec:
         let mut required_labels = HashMap::new();
         required_labels.insert("tier".to_string(), "backend".to_string());
 
-        let plugin_dependencies =
-            vec![create_mock_plugin_dependency("pmp.io/v1", "Application", None, required_labels)];
+        let plugin_dependencies = vec![create_mock_plugin_dependency(
+            "pmp.io/v1",
+            "Application",
+            None,
+            required_labels,
+        )];
 
         let result = ProjectGroupHandler::resolve_plugin_reference_projects(
             &ctx,
@@ -1439,10 +1462,12 @@ spec:
         );
 
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Label selector mismatch"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Label selector mismatch")
+        );
     }
 
     fn create_test_context(fs: Arc<MockFileSystem>) -> crate::context::Context {

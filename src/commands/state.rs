@@ -501,7 +501,8 @@ impl StateCommand {
             let env_name = if environments.len() == 1 {
                 environments[0].clone()
             } else {
-                ctx.input.select("Select environment:", environments, None)?
+                ctx.input
+                    .select("Select environment:", environments, None)?
             };
 
             Ok(project_path.join("environments").join(env_name))
@@ -703,9 +704,10 @@ impl StateCommand {
 
         // Confirm restore
         if !force {
-            let confirmed = ctx
-                .input
-                .confirm("This will replace the current state. Continue?", Some(false))?;
+            let confirmed = ctx.input.confirm(
+                "This will replace the current state. Continue?",
+                Some(false),
+            )?;
 
             if !confirmed {
                 ctx.output.dimmed("Restore cancelled.");

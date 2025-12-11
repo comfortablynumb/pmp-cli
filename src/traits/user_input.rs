@@ -94,9 +94,7 @@ impl UserInput for InquireUserInput {
             None => {
                 // No default - require explicit Y/N input
                 let help_msg = "Please enter Y or N explicitly";
-                Confirm::new(prompt)
-                    .with_help_message(help_msg)
-                    .prompt()?
+                Confirm::new(prompt).with_help_message(help_msg).prompt()?
             }
         };
 
@@ -148,7 +146,12 @@ impl Default for MockUserInput {
 }
 
 impl UserInput for MockUserInput {
-    fn select(&self, prompt: &str, options: Vec<String>, _default: Option<usize>) -> Result<String> {
+    fn select(
+        &self,
+        prompt: &str,
+        options: Vec<String>,
+        _default: Option<usize>,
+    ) -> Result<String> {
         match self.next_response()? {
             MockResponse::Select(answer) => {
                 // Verify the answer is in the options
@@ -162,7 +165,10 @@ impl UserInput for MockUserInput {
                     )
                 }
             }
-            _ => anyhow::bail!("Expected Select response but got a different type for prompt: '{}'", prompt),
+            _ => anyhow::bail!(
+                "Expected Select response but got a different type for prompt: '{}'",
+                prompt
+            ),
         }
     }
 
@@ -193,7 +199,10 @@ impl UserInput for MockUserInput {
     fn text(&self, prompt: &str, _default: Option<&str>) -> Result<String> {
         match self.next_response()? {
             MockResponse::Text(answer) => Ok(answer),
-            _ => anyhow::bail!("Expected Text response but got a different type for prompt: '{}'", prompt),
+            _ => anyhow::bail!(
+                "Expected Text response but got a different type for prompt: '{}'",
+                prompt
+            ),
         }
     }
 
@@ -207,7 +216,10 @@ impl UserInput for MockUserInput {
     fn confirm(&self, prompt: &str, _default: Option<bool>) -> Result<bool> {
         match self.next_response()? {
             MockResponse::Confirm(answer) => Ok(answer),
-            _ => anyhow::bail!("Expected Confirm response but got a different type for prompt: '{}'", prompt),
+            _ => anyhow::bail!(
+                "Expected Confirm response but got a different type for prompt: '{}'",
+                prompt
+            ),
         }
     }
 }

@@ -259,7 +259,8 @@ impl TestCommand {
         ctx.output
             .dimmed(&format!("Executing {} test...", executor.get_name()));
         ctx.output.blank();
-        ctx.output.dimmed("This will validate the configuration without creating infrastructure.");
+        ctx.output
+            .dimmed("This will validate the configuration without creating infrastructure.");
         ctx.output.blank();
         executor.test(&execution_config, env_dir_str, extra_args)?;
 

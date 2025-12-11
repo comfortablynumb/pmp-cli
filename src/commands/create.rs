@@ -2,7 +2,9 @@ use crate::collection::CollectionDiscovery;
 use crate::commands::apply::ApplyCommand;
 use crate::output;
 use crate::schema::SchemaValidator;
-use crate::template::metadata::{AddedPlugin, AddedPluginReference, InputType, PluginProjectReference};
+use crate::template::metadata::{
+    AddedPlugin, AddedPluginReference, InputType, PluginProjectReference,
+};
 use crate::template::utils::interpolate_all;
 use crate::template::{TemplateDiscovery, TemplateInfo, TemplatePackInfo, TemplateRenderer};
 use anyhow::{Context, Result};
@@ -48,7 +50,10 @@ struct CollectedPluginInfo {
     plugin_name: String,
     plugin_path: std::path::PathBuf,
     inputs: HashMap<String, Value>,
-    reference_projects: Vec<(crate::template::metadata::ProjectReference, crate::template::metadata::DynamicProjectEnvironmentResource)>,
+    reference_projects: Vec<(
+        crate::template::metadata::ProjectReference,
+        crate::template::metadata::DynamicProjectEnvironmentResource,
+    )>,
     raw_module_inputs: Option<HashMap<String, String>>,
     plugin_spec: crate::template::metadata::PluginSpec,
 }
@@ -262,69 +267,79 @@ impl CreateCommand {
         };
 
         // Check if plugin requires reference projects
-        let reference_projects_and_envs: Vec<(crate::template::metadata::ProjectReference, crate::template::metadata::DynamicProjectEnvironmentResource)> =
-            if !plugin_info.resource.spec.dependencies.is_empty() {
-                let mut refs = Vec::new();
+        let reference_projects_and_envs: Vec<(
+            crate::template::metadata::ProjectReference,
+            crate::template::metadata::DynamicProjectEnvironmentResource,
+        )> = if !plugin_info.resource.spec.dependencies.is_empty() {
+            let mut refs = Vec::new();
 
-                if let Some(preconfig) = preconfigured_plugin {
-                    // Use pre-configured references
-                    refs.extend(preconfig.resolved_references.clone());
+            if let Some(preconfig) = preconfigured_plugin {
+                // Use pre-configured references
+                refs.extend(preconfig.resolved_references.clone());
 
-                    // Prompt only for unresolved dependencies
-                    for dependency in &preconfig.unresolved_dependencies {
-                        match Self::prompt_for_dependency_selection(
-                            ctx,
-                            dependency,
-                            projects,
-                            collection_root,
-                        ) {
-                            Ok(selected) => refs.push(selected),
-                            Err(_) => {
-                                let _dep_display = dependency.dependency_name.as_deref()
-                                    .unwrap_or(&dependency.project.kind);
-                                ctx.output.warning(&format!(
-                                    "  Plugin '{}' requires a {} project{}, but none found. Skipping.",
-                                    installed_config.plugin_name,
-                                    dependency.project.kind,
-                                    dependency.dependency_name.as_ref()
-                                        .map(|n| format!(" (dependency: {})", n))
-                                        .unwrap_or_default()
-                                ));
-                                return Ok(None);
-                            }
-                        }
-                    }
-                } else {
-                    // Original flow - prompt for all dependencies
-                    for dependency in &plugin_info.resource.spec.dependencies {
-                        match Self::prompt_for_dependency_selection(
-                            ctx,
-                            dependency,
-                            projects,
-                            collection_root,
-                        ) {
-                            Ok(selected) => refs.push(selected),
-                            Err(_) => {
-                                let _dep_display = dependency.dependency_name.as_deref()
-                                    .unwrap_or(&dependency.project.kind);
-                                ctx.output.warning(&format!(
-                                    "  Plugin '{}' requires a {} project{}, but none found. Skipping.",
-                                    installed_config.plugin_name,
-                                    dependency.project.kind,
-                                    dependency.dependency_name.as_ref()
-                                        .map(|n| format!(" (dependency: {})", n))
-                                        .unwrap_or_default()
-                                ));
-                                return Ok(None);
-                            }
+                // Prompt only for unresolved dependencies
+                for dependency in &preconfig.unresolved_dependencies {
+                    match Self::prompt_for_dependency_selection(
+                        ctx,
+                        dependency,
+                        projects,
+                        collection_root,
+                    ) {
+                        Ok(selected) => refs.push(selected),
+                        Err(_) => {
+                            let _dep_display = dependency
+                                .dependency_name
+                                .as_deref()
+                                .unwrap_or(&dependency.project.kind);
+                            ctx.output.warning(&format!(
+                                "  Plugin '{}' requires a {} project{}, but none found. Skipping.",
+                                installed_config.plugin_name,
+                                dependency.project.kind,
+                                dependency
+                                    .dependency_name
+                                    .as_ref()
+                                    .map(|n| format!(" (dependency: {})", n))
+                                    .unwrap_or_default()
+                            ));
+                            return Ok(None);
                         }
                     }
                 }
-
-                refs
             } else {
-                Vec::new()
-            };
+                // Original flow - prompt for all dependencies
+                for dependency in &plugin_info.resource.spec.dependencies {
+                    match Self::prompt_for_dependency_selection(
+                        ctx,
+                        dependency,
+                        projects,
+                        collection_root,
+                    ) {
+                        Ok(selected) => refs.push(selected),
+                        Err(_) => {
+                            let _dep_display = dependency
+                                .dependency_name
+                                .as_deref()
+                                .unwrap_or(&dependency.project.kind);
+                            ctx.output.warning(&format!(
+                                "  Plugin '{}' requires a {} project{}, but none found. Skipping.",
+                                installed_config.plugin_name,
+                                dependency.project.kind,
+                                dependency
+                                    .dependency_name
+                                    .as_ref()
+                                    .map(|n| format!(" (dependency: {})", n))
+                                    .unwrap_or_default()
+                            ));
+                            return Ok(None);
+                        }
+                    }
+                }
+            }
+
+            refs
+        } else {
+            Vec::new()
+        };
 
         // Merge plugin inputs with installed config inputs
         let mut merged_inputs = plugin_info.resource.spec.inputs.clone();
@@ -355,9 +370,10 @@ impl CreateCommand {
             )?
         } else {
             // Ask user if they want to customize inputs
-            let customize = ctx
-                .input
-                .confirm("  Do you want to customize inputs for this plugin?", Some(false))?;
+            let customize = ctx.input.confirm(
+                "  Do you want to customize inputs for this plugin?",
+                Some(false),
+            )?;
 
             if customize {
                 ctx.output.dimmed("  Collecting plugin inputs...");
@@ -385,7 +401,6 @@ impl CreateCommand {
         }))
     }
 
-
     /// Render collected plugins to disk
     #[allow(clippy::too_many_arguments)]
     fn render_collected_plugins(
@@ -411,7 +426,8 @@ impl CreateCommand {
             // 2. Number of reference projects matches dependencies
             // 3. Reference project name differs from plugin name (avoid duplication)
             if !plugin_info.plugin_spec.dependencies.is_empty()
-                && plugin_info.reference_projects.len() == plugin_info.plugin_spec.dependencies.len()
+                && plugin_info.reference_projects.len()
+                    == plugin_info.plugin_spec.dependencies.len()
                 && let Some((first_ref, _)) = plugin_info.reference_projects.first()
                 && first_ref.name != plugin_info.plugin_name
             {
@@ -710,7 +726,8 @@ impl CreateCommand {
                 sorted_enum_values.sort();
 
                 // Find the default value index in the sorted list
-                let default_index = if let Some(Value::String(default_val)) = &interpolated_default {
+                let default_index = if let Some(Value::String(default_val)) = &interpolated_default
+                {
                     sorted_enum_values.iter().position(|v| v == default_val)
                 } else {
                     None
@@ -1825,7 +1842,13 @@ impl CreateCommand {
         ctx.output.dimmed("Rendering template...");
         let renderer = TemplateRenderer::new();
         let _generated_files = renderer
-            .render_template(ctx, template_src, environment_path.as_path(), &template_inputs, None)
+            .render_template(
+                ctx,
+                template_src,
+                environment_path.as_path(),
+                &template_inputs,
+                None,
+            )
             .context("Failed to render template")?;
 
         // Step 15.5: Generate common file (e.g., _common.tf) if executor config is present
@@ -2130,9 +2153,7 @@ impl CreateCommand {
                 .or_else(|| sorted_enum_values.first().map(|s| s.as_str()));
 
             let selected = if let Some(default) = default_str {
-                let starting_cursor = sorted_enum_values
-                    .iter()
-                    .position(|v| v == default);
+                let starting_cursor = sorted_enum_values.iter().position(|v| v == default);
                 ctx.input
                     .select(&description, sorted_enum_values.clone(), starting_cursor)
                     .context("Failed to get input")?
@@ -2517,7 +2538,9 @@ impl CreateCommand {
             InputType::Duration {
                 min_seconds,
                 max_seconds,
-            } => Self::prompt_for_duration(ctx, description, default_str, *min_seconds, *max_seconds),
+            } => {
+                Self::prompt_for_duration(ctx, description, default_str, *min_seconds, *max_seconds)
+            }
             InputType::Cron => Self::prompt_for_cron(ctx, description, default_str),
             InputType::KeyValue {
                 key_value_separator,
@@ -2536,7 +2559,13 @@ impl CreateCommand {
             InputType::Semver {
                 allow_prerelease,
                 allow_build,
-            } => Self::prompt_for_semver(ctx, description, default_str, *allow_prerelease, *allow_build),
+            } => Self::prompt_for_semver(
+                ctx,
+                description,
+                default_str,
+                *allow_prerelease,
+                *allow_build,
+            ),
         }
     }
 
@@ -2606,7 +2635,10 @@ impl CreateCommand {
         _allow_multiple: bool,
     ) -> Result<Value> {
         // Get collection root
-        let collection_root = ctx.fs.current_dir().context("Failed to get current directory")?;
+        let collection_root = ctx
+            .fs
+            .current_dir()
+            .context("Failed to get current directory")?;
 
         // Discover all projects
         let all_projects =
@@ -2685,7 +2717,10 @@ impl CreateCommand {
         max: Option<usize>,
     ) -> Result<Value> {
         // Get collection root
-        let collection_root = ctx.fs.current_dir().context("Failed to get current directory")?;
+        let collection_root = ctx
+            .fs
+            .current_dir()
+            .context("Failed to get current directory")?;
 
         // Discover all projects
         let all_projects =
@@ -3067,16 +3102,17 @@ impl CreateCommand {
         fields: &[crate::template::metadata::InputDefinition],
         _default: Option<&Value>,
     ) -> Result<Value> {
-        ctx.output.info(&format!("{} (object with {} fields)", description, fields.len()));
+        ctx.output.info(&format!(
+            "{} (object with {} fields)",
+            description,
+            fields.len()
+        ));
 
         let mut object = serde_json::Map::new();
 
         for field in fields {
             // Interpolate field description and default
-            let field_desc = field
-                .description
-                .as_deref()
-                .unwrap_or(&field.name);
+            let field_desc = field.description.as_deref().unwrap_or(&field.name);
 
             let field_label = format!("  {} → {}", field.name, field_desc);
 
@@ -3129,14 +3165,14 @@ impl CreateCommand {
             if current_count > 0 {
                 ctx.output.info(&format!(
                     "Current {} count: {}",
-                    item_description,
-                    current_count
+                    item_description, current_count
                 ));
             }
 
             // Check if we've reached the maximum
             if current_count >= max_items {
-                ctx.output.info(&format!("Maximum of {} items reached", max_items));
+                ctx.output
+                    .info(&format!("Maximum of {} items reached", max_items));
                 break;
             }
 
@@ -3475,15 +3511,14 @@ impl CreateCommand {
             let expected_len = if allow_alpha { vec![6, 8] } else { vec![6] };
 
             if !expected_len.contains(&hex.len()) {
-                ctx.output.error(&format!(
-                    "Invalid color format. Expected {}",
-                    pattern_desc
-                ));
+                ctx.output
+                    .error(&format!("Invalid color format. Expected {}", pattern_desc));
                 continue;
             }
 
             if !hex.chars().all(|c| c.is_ascii_hexdigit()) {
-                ctx.output.error("Color must contain only hex digits (0-9, A-F)");
+                ctx.output
+                    .error("Color must contain only hex digits (0-9, A-F)");
                 continue;
             }
 
@@ -3566,12 +3601,7 @@ impl CreateCommand {
                     'h' => 3600,
                     'd' => 86400,
                     'w' => 604800,
-                    _ => {
-                        return Err(anyhow::anyhow!(
-                            "Unknown unit '{}'. Use: s, m, h, d, w",
-                            ch
-                        ))
-                    }
+                    _ => return Err(anyhow::anyhow!("Unknown unit '{}'. Use: s, m, h, d, w", ch)),
                 };
 
                 total_seconds += num * multiplier;
@@ -3620,8 +3650,12 @@ impl CreateCommand {
             let valid_chars = "0123456789*,-/";
             let mut is_valid = true;
             for field in &fields {
-                if !field.chars().all(|c| valid_chars.contains(c) || c.is_alphabetic()) {
-                    ctx.output.error(&format!("Invalid characters in field: {}", field));
+                if !field
+                    .chars()
+                    .all(|c| valid_chars.contains(c) || c.is_alphabetic())
+                {
+                    ctx.output
+                        .error(&format!("Invalid characters in field: {}", field));
                     is_valid = false;
                     break;
                 }
@@ -3741,11 +3775,7 @@ impl CreateCommand {
             examples.push("1.0.0+build.123");
         }
 
-        let prompt = format!(
-            "{} [semver: e.g., {}]",
-            description,
-            examples.join(", ")
-        );
+        let prompt = format!("{} [semver: e.g., {}]", description, examples.join(", "));
 
         loop {
             let answer = ctx
@@ -3778,7 +3808,10 @@ impl CreateCommand {
 
         // Validate build metadata if present
         if let Some(b) = build
-            && (b.is_empty() || !b.chars().all(|c| c.is_alphanumeric() || c == '.' || c == '-'))
+            && (b.is_empty()
+                || !b
+                    .chars()
+                    .all(|c| c.is_alphanumeric() || c == '.' || c == '-'))
         {
             return Err(anyhow::anyhow!("Invalid build metadata"));
         }
@@ -4078,7 +4111,9 @@ impl CreateCommand {
         reference_projects: &[crate::template::metadata::TemplateReferenceProject],
         template_packs_paths: Option<&str>,
         executor_override: Option<&crate::template::metadata::ExecutorConfigOverride>,
-        plugin_configs: Option<&HashMap<String, crate::commands::project_group::PreConfiguredPluginData>>,
+        plugin_configs: Option<
+            &HashMap<String, crate::commands::project_group::PreConfiguredPluginData>,
+        >,
     ) -> Result<()> {
         use crate::template::renderer::TemplateRenderer;
 
@@ -4196,8 +4231,8 @@ impl CreateCommand {
                 plugin_config.disable_user_input_override = true;
 
                 // Get pre-configured data for this plugin if available
-                let preconfig = plugin_configs
-                    .and_then(|configs| configs.get(&installed_plugin.plugin_name));
+                let preconfig =
+                    plugin_configs.and_then(|configs| configs.get(&installed_plugin.plugin_name));
 
                 if let Some(plugin_info) = Self::collect_plugin_info(
                     ctx,
@@ -6025,8 +6060,8 @@ spec:
         );
 
         // Verify template pack was created
-        let template_pack_file = current_dir
-            .join(".pmp/template-packs/comprehensive-pack/.pmp.template-pack.yaml");
+        let template_pack_file =
+            current_dir.join(".pmp/template-packs/comprehensive-pack/.pmp.template-pack.yaml");
         assert!(
             fs.has_file(&template_pack_file),
             "Template pack file should exist at {:?}",
@@ -6090,8 +6125,7 @@ spec:
 
         // Run create command
         let result = CreateCommand::execute(
-            &ctx,
-            None,  // output_path
+            &ctx, None,  // output_path
             None,  // template_packs_paths
             None,  // inputs_str
             None,  // template_spec
@@ -6109,8 +6143,7 @@ spec:
 
         // Verify project files were created
         let current_dir = fs.current_dir().unwrap();
-        let project_yaml_path =
-            current_dir.join("projects/test-app/.pmp.project.yaml");
+        let project_yaml_path = current_dir.join("projects/test-app/.pmp.project.yaml");
         let env_yaml_path =
             current_dir.join("projects/test-app/environments/dev/.pmp.environment.yaml");
 
@@ -6184,16 +6217,15 @@ spec:
 
         // Verify plugins exist
         let monitoring_plugin_path = current_dir.join(
-            ".pmp/template-packs/comprehensive-pack/plugins/monitoring-plugin/.pmp.plugin.yaml"
+            ".pmp/template-packs/comprehensive-pack/plugins/monitoring-plugin/.pmp.plugin.yaml",
         );
         assert!(
             fs.has_file(&monitoring_plugin_path),
             "Monitoring plugin should exist"
         );
 
-        let backup_plugin_path = current_dir.join(
-            ".pmp/template-packs/comprehensive-pack/plugins/backup-plugin/.pmp.plugin.yaml"
-        );
+        let backup_plugin_path = current_dir
+            .join(".pmp/template-packs/comprehensive-pack/plugins/backup-plugin/.pmp.plugin.yaml");
         assert!(
             fs.has_file(&backup_plugin_path),
             "Backup plugin should exist"
@@ -6245,8 +6277,7 @@ spec:
 
         // Run create command
         let result = CreateCommand::execute(
-            &ctx,
-            None,  // output_path
+            &ctx, None,  // output_path
             None,  // template_packs_paths
             None,  // inputs_str
             None,  // template_spec
@@ -6353,7 +6384,11 @@ spec:
         );
 
         // Check monitoring plugin module was generated
-        let monitoring_tf_path = env_path.join("modules").join("opentofu-pack").join("monitoring").join("monitoring.tf");
+        let monitoring_tf_path = env_path
+            .join("modules")
+            .join("opentofu-pack")
+            .join("monitoring")
+            .join("monitoring.tf");
         assert!(
             fs.has_file(&monitoring_tf_path),
             "monitoring.tf from pre-installed plugin should exist in modules directory"
@@ -6383,11 +6418,23 @@ spec:
 
         // Verify logging and backup plugins were NOT installed (they're only allowed)
         assert!(
-            !fs.has_file(&env_path.join("modules").join("opentofu-pack").join("logging").join("logging.tf")),
+            !fs.has_file(
+                &env_path
+                    .join("modules")
+                    .join("opentofu-pack")
+                    .join("logging")
+                    .join("logging.tf")
+            ),
             "logging.tf should NOT exist (not pre-installed)"
         );
         assert!(
-            !fs.has_file(&env_path.join("modules").join("opentofu-pack").join("backup").join("backup.tf")),
+            !fs.has_file(
+                &env_path
+                    .join("modules")
+                    .join("opentofu-pack")
+                    .join("backup")
+                    .join("backup.tf")
+            ),
             "backup.tf should NOT exist (not pre-installed)"
         );
     }
@@ -6448,8 +6495,8 @@ spec:
         let result = UpdateCommand::execute(
             &ctx_update,
             Some(env_path_str.to_str().unwrap()), // absolute path to environment
-            None,                                   // template_packs_paths
-            None,                                   // inputs_str
+            None,                                 // template_packs_paths
+            None,                                 // inputs_str
         );
 
         assert!(
@@ -6507,7 +6554,11 @@ spec:
         );
 
         // Verify monitoring.tf was regenerated but kept original plugin input values
-        let monitoring_tf_path = env_path.join("modules").join("opentofu-pack").join("monitoring").join("monitoring.tf");
+        let monitoring_tf_path = env_path
+            .join("modules")
+            .join("opentofu-pack")
+            .join("monitoring")
+            .join("monitoring.tf");
         let monitoring_content = fs.get_file_contents(&monitoring_tf_path).unwrap();
         assert!(
             monitoring_content.contains("# Scrape interval: 15s"),
@@ -6587,8 +6638,8 @@ spec:
         let result = UpdateCommand::execute(
             &ctx_update,
             Some(env_path_str.to_str().unwrap()), // absolute path to environment
-            None,                                   // template_packs_paths
-            None,                                   // inputs_str
+            None,                                 // template_packs_paths
+            None,                                 // inputs_str
         );
 
         assert!(
@@ -6602,7 +6653,11 @@ spec:
         let env_path = current_dir.join("projects/my-webapp/environments/dev");
 
         // Verify logging.tf was created
-        let logging_tf_path = env_path.join("modules").join("opentofu-pack").join("logging").join("logging.tf");
+        let logging_tf_path = env_path
+            .join("modules")
+            .join("opentofu-pack")
+            .join("logging")
+            .join("logging.tf");
         assert!(
             fs.has_file(&logging_tf_path),
             "logging.tf should be created after adding plugin"
@@ -6643,7 +6698,11 @@ spec:
         );
 
         // Verify monitoring.tf still exists (pre-installed plugin should remain)
-        let monitoring_tf_path = env_path.join("modules").join("opentofu-pack").join("monitoring").join("monitoring.tf");
+        let monitoring_tf_path = env_path
+            .join("modules")
+            .join("opentofu-pack")
+            .join("monitoring")
+            .join("monitoring.tf");
         assert!(
             fs.has_file(&monitoring_tf_path),
             "monitoring.tf should still exist after update"
@@ -6683,8 +6742,8 @@ spec:
         let result2 = UpdateCommand::execute(
             &ctx_update2,
             Some(env_path_str.to_str().unwrap()), // absolute path to environment
-            None,                                   // template_packs_paths
-            None,                                   // inputs_str
+            None,                                 // template_packs_paths
+            None,                                 // inputs_str
         );
 
         assert!(
@@ -6694,7 +6753,11 @@ spec:
         );
 
         // Verify backup.tf was created
-        let backup_tf_path = env_path.join("modules").join("opentofu-pack").join("backup").join("backup.tf");
+        let backup_tf_path = env_path
+            .join("modules")
+            .join("opentofu-pack")
+            .join("backup")
+            .join("backup.tf");
         assert!(
             fs.has_file(&backup_tf_path),
             "backup.tf should be created after adding backup plugin"
@@ -6749,15 +6812,23 @@ max_seconds: 86400
 default: "1h"
 "##;
 
-        let result: Result<crate::template::metadata::InputDefinition, _> = serde_yaml::from_str(yaml);
-        assert!(result.is_ok(), "Failed to deserialize duration input: {:?}", result);
+        let result: Result<crate::template::metadata::InputDefinition, _> =
+            serde_yaml::from_str(yaml);
+        assert!(
+            result.is_ok(),
+            "Failed to deserialize duration input: {:?}",
+            result
+        );
 
         let input_def = result.unwrap();
         assert_eq!(input_def.name, "test_duration");
         assert!(input_def.input_type.is_some(), "Input type should be Some");
 
         match input_def.input_type.unwrap() {
-            crate::template::metadata::InputType::Duration { min_seconds, max_seconds } => {
+            crate::template::metadata::InputType::Duration {
+                min_seconds,
+                max_seconds,
+            } => {
                 assert_eq!(min_seconds, Some(60));
                 assert_eq!(max_seconds, Some(86400));
             }
@@ -6851,9 +6922,7 @@ resource "database" "main" {
         let ctx = create_test_context(Arc::clone(&fs), input);
 
         // Run create command
-        let result = CreateCommand::execute(
-            &ctx, None, None, None, None, false, None, None,
-        );
+        let result = CreateCommand::execute(&ctx, None, None, None, None, false, None, None);
 
         assert!(
             result.is_ok(),
@@ -6862,12 +6931,8 @@ resource "database" "main" {
         );
 
         // Verify rendered template
-        let main_tf_path =
-            current_dir.join("projects/test-project/environments/dev/main.tf");
-        assert!(
-            fs.has_file(&main_tf_path),
-            "main.tf should be created"
-        );
+        let main_tf_path = current_dir.join("projects/test-project/environments/dev/main.tf");
+        assert!(fs.has_file(&main_tf_path), "main.tf should be created");
 
         let main_tf_content = fs.get_file_contents(&main_tf_path).unwrap();
         assert!(
@@ -6971,32 +7036,30 @@ resource "team_membership" "member_{{@index}}" {
         ));
         input.add_response(MockResponse::Text("test-project".to_string()));
 
-        // First team member
-        input.add_response(MockResponse::Confirm(true)); // Add another?
+        // First team member (when min=0 and empty, first prompt allows Add or Done)
+        input.add_response(MockResponse::Select("Add new team member".to_string()));
         input.add_response(MockResponse::Text("alice".to_string())); // username
         input.add_response(MockResponse::Select("Maintainer".to_string())); // role
 
         // Second team member
-        input.add_response(MockResponse::Confirm(true)); // Add another?
+        input.add_response(MockResponse::Select("Add new team member".to_string()));
         input.add_response(MockResponse::Text("bob".to_string())); // username
         input.add_response(MockResponse::Select("Member".to_string())); // role
 
         // Third team member
-        input.add_response(MockResponse::Confirm(true)); // Add another?
+        input.add_response(MockResponse::Select("Add new team member".to_string()));
         input.add_response(MockResponse::Text("charlie".to_string())); // username
         input.add_response(MockResponse::Select("Member".to_string())); // role
 
         // Stop adding members
-        input.add_response(MockResponse::Confirm(false)); // No more
+        input.add_response(MockResponse::Select("Done".to_string()));
 
         input.add_response(MockResponse::Confirm(false)); // apply after create
 
         let ctx = create_test_context(Arc::clone(&fs), input);
 
         // Run create command
-        let result = CreateCommand::execute(
-            &ctx, None, None, None, None, false, None, None,
-        );
+        let result = CreateCommand::execute(&ctx, None, None, None, None, false, None, None);
 
         assert!(
             result.is_ok(),
@@ -7005,12 +7068,8 @@ resource "team_membership" "member_{{@index}}" {
         );
 
         // Verify rendered template
-        let main_tf_path =
-            current_dir.join("projects/test-project/environments/dev/main.tf");
-        assert!(
-            fs.has_file(&main_tf_path),
-            "main.tf should be created"
-        );
+        let main_tf_path = current_dir.join("projects/test-project/environments/dev/main.tf");
+        assert!(fs.has_file(&main_tf_path), "main.tf should be created");
 
         let main_tf_content = fs.get_file_contents(&main_tf_path).unwrap();
 
@@ -7047,11 +7106,10 @@ resource "team_membership" "member_{{@index}}" {
         );
 
         // Count member blocks
-        let member_count = main_tf_content.matches("resource \"team_membership\"").count();
-        assert_eq!(
-            member_count, 3,
-            "Should have exactly 3 team members"
-        );
+        let member_count = main_tf_content
+            .matches("resource \"team_membership\"")
+            .count();
+        assert_eq!(member_count, 3, "Should have exactly 3 team members");
     }
 
     #[test]
@@ -7079,7 +7137,8 @@ resource "theme" "main" {
   primary_color = "{{brand_color}}"
 }"#;
         fs.write(
-            &current_dir.join(".pmp/template-packs/test-pack/templates/test-template/src/main.tf.hbs"),
+            &current_dir
+                .join(".pmp/template-packs/test-pack/templates/test-template/src/main.tf.hbs"),
             template_content,
         )
         .unwrap();
@@ -7103,14 +7162,11 @@ resource "theme" "main" {
 
         let ctx = create_test_context(Arc::clone(&fs), input);
 
-        let result = CreateCommand::execute(
-            &ctx, None, None, None, None, false, None, None,
-        );
+        let result = CreateCommand::execute(&ctx, None, None, None, None, false, None, None);
 
         assert!(result.is_ok(), "Create should succeed: {:?}", result);
 
-        let main_tf_path =
-            current_dir.join("projects/test-project/environments/dev/main.tf");
+        let main_tf_path = current_dir.join("projects/test-project/environments/dev/main.tf");
         let main_tf_content = fs.get_file_contents(&main_tf_path).unwrap();
 
         assert!(
@@ -7147,13 +7203,17 @@ resource "cache" "main" {
   ttl_seconds = {{cache_ttl}}
 }"#;
         fs.write(
-            &current_dir.join(".pmp/template-packs/test-pack/templates/test-template/src/main.tf.hbs"),
+            &current_dir
+                .join(".pmp/template-packs/test-pack/templates/test-template/src/main.tf.hbs"),
             template_content,
         )
         .unwrap();
 
-        setup_infrastructure(&fs, r#"    - apiVersion: pmp.io/v1
-      kind: TestResource"#);
+        setup_infrastructure(
+            &fs,
+            r#"    - apiVersion: pmp.io/v1
+      kind: TestResource"#,
+        );
 
         let input = MockUserInput::new();
         input.add_response(MockResponse::Select(
@@ -7172,7 +7232,8 @@ resource "cache" "main" {
         assert!(result.is_ok(), "Create should succeed: {:?}", result);
 
         // Check environment file first
-        let env_yaml_path = current_dir.join("projects/test-project/environments/dev/.pmp.environment.yaml");
+        let env_yaml_path =
+            current_dir.join("projects/test-project/environments/dev/.pmp.environment.yaml");
         let env_content = fs.get_file_contents(&env_yaml_path).unwrap();
         assert!(
             env_content.contains("cache_ttl: 9000"),
@@ -7217,13 +7278,17 @@ resource "backup" "main" {
   schedule = "{{backup_schedule}}"
 }"#;
         fs.write(
-            &current_dir.join(".pmp/template-packs/test-pack/templates/test-template/src/main.tf.hbs"),
+            &current_dir
+                .join(".pmp/template-packs/test-pack/templates/test-template/src/main.tf.hbs"),
             template_content,
         )
         .unwrap();
 
-        setup_infrastructure(&fs, r#"    - apiVersion: pmp.io/v1
-      kind: TestResource"#);
+        setup_infrastructure(
+            &fs,
+            r#"    - apiVersion: pmp.io/v1
+      kind: TestResource"#,
+        );
 
         let input = MockUserInput::new();
         input.add_response(MockResponse::Select(
@@ -7287,13 +7352,17 @@ resource "app" "main" {
   }
 }"#;
         fs.write(
-            &current_dir.join(".pmp/template-packs/test-pack/templates/test-template/src/main.tf.hbs"),
+            &current_dir
+                .join(".pmp/template-packs/test-pack/templates/test-template/src/main.tf.hbs"),
             template_content,
         )
         .unwrap();
 
-        setup_infrastructure(&fs, r#"    - apiVersion: pmp.io/v1
-      kind: TestResource"#);
+        setup_infrastructure(
+            &fs,
+            r#"    - apiVersion: pmp.io/v1
+      kind: TestResource"#,
+        );
 
         let input = MockUserInput::new();
         input.add_response(MockResponse::Select(
@@ -7303,7 +7372,9 @@ resource "app" "main" {
             "📄 test-template - Test template".to_string(),
         ));
         input.add_response(MockResponse::Text("test-project".to_string()));
-        input.add_response(MockResponse::Text("env=prod,team=platform,version=1.0".to_string())); // labels
+        input.add_response(MockResponse::Text(
+            "env=prod,team=platform,version=1.0".to_string(),
+        )); // labels
         input.add_response(MockResponse::Confirm(false));
 
         let ctx = create_test_context(Arc::clone(&fs), input);
@@ -7360,13 +7431,17 @@ resource "deployment" "main" {
   version = "{{app_version}}"
 }"#;
         fs.write(
-            &current_dir.join(".pmp/template-packs/test-pack/templates/test-template/src/main.tf.hbs"),
+            &current_dir
+                .join(".pmp/template-packs/test-pack/templates/test-template/src/main.tf.hbs"),
             template_content,
         )
         .unwrap();
 
-        setup_infrastructure(&fs, r#"    - apiVersion: pmp.io/v1
-      kind: TestResource"#);
+        setup_infrastructure(
+            &fs,
+            r#"    - apiVersion: pmp.io/v1
+      kind: TestResource"#,
+        );
 
         let input = MockUserInput::new();
         input.add_response(MockResponse::Select(
@@ -7517,8 +7592,11 @@ resource "team_membership" "member_{{@index}}" {
         .unwrap();
 
         // Setup infrastructure
-        setup_infrastructure(&fs, r#"    - apiVersion: pmp.io/v1
-      kind: TestResource"#);
+        setup_infrastructure(
+            &fs,
+            r#"    - apiVersion: pmp.io/v1
+      kind: TestResource"#,
+        );
 
         let input = MockUserInput::new();
         input.add_response(MockResponse::Select(
@@ -7553,10 +7631,15 @@ resource "team_membership" "member_{{@index}}" {
         let ctx = create_test_context(Arc::clone(&fs), input);
         let result = CreateCommand::execute(&ctx, None, None, None, None, false, None, None);
 
-        assert!(result.is_ok(), "Project creation should succeed: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "Project creation should succeed: {:?}",
+            result
+        );
 
         // Verify main template file
-        let main_tf_path = current_dir.join("projects/plugin-test-project/environments/dev/main.tf");
+        let main_tf_path =
+            current_dir.join("projects/plugin-test-project/environments/dev/main.tf");
         let main_tf_content = fs.get_file_contents(&main_tf_path).unwrap();
         assert!(
             main_tf_content.contains("name = \"awesome-app\""),
@@ -7564,7 +7647,8 @@ resource "team_membership" "member_{{@index}}" {
         );
 
         // Verify plugin file exists and has correct content
-        let plugin_tf_path = current_dir.join("projects/plugin-test-project/environments/dev/plugin_team.tf");
+        let plugin_tf_path =
+            current_dir.join("projects/plugin-test-project/environments/dev/plugin_team.tf");
         let plugin_tf_content = fs.get_file_contents(&plugin_tf_path).unwrap();
 
         assert!(
@@ -7594,7 +7678,8 @@ resource "team_membership" "member_{{@index}}" {
         );
 
         // Verify environment file has plugin inputs stored
-        let env_yaml_path = current_dir.join("projects/plugin-test-project/environments/dev/.pmp.environment.yaml");
+        let env_yaml_path =
+            current_dir.join("projects/plugin-test-project/environments/dev/.pmp.environment.yaml");
         let env_content = fs.get_file_contents(&env_yaml_path).unwrap();
         assert!(
             env_content.contains("team_name: platform-team"),
@@ -7623,7 +7708,8 @@ resource "team_membership" "member_{{@index}}" {
         );
 
         fs.write(
-            &current_dir.join(".pmp/template-packs/test-pack/templates/test-template/src/main.tf.hbs"),
+            &current_dir
+                .join(".pmp/template-packs/test-pack/templates/test-template/src/main.tf.hbs"),
             r#"resource "app" "main" {
   name = "{{app_name}}"
 }"#,
@@ -7661,16 +7747,11 @@ spec:
       description: Development environment"#
         );
 
-        fs.write(
-            &current_dir.join(".pmp.infrastructure.yaml"),
-            &infra_yaml,
-        )
-        .unwrap();
+        fs.write(&current_dir.join(".pmp.infrastructure.yaml"), &infra_yaml)
+            .unwrap();
 
         let input = MockUserInput::new();
-        input.add_response(MockResponse::Select(
-            "📁 TestResource".to_string(),
-        ));
+        input.add_response(MockResponse::Select("📁 TestResource".to_string()));
         input.add_response(MockResponse::Select(
             "📄 test-template - Test template".to_string(),
         ));
@@ -7681,10 +7762,15 @@ spec:
         let ctx = create_test_context(Arc::clone(&fs), input);
         let result = CreateCommand::execute(&ctx, None, None, None, None, false, None, None);
 
-        assert!(result.is_ok(), "Project creation should succeed: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "Project creation should succeed: {:?}",
+            result
+        );
 
         // Verify _common.tf exists with backend configuration
-        let common_tf_path = current_dir.join("projects/backend-test-project/environments/dev/_common.tf");
+        let common_tf_path =
+            current_dir.join("projects/backend-test-project/environments/dev/_common.tf");
         assert!(
             fs.exists(&common_tf_path),
             "_common.tf should be generated with backend config"
@@ -7805,7 +7891,8 @@ spec: {}"#,
         .unwrap();
 
         fs.write(
-            &current_dir.join(".pmp/template-packs/test-pack/templates/comprehensive/.pmp.template.yaml"),
+            &current_dir
+                .join(".pmp/template-packs/test-pack/templates/comprehensive/.pmp.template.yaml"),
             template_yaml,
         )
         .unwrap();
@@ -7841,7 +7928,8 @@ resource "app" "main" {
 }"#;
 
         fs.write(
-            &current_dir.join(".pmp/template-packs/test-pack/templates/comprehensive/src/main.tf.hbs"),
+            &current_dir
+                .join(".pmp/template-packs/test-pack/templates/comprehensive/src/main.tf.hbs"),
             template_content,
         )
         .unwrap();
@@ -7888,25 +7976,63 @@ resource "app" "main" {
         let ctx = create_test_context(Arc::clone(&fs), input);
         let result = CreateCommand::execute(&ctx, None, None, None, None, false, None, None);
 
-        assert!(result.is_ok(), "Project creation should succeed: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "Project creation should succeed: {:?}",
+            result
+        );
 
-        let main_tf_path = current_dir.join("projects/comprehensive-project/environments/dev/main.tf");
+        let main_tf_path =
+            current_dir.join("projects/comprehensive-project/environments/dev/main.tf");
         let main_tf_content = fs.get_file_contents(&main_tf_path).unwrap();
 
         // Verify all input types rendered correctly
-        assert!(main_tf_content.contains("name     = \"awesome-app\""), "String input");
+        assert!(
+            main_tf_content.contains("name     = \"awesome-app\""),
+            "String input"
+        );
         assert!(main_tf_content.contains("replicas = 5"), "Number input");
-        assert!(main_tf_content.contains("monitoring_enabled = true"), "Boolean input");
-        assert!(main_tf_content.contains("environment = \"prod\""), "Select input");
-        assert!(main_tf_content.contains("theme_color = \"#FF5733\""), "Color input");
-        assert!(main_tf_content.contains("cache_ttl_seconds = 9000"), "Duration input (parsed)");
-        assert!(main_tf_content.contains("backup_cron = \"0 3 * * *\""), "Cron input");
-        assert!(main_tf_content.contains("version = \"2.5.1\""), "Semver input");
-        assert!(main_tf_content.contains("label_env = \"prod\""), "KeyValue input");
-        assert!(main_tf_content.contains("label_team = \"backend\""), "KeyValue input");
-        assert!(main_tf_content.contains("host = \"db.example.com\""), "Object input");
+        assert!(
+            main_tf_content.contains("monitoring_enabled = true"),
+            "Boolean input"
+        );
+        assert!(
+            main_tf_content.contains("environment = \"prod\""),
+            "Select input"
+        );
+        assert!(
+            main_tf_content.contains("theme_color = \"#FF5733\""),
+            "Color input"
+        );
+        assert!(
+            main_tf_content.contains("cache_ttl_seconds = 9000"),
+            "Duration input (parsed)"
+        );
+        assert!(
+            main_tf_content.contains("backup_cron = \"0 3 * * *\""),
+            "Cron input"
+        );
+        assert!(
+            main_tf_content.contains("version = \"2.5.1\""),
+            "Semver input"
+        );
+        assert!(
+            main_tf_content.contains("label_env = \"prod\""),
+            "KeyValue input"
+        );
+        assert!(
+            main_tf_content.contains("label_team = \"backend\""),
+            "KeyValue input"
+        );
+        assert!(
+            main_tf_content.contains("host = \"db.example.com\""),
+            "Object input"
+        );
         assert!(main_tf_content.contains("port = 5432"), "Object input");
-        assert!(main_tf_content.contains("ssl_enabled = true"), "Object input");
+        assert!(
+            main_tf_content.contains("ssl_enabled = true"),
+            "Object input"
+        );
     }
 
     #[test]
@@ -7927,7 +8053,8 @@ resource "app" "main" {
         );
 
         fs.write(
-            &current_dir.join(".pmp/template-packs/test-pack/templates/test-template/src/main.tf.hbs"),
+            &current_dir
+                .join(".pmp/template-packs/test-pack/templates/test-template/src/main.tf.hbs"),
             r#"resource "app" "main" {
   name = "{{app_name}}"
   environment = "{{_environment_name}}"
@@ -7963,31 +8090,32 @@ spec:
       description: Production environment"#
         );
 
-        fs.write(
-            &current_dir.join(".pmp.infrastructure.yaml"),
-            &infra_yaml,
-        )
-        .unwrap();
+        fs.write(&current_dir.join(".pmp.infrastructure.yaml"), &infra_yaml)
+            .unwrap();
 
         let input = MockUserInput::new();
-        input.add_response(MockResponse::Select(
-            "📁 TestResource".to_string(),
-        ));
+        input.add_response(MockResponse::Select("📁 TestResource".to_string()));
         input.add_response(MockResponse::Select(
             "📄 test-template - Test template".to_string(),
         ));
-        input.add_response(MockResponse::Select("Development - Development environment".to_string())); // Initial environment
+        input.add_response(MockResponse::Select(
+            "Development - Development environment".to_string(),
+        )); // Initial environment
         input.add_response(MockResponse::Text("multi-env-project".to_string()));
         input.add_response(MockResponse::Text("myapp".to_string())); // app_name for dev
 
         // Add staging environment
         input.add_response(MockResponse::Confirm(true));
-        input.add_response(MockResponse::Select("Staging - Staging environment".to_string()));
+        input.add_response(MockResponse::Select(
+            "Staging - Staging environment".to_string(),
+        ));
         input.add_response(MockResponse::Text("myapp".to_string())); // app_name for staging
 
         // Add prod environment
         input.add_response(MockResponse::Confirm(true));
-        input.add_response(MockResponse::Select("Production - Production environment".to_string()));
+        input.add_response(MockResponse::Select(
+            "Production - Production environment".to_string(),
+        ));
         input.add_response(MockResponse::Text("myapp".to_string())); // app_name for prod
 
         input.add_response(MockResponse::Confirm(false)); // No more environments
@@ -7995,7 +8123,11 @@ spec:
         let ctx = create_test_context(Arc::clone(&fs), input);
         let result = CreateCommand::execute(&ctx, None, None, None, None, false, None, None);
 
-        assert!(result.is_ok(), "Project creation should succeed: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "Project creation should succeed: {:?}",
+            result
+        );
 
         // Verify dev environment
         let dev_tf_path = current_dir.join("projects/multi-env-project/environments/dev/main.tf");
@@ -8006,7 +8138,8 @@ spec:
         );
 
         // Verify staging environment
-        let staging_tf_path = current_dir.join("projects/multi-env-project/environments/staging/main.tf");
+        let staging_tf_path =
+            current_dir.join("projects/multi-env-project/environments/staging/main.tf");
         let staging_tf_content = fs.get_file_contents(&staging_tf_path).unwrap();
         assert!(
             staging_tf_content.contains("environment = \"staging\""),
@@ -8052,7 +8185,8 @@ spec:
         );
 
         fs.write(
-            &current_dir.join(".pmp/template-packs/test-pack/templates/test-template/src/main.tf.hbs"),
+            &current_dir
+                .join(".pmp/template-packs/test-pack/templates/test-template/src/main.tf.hbs"),
             r#"resource "app" "main" {
   name = "{{app_name}}"
   replicas = {{replicas}}
@@ -8079,9 +8213,7 @@ spec:
         );
 
         let input = MockUserInput::new();
-        input.add_response(MockResponse::Select(
-            "📁 TestResource".to_string(),
-        ));
+        input.add_response(MockResponse::Select("📁 TestResource".to_string()));
         input.add_response(MockResponse::Select(
             "📄 test-template - Test template".to_string(),
         ));
@@ -8093,7 +8225,11 @@ spec:
         let ctx = create_test_context(Arc::clone(&fs), input);
         let result = CreateCommand::execute(&ctx, None, None, None, None, false, None, None);
 
-        assert!(result.is_ok(), "Project creation should succeed: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "Project creation should succeed: {:?}",
+            result
+        );
 
         let main_tf_path = current_dir.join("projects/defaults-project/environments/dev/main.tf");
         let main_tf_content = fs.get_file_contents(&main_tf_path).unwrap();
@@ -8103,7 +8239,8 @@ spec:
             "Should use infrastructure default value (5) not template default (1)"
         );
 
-        let env_yaml_path = current_dir.join("projects/defaults-project/environments/dev/.pmp.environment.yaml");
+        let env_yaml_path =
+            current_dir.join("projects/defaults-project/environments/dev/.pmp.environment.yaml");
         let env_content = fs.get_file_contents(&env_yaml_path).unwrap();
         assert!(
             env_content.contains("replicas: 5"),
@@ -8172,13 +8309,15 @@ spec: {}"#,
         .unwrap();
 
         fs.write(
-            &current_dir.join(".pmp/template-packs/test-pack/templates/conditional/.pmp.template.yaml"),
+            &current_dir
+                .join(".pmp/template-packs/test-pack/templates/conditional/.pmp.template.yaml"),
             template_yaml,
         )
         .unwrap();
 
         fs.write(
-            &current_dir.join(".pmp/template-packs/test-pack/templates/conditional/src/main.tf.hbs"),
+            &current_dir
+                .join(".pmp/template-packs/test-pack/templates/conditional/src/main.tf.hbs"),
             r#"resource "app" "main" {
 {{#if enable_monitoring}}
   monitoring_endpoint = "{{monitoring_endpoint}}"
@@ -8213,7 +8352,9 @@ spec: {}"#,
         input.add_response(MockResponse::Text("conditional-project".to_string()));
 
         input.add_response(MockResponse::Select("Yes".to_string())); // enable_monitoring = true
-        input.add_response(MockResponse::Text("http://monitoring.example.com".to_string())); // monitoring_endpoint (shown)
+        input.add_response(MockResponse::Text(
+            "http://monitoring.example.com".to_string(),
+        )); // monitoring_endpoint (shown)
         input.add_response(MockResponse::Select("Production".to_string())); // environment_type = prod
         input.add_response(MockResponse::Text("10".to_string())); // production_replicas (shown)
 
@@ -8222,9 +8363,14 @@ spec: {}"#,
         let ctx = create_test_context(Arc::clone(&fs), input);
         let result = CreateCommand::execute(&ctx, None, None, None, None, false, None, None);
 
-        assert!(result.is_ok(), "Project creation should succeed: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "Project creation should succeed: {:?}",
+            result
+        );
 
-        let main_tf_path = current_dir.join("projects/conditional-project/environments/dev/main.tf");
+        let main_tf_path =
+            current_dir.join("projects/conditional-project/environments/dev/main.tf");
         let main_tf_content = fs.get_file_contents(&main_tf_path).unwrap();
 
         assert!(

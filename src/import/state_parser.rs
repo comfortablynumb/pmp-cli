@@ -25,8 +25,8 @@ impl StateParser {
             .with_context(|| format!("Failed to read state file: {}", self.state_path.display()))?;
 
         // Parse JSON
-        let state: Value = serde_json::from_str(&content)
-            .context("Failed to parse state file as JSON")?;
+        let state: Value =
+            serde_json::from_str(&content).context("Failed to parse state file as JSON")?;
 
         // Extract resources
         let resources = self.extract_resources(&state)?;

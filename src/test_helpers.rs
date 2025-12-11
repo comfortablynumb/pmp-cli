@@ -3,8 +3,6 @@
 //! This module provides utilities for setting up comprehensive test environments
 //! with template packs, plugins, and infrastructure configurations.
 
-#![cfg(test)]
-
 use crate::traits::{FileSystem, MockFileSystem};
 use std::path::PathBuf;
 
@@ -213,7 +211,8 @@ impl TemplateBuilder {
                         "      - template_pack_name: {}\n",
                         plugin.template_pack_name
                     ));
-                    plugins_section.push_str(&format!("        plugin_name: {}\n", plugin.plugin_name));
+                    plugins_section
+                        .push_str(&format!("        plugin_name: {}\n", plugin.plugin_name));
                     plugins_section.push_str(&format!("        order: {}\n", plugin.order));
                     if plugin.disable_user_input_override {
                         plugins_section.push_str("        disable_user_input_override: true\n");
@@ -234,7 +233,8 @@ impl TemplateBuilder {
                         "      - template_pack_name: {}\n",
                         plugin.template_pack_name
                     ));
-                    plugins_section.push_str(&format!("        plugin_name: {}\n", plugin.plugin_name));
+                    plugins_section
+                        .push_str(&format!("        plugin_name: {}\n", plugin.plugin_name));
                 }
             }
         }
@@ -365,7 +365,11 @@ spec:
             self.description,
             self.role,
             deps_section,
-            if self.inputs.is_empty() { "    {}" } else { &self.inputs }
+            if self.inputs.is_empty() {
+                "    {}"
+            } else {
+                &self.inputs
+            }
         );
         fs.write(&plugin_dir.join(".pmp.plugin.yaml"), &plugin_yaml)
             .unwrap();
@@ -406,7 +410,8 @@ pub fn create_comprehensive_template_pack(fs: &MockFileSystem) -> PathBuf {
                 .resource("pmp.io/v1", "Application")
                 .executor("opentofu")
                 .order(100)
-                .inputs(r#"    # String input
+                .inputs(
+                    r#"    # String input
     app_name:
       type: string
       description: Application name
@@ -476,8 +481,10 @@ pub fn create_comprehensive_template_pack(fs: &MockFileSystem) -> PathBuf {
         dev:
           default: debug
         prod:
-          default: warn"#)
-                .dependencies(r#"    - dependency_name: main_database
+          default: warn"#,
+                )
+                .dependencies(
+                    r#"    - dependency_name: main_database
       project:
         apiVersion: pmp.io/v1
         kind: Database
@@ -485,10 +492,13 @@ pub fn create_comprehensive_template_pack(fs: &MockFileSystem) -> PathBuf {
           tier: primary
         description: Main database for the application
         remote_state:
-          data_source_name: main_db"#)
-                .environments(r#"    - dev
+          data_source_name: main_db"#,
+                )
+                .environments(
+                    r#"    - dev
     - staging
-    - prod"#)
+    - prod"#,
+                )
                 .with_installed_plugin(InstalledPluginConfig {
                     template_pack_name: "comprehensive-pack".to_string(),
                     plugin_name: "monitoring-plugin".to_string(),
@@ -507,7 +517,9 @@ pub fn create_comprehensive_template_pack(fs: &MockFileSystem) -> PathBuf {
                     template_pack_name: "comprehensive-pack".to_string(),
                     plugin_name: "logging-plugin".to_string(),
                 })
-                .with_file("main.tf.hbs", r#"# Application: {{app_name}}
+                .with_file(
+                    "main.tf.hbs",
+                    r#"# Application: {{app_name}}
 # Replicas: {{replica_count}}
 # Monitoring: {{enable_monitoring}}
 # Strategy: {{deployment_strategy}}
@@ -525,7 +537,8 @@ resource "kubernetes_deployment" "app" {
     {{/if}}
   }
 }
-"#)
+"#,
+                ),
         )
         // Simple template for basic tests
         .template(
@@ -533,18 +546,21 @@ resource "kubernetes_deployment" "app" {
                 .description("Simple template for basic tests")
                 .resource("pmp.io/v1", "SimpleResource")
                 .executor("opentofu")
-                .inputs(r#"    name:
+                .inputs(
+                    r#"    name:
       type: string
       description: Resource name
-      default: simple"#)
-                .with_file("simple.tf.hbs", "# Simple resource: {{name}}")
+      default: simple"#,
+                )
+                .with_file("simple.tf.hbs", "# Simple resource: {{name}}"),
         )
         // Plugin with dependencies
         .plugin(
             PluginBuilder::new("monitoring-plugin")
                 .description("Monitoring plugin with Prometheus")
                 .role("observability")
-                .inputs(r#"    prometheus_enabled:
+                .inputs(
+                    r#"    prometheus_enabled:
       type: boolean
       description: Enable Prometheus
       default: true
@@ -559,8 +575,11 @@ resource "kubernetes_deployment" "app" {
       description: Metrics retention in days
       default: 30
       min: 7
-      max: 365"#)
-                .with_file("monitoring.tf.hbs", r#"# Monitoring configuration
+      max: 365"#,
+                )
+                .with_file(
+                    "monitoring.tf.hbs",
+                    r#"# Monitoring configuration
 {{#if prometheus_enabled}}
 resource "helm_release" "prometheus" {
   name = "prometheus"
@@ -574,14 +593,16 @@ resource "helm_release" "grafana" {
   # ... configuration
 }
 {{/if}}
-"#)
+"#,
+                ),
         )
         // Plugin with project dependencies
         .plugin(
             PluginBuilder::new("backup-plugin")
                 .description("Backup plugin with storage dependency")
                 .role("data-protection")
-                .inputs(r#"    backup_schedule:
+                .inputs(
+                    r#"    backup_schedule:
       type: string
       description: Cron schedule for backups
       default: "0 2 * * *"
@@ -589,15 +610,20 @@ resource "helm_release" "grafana" {
     retention_count:
       type: number
       description: Number of backups to retain
-      default: 7"#)
-                .dependencies(r#"    - dependency_name: storage
+      default: 7"#,
+                )
+                .dependencies(
+                    r#"    - dependency_name: storage
       project:
         apiVersion: pmp.io/v1
         kind: ObjectStorage
         description: Storage for backups
         remote_state:
-          data_source_name: backup_storage"#)
-                .with_file("backup.tf.hbs", r#"# Backup configuration
+          data_source_name: backup_storage"#,
+                )
+                .with_file(
+                    "backup.tf.hbs",
+                    r#"# Backup configuration
 # Schedule: {{backup_schedule}}
 # Retention: {{retention_count}}
 
@@ -609,22 +635,25 @@ resource "kubernetes_cron_job" "backup" {
   schedule = "{{backup_schedule}}"
   # ... configuration
 }
-"#)
+"#,
+                ),
         )
         // Simple plugin for allowed plugins
         .plugin(
             PluginBuilder::new("logging-plugin")
                 .description("Logging aggregation plugin")
                 .role("observability")
-                .inputs(r#"    log_aggregator:
+                .inputs(
+                    r#"    log_aggregator:
       type: select
       description: Log aggregation service
       default: loki
       options:
         - loki
         - elasticsearch
-        - cloudwatch"#)
-                .with_file("logging.tf.hbs", "# Logging: {{log_aggregator}}")
+        - cloudwatch"#,
+                )
+                .with_file("logging.tf.hbs", "# Logging: {{log_aggregator}}"),
         )
         .build(fs, base_path)
 }
@@ -649,7 +678,8 @@ pub fn create_opentofu_template_pack(fs: &MockFileSystem) -> PathBuf {
                 .resource("pmp.io/v1", "WebApp")
                 .executor("opentofu")
                 .order(100)
-                .inputs(r#"    app_name:
+                .inputs(
+                    r#"    app_name:
       type: string
       description: Application name
       default: my-app
@@ -676,7 +706,8 @@ pub fn create_opentofu_template_pack(fs: &MockFileSystem) -> PathBuf {
         - label: "Staging"
           value: "staging"
         - label: "Production"
-          value: "production""#)
+          value: "production""#,
+                )
                 .with_installed_plugin(InstalledPluginConfig {
                     template_pack_name: "opentofu-pack".to_string(),
                     plugin_name: "monitoring".to_string(),
@@ -692,7 +723,9 @@ pub fn create_opentofu_template_pack(fs: &MockFileSystem) -> PathBuf {
                     template_pack_name: "opentofu-pack".to_string(),
                     plugin_name: "backup".to_string(),
                 })
-                .with_file("main.tf.hbs", r#"# Web Application: {{app_name}}
+                .with_file(
+                    "main.tf.hbs",
+                    r#"# Web Application: {{app_name}}
 # Port: {{port}}
 # TLS: {{enable_tls}}
 # Environment: {{environment_type}}
@@ -754,14 +787,16 @@ resource "kubernetes_service" "webapp" {
     type = "{{#if (eq environment_type "production")}}LoadBalancer{{else}}ClusterIP{{/if}}"
   }
 }
-"#)
+"#,
+                ),
         )
         // Monitoring plugin (pre-installed)
         .plugin(
             PluginBuilder::new("monitoring")
                 .description("Prometheus monitoring")
                 .role("observability")
-                .inputs(r#"    metrics_enabled:
+                .inputs(
+                    r#"    metrics_enabled:
       type: boolean
       description: Enable metrics collection
       default: true
@@ -769,8 +804,11 @@ resource "kubernetes_service" "webapp" {
     scrape_interval:
       type: string
       description: Metrics scrape interval
-      default: "30s""#)
-                .with_file("monitoring.tf.hbs", r#"# Monitoring configuration
+      default: "30s""#,
+                )
+                .with_file(
+                    "monitoring.tf.hbs",
+                    r#"# Monitoring configuration
 # Metrics: {{metrics_enabled}}
 # Scrape interval: {{scrape_interval}}
 
@@ -824,14 +862,16 @@ resource "kubernetes_deployment" "prometheus" {
   }
 }
 {{/if}}
-"#)
+"#,
+                ),
         )
         // Logging plugin (allowed, not pre-installed)
         .plugin(
             PluginBuilder::new("logging")
                 .description("Centralized logging")
                 .role("observability")
-                .inputs(r#"    log_level:
+                .inputs(
+                    r#"    log_level:
       type: select
       description: Log level
       default: info
@@ -846,8 +886,11 @@ resource "kubernetes_deployment" "prometheus" {
       description: Log retention in days
       default: 30
       min: 1
-      max: 365"#)
-                .with_file("logging.tf.hbs", r#"# Logging configuration
+      max: 365"#,
+                )
+                .with_file(
+                    "logging.tf.hbs",
+                    r#"# Logging configuration
 # Log level: {{log_level}}
 # Retention: {{retention_days}} days
 
@@ -908,14 +951,16 @@ resource "kubernetes_daemonset" "fluentd" {
     }
   }
 }
-"#)
+"#,
+                ),
         )
         // Backup plugin (allowed, not pre-installed)
         .plugin(
             PluginBuilder::new("backup")
                 .description("Automated backups")
                 .role("data-protection")
-                .inputs(r#"    backup_schedule:
+                .inputs(
+                    r#"    backup_schedule:
       type: string
       description: Cron schedule for backups
       default: "0 2 * * *"
@@ -925,8 +970,11 @@ resource "kubernetes_daemonset" "fluentd" {
       description: Number of backups to retain
       default: 7
       min: 1
-      max: 30"#)
-                .with_file("backup.tf.hbs", r#"# Backup configuration
+      max: 30"#,
+                )
+                .with_file(
+                    "backup.tf.hbs",
+                    r#"# Backup configuration
 # Schedule: {{backup_schedule}}
 # Retention: {{backup_retention}} backups
 
@@ -970,7 +1018,8 @@ resource "kubernetes_cron_job" "backup" {
     }
   }
 }
-"#)
+"#,
+                ),
         )
         .build(fs, base_path)
 }

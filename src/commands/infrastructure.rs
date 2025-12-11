@@ -102,9 +102,11 @@ impl InfrastructureCommand {
                 })
                 .collect();
 
-            let selected_option = ctx
-                .input
-                .select("Select infrastructure template:", template_options.clone(), None)?;
+            let selected_option = ctx.input.select(
+                "Select infrastructure template:",
+                template_options.clone(),
+                None,
+            )?;
 
             // Find the index
             let selected_idx = template_options
@@ -272,7 +274,9 @@ impl InfrastructureCommand {
                 "jenkins".to_string(),
             ];
 
-            let ci_provider = ctx.input.select("Select CI provider:", ci_providers, None)?;
+            let ci_provider = ctx
+                .input
+                .select("Select CI provider:", ci_providers, None)?;
 
             output::blank();
             output::info(&format!("Generating {} pipeline...", ci_provider));
@@ -584,7 +588,9 @@ impl InfrastructureCommand {
             "local".to_string(),
         ];
 
-        let backend_type = ctx.input.select("Backend type:", backend_types.clone(), None)?;
+        let backend_type = ctx
+            .input
+            .select("Backend type:", backend_types.clone(), None)?;
 
         output::blank();
         output::dimmed(&format!("Configuring {} backend...", backend_type));

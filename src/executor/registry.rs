@@ -144,6 +144,15 @@ mod tests {
             Ok(())
         }
 
+        fn test(
+            &self,
+            _config: &ExecutorConfig,
+            _working_dir: &str,
+            _extra_args: &[String],
+        ) -> Result<()> {
+            Ok(())
+        }
+
         fn get_name(&self) -> &str {
             &self.name
         }
@@ -162,6 +171,10 @@ mod tests {
 
         fn default_refresh_command(&self) -> &str {
             "mock refresh"
+        }
+
+        fn default_test_command(&self) -> &str {
+            "mock test"
         }
     }
 

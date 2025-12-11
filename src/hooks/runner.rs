@@ -489,7 +489,7 @@ config:
                 question: "Ready to deploy?".to_string(),
                 exit_on_cancel: true,
                 default: None,
-            exit_on_confirm: false,
+                exit_on_confirm: false,
             }),
         ];
 
