@@ -1,24 +1,42 @@
 use anyhow::{Context, Result};
 use axum::{
     Router,
-    extract::{Json, Path, Query, State},
+    extract::{
+        Json, Path, Query, State,
+        ws::{Message, WebSocket, WebSocketUpgrade},
+    },
     http::StatusCode,
     response::{Html, IntoResponse, Response},
     routing::{get, post},
 };
+use futures::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use tokio::sync::Mutex as TokioMutex;
 use tower_http::cors::{Any, CorsLayer};
 
 /// Handles the 'ui' command - starts HTTP server with web interface
 pub struct UiCommand;
 
+/// Operation status for tracking running operations
+#[derive(Debug, Clone, Serialize)]
+pub struct OperationStatus {
+    pub id: String,
+    pub operation: String,
+    pub project_path: String,
+    pub status: String,
+    pub started_at: String,
+    pub finished_at: Option<String>,
+    pub success: Option<bool>,
+}
+
 /// Shared application state
 #[derive(Clone)]
 struct AppState {
     ctx: Arc<crate::context::Context>,
+    operations: Arc<TokioMutex<HashMap<String, OperationStatus>>>,
 }
 
 /// Request/Response structures
@@ -87,6 +105,23 @@ struct BrowseDirectoryRequest {
     path: Option<String>,
 }
 
+/// WebSocket operation request
+#[derive(Debug, Deserialize)]
+struct WsOperationRequest {
+    operation: String,
+    path: Option<String>,
+    executor_args: Option<Vec<String>>,
+    yes: Option<bool>,
+}
+
+/// WebSocket message types
+#[derive(Debug, Serialize)]
+struct WsMessage {
+    #[serde(rename = "type")]
+    msg_type: String,
+    data: serde_json::Value,
+}
+
 #[derive(Debug, Serialize)]
 struct ApiResponse<T> {
     success: bool,
@@ -127,9 +162,137 @@ struct TemplateInfo {
 #[derive(Debug, Serialize)]
 struct InputInfo {
     name: String,
+    #[serde(rename = "type")]
+    input_type: String,
     description: Option<String>,
     default: Option<serde_json::Value>,
-    enum_values: Option<Vec<String>>,
+    required: bool,
+    /// For select/multiselect types
+    options: Option<Vec<SelectOption>>,
+    /// For number type
+    min: Option<f64>,
+    max: Option<f64>,
+    /// Conditional visibility conditions
+    conditions: Option<Vec<InputConditionInfo>>,
+}
+
+#[derive(Debug, Serialize)]
+struct SelectOption {
+    label: String,
+    value: String,
+}
+
+#[derive(Debug, Serialize)]
+struct InputConditionInfo {
+    field: String,
+    condition: String,
+    value: Option<serde_json::Value>,
+}
+
+/// Convert an InputDefinition to InputInfo for API response
+fn convert_input_to_info(input: &crate::template::metadata::InputDefinition) -> InputInfo {
+    use crate::template::metadata::InputType;
+
+    // Determine input type string and extract type-specific fields
+    let (type_str, options, min, max) = match &input.input_type {
+        Some(InputType::String) => ("string".to_string(), None, None, None),
+        Some(InputType::Boolean) => ("boolean".to_string(), None, None, None),
+        Some(InputType::Number { min, max, .. }) => {
+            ("number".to_string(), None, *min, *max)
+        }
+        Some(InputType::Select { options }) => {
+            let opts: Vec<SelectOption> = options
+                .iter()
+                .map(|o| SelectOption {
+                    label: o.label.clone(),
+                    value: o.value.clone(),
+                })
+                .collect();
+            ("select".to_string(), Some(opts), None, None)
+        }
+        Some(InputType::MultiSelect { options, .. }) => {
+            let opts: Vec<SelectOption> = options
+                .iter()
+                .map(|o| SelectOption {
+                    label: o.label.clone(),
+                    value: o.value.clone(),
+                })
+                .collect();
+            ("multiselect".to_string(), Some(opts), None, None)
+        }
+        Some(InputType::Password) => ("password".to_string(), None, None, None),
+        Some(InputType::Path { .. }) => ("path".to_string(), None, None, None),
+        Some(InputType::Url { .. }) => ("url".to_string(), None, None, None),
+        Some(InputType::Json { .. }) => ("json".to_string(), None, None, None),
+        Some(InputType::Yaml { .. }) => ("yaml".to_string(), None, None, None),
+        Some(InputType::Email) => ("email".to_string(), None, None, None),
+        Some(InputType::IpAddress { .. }) => ("ip".to_string(), None, None, None),
+        Some(InputType::Cidr { .. }) => ("cidr".to_string(), None, None, None),
+        Some(InputType::Port) => ("port".to_string(), None, None, None),
+        Some(InputType::Duration { .. }) => ("duration".to_string(), None, None, None),
+        Some(InputType::Cron) => ("cron".to_string(), None, None, None),
+        Some(InputType::Semver { .. }) => ("semver".to_string(), None, None, None),
+        Some(InputType::Color { .. }) => ("color".to_string(), None, None, None),
+        Some(InputType::KeyValue { .. }) => ("keyvalue".to_string(), None, None, None),
+        Some(InputType::List { .. }) => ("list".to_string(), None, None, None),
+        Some(InputType::Object { .. }) => ("object".to_string(), None, None, None),
+        Some(InputType::RepeatableObject { .. }) => ("repeatable_object".to_string(), None, None, None),
+        Some(InputType::Date { .. }) => ("date".to_string(), None, None, None),
+        Some(InputType::DateTime { .. }) => ("datetime".to_string(), None, None, None),
+        Some(InputType::ProjectSelect { .. }) => ("project_select".to_string(), None, None, None),
+        Some(InputType::MultiProjectSelect { .. }) => ("multi_project_select".to_string(), None, None, None),
+        None => {
+            // Handle deprecated enum_values or default to string
+            if input.enum_values.is_some() {
+                let opts: Vec<SelectOption> = input
+                    .enum_values
+                    .as_ref()
+                    .unwrap()
+                    .iter()
+                    .map(|v| SelectOption {
+                        label: v.clone(),
+                        value: v.clone(),
+                    })
+                    .collect();
+                ("select".to_string(), Some(opts), None, None)
+            } else {
+                ("string".to_string(), None, None, None)
+            }
+        }
+    };
+
+    // Convert conditions (simplified - InputCondition uses input_name and equals)
+    let conditions = if input.conditions.is_empty() {
+        None
+    } else {
+        Some(
+            input
+                .conditions
+                .iter()
+                .map(|c| InputConditionInfo {
+                    field: c.input_name.clone(),
+                    condition: if c.equals.is_some() {
+                        "equals".to_string()
+                    } else {
+                        "exists".to_string()
+                    },
+                    value: c.equals.clone(),
+                })
+                .collect(),
+        )
+    };
+
+    InputInfo {
+        name: input.name.clone(),
+        input_type: type_str,
+        description: input.description.clone(),
+        default: input.default.clone(),
+        required: input.default.is_none(),
+        options,
+        min,
+        max,
+        conditions,
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -208,6 +371,7 @@ impl UiCommand {
         // Create shared state
         let state = AppState {
             ctx: Arc::new(ctx.clone()),
+            operations: Arc::new(TokioMutex::new(HashMap::new())),
         };
 
         // Build router
@@ -238,6 +402,12 @@ impl UiCommand {
             .route("/api/apply", post(apply))
             .route("/api/destroy", post(destroy))
             .route("/api/refresh", post(refresh))
+            .route("/api/graph", get(get_dependency_graph))
+            // WebSocket route for streaming operations
+            .route("/ws/execute", get(ws_execute_handler))
+            // Dashboard API routes
+            .route("/api/dashboard", get(get_dashboard))
+            .route("/api/operations", get(list_operations))
             // CORS layer for development
             .layer(
                 CorsLayer::new()
@@ -351,12 +521,7 @@ async fn list_template_packs(
                                 .spec
                                 .inputs
                                 .iter()
-                                .map(|i| InputInfo {
-                                    name: i.name.clone(),
-                                    description: i.description.clone(),
-                                    default: i.default.clone(),
-                                    enum_values: i.enum_values.clone(),
-                                })
+                                .map(convert_input_to_info)
                                 .collect(),
                             environments: t.resource.spec.environments.keys().cloned().collect(),
                         })
@@ -435,12 +600,7 @@ async fn list_templates(
                                         .spec
                                         .inputs
                                         .iter()
-                                        .map(|i| InputInfo {
-                                            name: i.name.clone(),
-                                            description: i.description.clone(),
-                                            default: i.default.clone(),
-                                            enum_values: i.enum_values.clone(),
-                                        })
+                                        .map(convert_input_to_info)
                                         .collect(),
                                     environments: t
                                         .resource
@@ -534,12 +694,7 @@ async fn get_template_details(
                                             .spec
                                             .inputs
                                             .iter()
-                                            .map(|i| InputInfo {
-                                                name: i.name.clone(),
-                                                description: i.description.clone(),
-                                                default: i.default.clone(),
-                                                enum_values: i.enum_values.clone(),
-                                            })
+                                            .map(convert_input_to_info)
                                             .collect(),
                                         environments: t
                                             .resource
@@ -748,19 +903,117 @@ async fn list_projects(
 }
 
 async fn create_project(
-    State(_state): State<AppState>,
-    Json(_req): Json<CreateProjectRequest>,
+    State(state): State<AppState>,
+    Json(req): Json<CreateProjectRequest>,
 ) -> Json<ApiResponse<String>> {
-    // This is a simplified version - in a real implementation, you'd want to
-    // call the CreateCommand::execute function with appropriate parameters
-    // For now, return an error indicating manual implementation needed
-    Json(ApiResponse {
-        success: false,
-        data: None,
-        error: Some(
-            "Project creation via API not yet fully implemented. Use CLI for now.".to_string(),
-        ),
-    })
+    use crate::traits::output::MockOutput;
+    use std::sync::Arc;
+
+    // Validate required fields
+    if req.template_pack.is_empty() {
+        return Json(ApiResponse {
+            success: false,
+            data: None,
+            error: Some("template_pack is required".to_string()),
+        });
+    }
+
+    if req.template.is_empty() {
+        return Json(ApiResponse {
+            success: false,
+            data: None,
+            error: Some("template is required".to_string()),
+        });
+    }
+
+    if req.environment.is_empty() {
+        return Json(ApiResponse {
+            success: false,
+            data: None,
+            error: Some("environment is required".to_string()),
+        });
+    }
+
+    if req.name.is_empty() {
+        return Json(ApiResponse {
+            success: false,
+            data: None,
+            error: Some("name is required".to_string()),
+        });
+    }
+
+    // Validate project name format using schema validator
+    if let Err(e) = crate::schema::validator::SchemaValidator::validate_project_name(&req.name) {
+        return Json(ApiResponse {
+            success: false,
+            data: None,
+            error: Some(format!("Invalid project name: {}", e)),
+        });
+    }
+
+    // Create buffered output to capture command output
+    let buffered_output = Arc::new(MockOutput::new());
+
+    // Create a temporary context with buffered output
+    let mut temp_ctx = (*state.ctx).clone();
+    temp_ctx.output = buffered_output.clone();
+
+    // Convert inputs to JSON string format for CreateCommand
+    // Format: key1=value1,key2=value2
+    let inputs_str = if !req.inputs.is_empty() {
+        let inputs_vec: Vec<String> = req
+            .inputs
+            .iter()
+            .map(|(k, v)| {
+                let value_str = match v {
+                    serde_json::Value::String(s) => s.clone(),
+                    serde_json::Value::Bool(b) => b.to_string(),
+                    serde_json::Value::Number(n) => n.to_string(),
+                    _ => v.to_string(),
+                };
+                format!("{}={}", k, value_str)
+            })
+            .collect();
+        Some(inputs_vec.join(","))
+    } else {
+        None
+    };
+
+    // Build template spec string: "template_pack/template"
+    let template_spec = format!("{}/{}", req.template_pack, req.template);
+
+    // Execute project creation with all parameters specified to minimize interactivity
+    // Note: CreateCommand supports non-interactive mode when template_spec, project_name,
+    // and environment_name are all provided
+    let result = crate::commands::CreateCommand::execute(
+        &temp_ctx,
+        req.output.as_deref(),        // output_path
+        None,                          // template_packs_paths
+        inputs_str.as_deref(),         // inputs_str (predefined inputs)
+        Some(&template_spec),          // template_spec (pack/template)
+        false,                         // auto_apply
+        Some(&req.name),               // project_name
+        Some(&req.environment),        // environment_name
+    );
+
+    // Get captured output
+    let output_text = buffered_output.to_text();
+
+    match result {
+        Ok(_) => Json(ApiResponse {
+            success: true,
+            data: Some(format!(
+                "Project '{}' created successfully in environment '{}'\n\n{}",
+                req.name, req.environment, output_text
+            )),
+            error: None,
+        }),
+        Err(e) => Json(ApiResponse {
+            success: false,
+            data: Some(output_text),
+            error: Some(e.to_string()),
+        }),
+    }
 }
 
 async fn generate(
@@ -790,6 +1043,172 @@ async fn generate(
     }
 }
 
+/// Response structure for dependency graph
+#[derive(Debug, Serialize)]
+struct GraphResponse {
+    /// Mermaid diagram code
+    mermaid: String,
+    /// List of nodes in the graph
+    nodes: Vec<GraphNode>,
+    /// List of edges (dependencies)
+    edges: Vec<GraphEdge>,
+}
+
+#[derive(Debug, Serialize)]
+struct GraphNode {
+    id: String,
+    project_name: String,
+    environment: String,
+    kind: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct GraphEdge {
+    from: String,
+    to: String,
+}
+
+async fn get_dependency_graph(
+    State(state): State<AppState>,
+) -> Json<ApiResponse<GraphResponse>> {
+    use crate::collection::CollectionDiscovery;
+    use std::collections::{HashMap, HashSet};
+
+    // Find infrastructure
+    let collection_result = CollectionDiscovery::find_collection(&*state.ctx.fs);
+
+    let (_infrastructure, infrastructure_root) = match collection_result {
+        Ok(Some((infra, root))) => (infra, root),
+        Ok(None) => {
+            return Json(ApiResponse {
+                success: false,
+                data: None,
+                error: Some("No infrastructure found".to_string()),
+            });
+        }
+        Err(e) => {
+            return Json(ApiResponse {
+                success: false,
+                data: None,
+                error: Some(e.to_string()),
+            });
+        }
+    };
+
+    // Discover all projects
+    let projects = match CollectionDiscovery::discover_projects(
+        &*state.ctx.fs,
+        &*state.ctx.output,
+        &infrastructure_root,
+    ) {
+        Ok(p) => p,
+        Err(e) => {
+            return Json(ApiResponse {
+                success: false,
+                data: None,
+                error: Some(format!("Failed to discover projects: {}", e)),
+            });
+        }
+    };
+
+    // Build graph data
+    let mut all_nodes: HashSet<String> = HashSet::new();
+    let mut dependencies: HashMap<String, Vec<String>> = HashMap::new();
+    let mut node_info: HashMap<String, GraphNode> = HashMap::new();
+
+    for project in &projects {
+        let project_path = infrastructure_root.join(&project.path);
+        let environments_dir = project_path.join("environments");
+
+        if let Ok(env_entries) = state.ctx.fs.read_dir(&environments_dir) {
+            for env_path in env_entries {
+                let env_file = env_path.join(".pmp.environment.yaml");
+
+                if state.ctx.fs.exists(&env_file)
+                    && let Ok(env_resource) =
+                        crate::template::metadata::DynamicProjectEnvironmentResource::from_file(
+                            &*state.ctx.fs,
+                            &env_file,
+                        )
+                {
+                    let env_name = env_resource.metadata.environment_name.clone();
+                    let node_key = format!("{}:{}", project.name, env_name);
+
+                    all_nodes.insert(node_key.clone());
+                    node_info.insert(
+                        node_key.clone(),
+                        GraphNode {
+                            id: node_key.clone(),
+                            project_name: project.name.clone(),
+                            environment: env_name.clone(),
+                            kind: Some(env_resource.kind.clone()),
+                        },
+                    );
+
+                    // Extract dependencies
+                    for dep in &env_resource.spec.dependencies {
+                        for dep_env in &dep.project.environments {
+                            let dep_key = format!("{}:{}", dep.project.name, dep_env);
+                            dependencies
+                                .entry(node_key.clone())
+                                .or_default()
+                                .push(dep_key);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Generate Mermaid diagram
+    let mut mermaid = String::from("graph TD\n");
+
+    let mut sorted_nodes: Vec<_> = all_nodes.iter().collect();
+    sorted_nodes.sort();
+
+    for node_key in &sorted_nodes {
+        let sanitized_id = node_key.replace([':', '-', '.', ' '], "_");
+        if let Some(info) = node_info.get(*node_key) {
+            let label = format!("{}\\n({})", info.project_name, info.environment);
+            mermaid.push_str(&format!("    {}[\"{}\"]\n", sanitized_id, label));
+        }
+    }
+
+    mermaid.push('\n');
+
+    for (parent_key, deps) in &dependencies {
+        let parent_id = parent_key.replace([':', '-', '.', ' '], "_");
+        for dep in deps {
+            let dep_id = dep.replace([':', '-', '.', ' '], "_");
+            mermaid.push_str(&format!("    {} --> {}\n", parent_id, dep_id));
+        }
+    }
+
+    // Build edges list
+    let edges: Vec<GraphEdge> = dependencies
+        .iter()
+        .flat_map(|(from, to_list)| {
+            to_list.iter().map(move |to| GraphEdge {
+                from: from.clone(),
+                to: to.clone(),
+            })
+        })
+        .collect();
+
+    // Build nodes list
+    let nodes: Vec<GraphNode> = node_info.into_values().collect();
+
+    Json(ApiResponse {
+        success: true,
+        data: Some(GraphResponse {
+            mermaid,
+            nodes,
+            edges,
+        }),
+        error: None,
+    })
+}
+
 async fn preview(
     State(state): State<AppState>,
     Json(req): Json<ExecutorRequest>,
@@ -807,6 +1226,15 @@ async fn preview(
     let result = crate::commands::PreviewCommand::execute(
         &temp_ctx,
         req.path.as_deref(),
+        false,  // show_cost - not supported in UI yet
+        false,  // skip_policy - run validation in UI
+        None,   // parallel - not supported in UI yet
+        false,  // show_diff - not supported in UI yet
+        "ascii", // diff_format
+        false,  // side_by_side
+        None,   // diff_output
+        false,  // show_unchanged
+        false,  // show_sensitive
         &req.executor_args,
     );
 
@@ -838,8 +1266,14 @@ async fn apply(
     let mut temp_ctx = (*state.ctx).clone();
     temp_ctx.output = buffered_output.clone();
 
-    let result =
-        crate::commands::ApplyCommand::execute(&temp_ctx, req.path.as_deref(), &req.executor_args);
+    let result = crate::commands::ApplyCommand::execute(
+        &temp_ctx,
+        req.path.as_deref(),
+        false, // show_cost - not supported in UI yet
+        false, // skip_policy - run validation in UI
+        None,  // parallel - not supported in UI yet
+        &req.executor_args,
+    );
 
     let output_text = buffered_output.to_text();
 
@@ -872,6 +1306,7 @@ async fn destroy(
         &temp_ctx,
         req.path.as_deref(),
         req.yes,
+        None, // parallel - not supported in UI yet
         &req.executor_args,
     );
 
@@ -1297,5 +1732,628 @@ async fn install_local_pack(
             data: None,
             error: Some(format!("Failed to load template pack: {}", e)),
         }),
+    }
+}
+
+// ============================================================================
+// WebSocket Handler for Streaming Operations
+// ============================================================================
+
+async fn ws_execute_handler(
+    ws: WebSocketUpgrade,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    ws.on_upgrade(|socket| handle_ws_connection(socket, state))
+}
+
+async fn handle_ws_connection(socket: WebSocket, state: AppState) {
+    let (mut sender, mut receiver) = socket.split();
+
+    // Wait for the operation request
+    while let Some(msg) = receiver.next().await {
+        if let Ok(Message::Text(text)) = msg {
+            // Parse the operation request
+            let request: Result<WsOperationRequest, _> = serde_json::from_str(&text);
+
+            match request {
+                Ok(req) => {
+                    execute_streaming_operation(&mut sender, &state, req).await;
+                }
+                Err(e) => {
+                    let error_msg = WsMessage {
+                        msg_type: "error".to_string(),
+                        data: serde_json::json!({ "message": format!("Invalid request: {}", e) }),
+                    };
+                    let _ = sender
+                        .send(Message::Text(serde_json::to_string(&error_msg).unwrap()))
+                        .await;
+                }
+            }
+        }
+    }
+}
+
+async fn execute_streaming_operation(
+    sender: &mut futures::stream::SplitSink<WebSocket, Message>,
+    state: &AppState,
+    req: WsOperationRequest,
+) {
+    use crate::traits::{StreamingOutput, format_output_message};
+
+    let operation_id = uuid::Uuid::new_v4().to_string();
+    let path = req.path.clone().unwrap_or_else(|| ".".to_string());
+
+    // Send start message
+    let start_msg = WsMessage {
+        msg_type: "start".to_string(),
+        data: serde_json::json!({
+            "operation_id": operation_id,
+            "operation": req.operation,
+            "path": path
+        }),
+    };
+    let _ = sender
+        .send(Message::Text(serde_json::to_string(&start_msg).unwrap()))
+        .await;
+
+    // Track operation
+    let now = chrono::Utc::now().to_rfc3339();
+    {
+        let mut ops = state.operations.lock().await;
+        ops.insert(
+            operation_id.clone(),
+            OperationStatus {
+                id: operation_id.clone(),
+                operation: req.operation.clone(),
+                project_path: path.clone(),
+                status: "running".to_string(),
+                started_at: now.clone(),
+                finished_at: None,
+                success: None,
+            },
+        );
+    }
+
+    // Create streaming output
+    let (streaming_output, mut receiver) = StreamingOutput::new();
+    let streaming_output = Arc::new(streaming_output);
+
+    // Clone for the spawned task
+    let ctx = (*state.ctx).clone();
+    let mut temp_ctx = ctx;
+    temp_ctx.output = streaming_output.clone();
+
+    let operation = req.operation.clone();
+    let executor_args = req.executor_args.unwrap_or_default();
+    let yes = req.yes.unwrap_or(false);
+    let path_clone = path.clone();
+
+    // Spawn the operation in a separate task
+    let handle = tokio::task::spawn_blocking(move || {
+        match operation.as_str() {
+            "preview" => crate::commands::PreviewCommand::execute(
+                &temp_ctx,
+                Some(&path_clone),
+                false,  // show_cost - not supported in UI yet
+                false,  // skip_policy - run validation in UI
+                None,   // parallel - not supported in UI yet
+                false,  // show_diff - not supported in UI yet
+                "ascii", // diff_format
+                false,  // side_by_side
+                None,   // diff_output
+                false,  // show_unchanged
+                false,  // show_sensitive
+                &executor_args,
+            ),
+            "apply" => crate::commands::ApplyCommand::execute(
+                &temp_ctx,
+                Some(&path_clone),
+                false, // show_cost - not supported in UI yet
+                false, // skip_policy - run validation in UI
+                None,  // parallel - not supported in UI yet
+                &executor_args,
+            ),
+            "destroy" => crate::commands::DestroyCommand::execute(
+                &temp_ctx,
+                Some(&path_clone),
+                yes,
+                None, // parallel - not supported in UI yet
+                &executor_args,
+            ),
+            "refresh" => crate::commands::RefreshCommand::execute(
+                &temp_ctx,
+                Some(&path_clone),
+                &executor_args,
+            ),
+            _ => Err(anyhow::anyhow!("Unknown operation: {}", operation)),
+        }
+    });
+
+    // Pin the handle for use in the select loop
+    let mut handle = std::pin::pin!(handle);
+    let mut operation_complete = false;
+
+    // Stream output messages as they arrive
+    while !operation_complete {
+        tokio::select! {
+            msg = receiver.recv() => {
+                match msg {
+                    Ok(output_msg) => {
+                        let text = format_output_message(&output_msg);
+                        let ws_msg = WsMessage {
+                            msg_type: "output".to_string(),
+                            data: serde_json::json!({ "text": text }),
+                        };
+
+                        if sender.send(Message::Text(serde_json::to_string(&ws_msg).unwrap())).await.is_err() {
+                            break;
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        operation_complete = true;
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                }
+            }
+            result = &mut handle => {
+                let success = matches!(result, Ok(Ok(_)));
+
+                // Update operation status
+                let finished_at = chrono::Utc::now().to_rfc3339();
+                {
+                    let mut ops = state.operations.lock().await;
+                    if let Some(op) = ops.get_mut(&operation_id) {
+                        op.status = if success { "completed".to_string() } else { "failed".to_string() };
+                        op.finished_at = Some(finished_at.clone());
+                        op.success = Some(success);
+                    }
+                }
+
+                // Send completion message
+                let end_msg = WsMessage {
+                    msg_type: "complete".to_string(),
+                    data: serde_json::json!({
+                        "operation_id": operation_id,
+                        "success": success,
+                        "finished_at": finished_at
+                    }),
+                };
+                let _ = sender.send(Message::Text(serde_json::to_string(&end_msg).unwrap())).await;
+                operation_complete = true;
+            }
+        }
+    }
+}
+
+// ============================================================================
+// Dashboard API
+// ============================================================================
+
+#[derive(Debug, Serialize)]
+struct DashboardData {
+    infrastructure: Option<InfrastructureInfo>,
+    project_count: usize,
+    projects_by_kind: HashMap<String, usize>,
+    projects_by_environment: HashMap<String, usize>,
+    recent_operations: Vec<OperationStatus>,
+    environments: Vec<String>,
+}
+
+async fn get_dashboard(State(state): State<AppState>) -> Json<ApiResponse<DashboardData>> {
+    use crate::collection::CollectionDiscovery;
+
+    // Load infrastructure
+    let current_dir = match std::env::current_dir() {
+        Ok(dir) => dir,
+        Err(e) => {
+            return Json(ApiResponse {
+                success: false,
+                data: None,
+                error: Some(format!("Failed to get current directory: {}", e)),
+            });
+        }
+    };
+
+    let infra_path = current_dir.join(".pmp.infrastructure.yaml");
+    let infrastructure = if state.ctx.fs.exists(&infra_path) {
+        match crate::template::metadata::InfrastructureResource::from_file(
+            &*state.ctx.fs,
+            &infra_path,
+        ) {
+            Ok(infra) => {
+                let categories: Vec<CategoryInfo> =
+                    infra.spec.categories.iter().map(convert_category).collect();
+                Some(InfrastructureInfo {
+                    name: infra.metadata.name.clone(),
+                    description: infra.metadata.description.clone(),
+                    path: current_dir.to_string_lossy().to_string(),
+                    environments: infra.spec.environments.keys().cloned().collect(),
+                    categories,
+                })
+            }
+            Err(_) => None,
+        }
+    } else {
+        None
+    };
+
+    // Get environments list
+    let environments: Vec<String> = infrastructure
+        .as_ref()
+        .map(|i| i.environments.clone())
+        .unwrap_or_default();
+
+    // Discover projects
+    let projects = CollectionDiscovery::discover_projects(
+        &*state.ctx.fs,
+        &*state.ctx.output,
+        &current_dir,
+    )
+    .unwrap_or_default();
+
+    let project_count = projects.len();
+
+    // Count projects by kind
+    let mut projects_by_kind: HashMap<String, usize> = HashMap::new();
+    for project in &projects {
+        *projects_by_kind.entry(project.kind.clone()).or_insert(0) += 1;
+    }
+
+    // Count projects by environment
+    let mut projects_by_environment: HashMap<String, usize> = HashMap::new();
+    for project in &projects {
+        let project_path = current_dir.join(&project.path);
+        let envs = CollectionDiscovery::discover_environments(&*state.ctx.fs, &project_path)
+            .unwrap_or_default();
+
+        for env in envs {
+            *projects_by_environment.entry(env).or_insert(0) += 1;
+        }
+    }
+
+    // Get recent operations (last 10)
+    let recent_operations: Vec<OperationStatus> = {
+        let ops = state.operations.lock().await;
+        let mut ops_vec: Vec<_> = ops.values().cloned().collect();
+        ops_vec.sort_by(|a, b| b.started_at.cmp(&a.started_at));
+        ops_vec.into_iter().take(10).collect()
+    };
+
+    Json(ApiResponse {
+        success: true,
+        data: Some(DashboardData {
+            infrastructure,
+            project_count,
+            projects_by_kind,
+            projects_by_environment,
+            recent_operations,
+            environments,
+        }),
+        error: None,
+    })
+}
+
+async fn list_operations(
+    State(state): State<AppState>,
+) -> Json<ApiResponse<Vec<OperationStatus>>> {
+    let ops = state.operations.lock().await;
+    let mut ops_vec: Vec<_> = ops.values().cloned().collect();
+    ops_vec.sort_by(|a, b| b.started_at.cmp(&a.started_at));
+
+    Json(ApiResponse {
+        success: true,
+        data: Some(ops_vec),
+        error: None,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_api_response_success_serialization() {
+        let response: ApiResponse<String> = ApiResponse {
+            success: true,
+            data: Some("test data".to_string()),
+            error: None,
+        };
+
+        let json = serde_json::to_string(&response).unwrap();
+        assert!(json.contains("\"success\":true"));
+        assert!(json.contains("\"data\":\"test data\""));
+        assert!(json.contains("\"error\":null"));
+    }
+
+    #[test]
+    fn test_api_response_error_serialization() {
+        let response: ApiResponse<String> = ApiResponse {
+            success: false,
+            data: None,
+            error: Some("Something went wrong".to_string()),
+        };
+
+        let json = serde_json::to_string(&response).unwrap();
+        assert!(json.contains("\"success\":false"));
+        assert!(json.contains("\"data\":null"));
+        assert!(json.contains("\"error\":\"Something went wrong\""));
+    }
+
+    #[test]
+    fn test_operation_status_serialization() {
+        let status = OperationStatus {
+            id: "op-123".to_string(),
+            operation: "apply".to_string(),
+            project_path: "/path/to/project".to_string(),
+            status: "running".to_string(),
+            started_at: "2024-01-01T00:00:00Z".to_string(),
+            finished_at: None,
+            success: None,
+        };
+
+        let json = serde_json::to_string(&status).unwrap();
+        assert!(json.contains("\"id\":\"op-123\""));
+        assert!(json.contains("\"operation\":\"apply\""));
+        assert!(json.contains("\"status\":\"running\""));
+    }
+
+    #[test]
+    fn test_operation_status_completed_serialization() {
+        let status = OperationStatus {
+            id: "op-456".to_string(),
+            operation: "destroy".to_string(),
+            project_path: "/path/to/project".to_string(),
+            status: "completed".to_string(),
+            started_at: "2024-01-01T00:00:00Z".to_string(),
+            finished_at: Some("2024-01-01T00:05:00Z".to_string()),
+            success: Some(true),
+        };
+
+        let json = serde_json::to_string(&status).unwrap();
+        assert!(json.contains("\"finished_at\":\"2024-01-01T00:05:00Z\""));
+        assert!(json.contains("\"success\":true"));
+    }
+
+    #[test]
+    fn test_directory_entry_serialization() {
+        let entry = DirectoryEntry {
+            name: "src".to_string(),
+            path: "/project/src".to_string(),
+            is_dir: true,
+        };
+
+        let json = serde_json::to_string(&entry).unwrap();
+        assert!(json.contains("\"name\":\"src\""));
+        assert!(json.contains("\"is_dir\":true"));
+    }
+
+    #[test]
+    fn test_drive_info_serialization() {
+        let drive = DriveInfo {
+            name: "C:".to_string(),
+            path: "C:\\".to_string(),
+        };
+
+        let json = serde_json::to_string(&drive).unwrap();
+        assert!(json.contains("\"name\":\"C:\""));
+    }
+
+    #[test]
+    fn test_template_pack_info_serialization() {
+        let pack = TemplatePackInfo {
+            name: "aws-pack".to_string(),
+            description: Some("AWS templates".to_string()),
+            templates: vec![TemplateInfo {
+                name: "vpc".to_string(),
+                description: Some("VPC template".to_string()),
+                kind: "VPC".to_string(),
+                api_version: "pmp.io/v1".to_string(),
+                inputs: vec![],
+                environments: vec!["dev".to_string(), "prod".to_string()],
+            }],
+        };
+
+        let json = serde_json::to_string(&pack).unwrap();
+        assert!(json.contains("\"name\":\"aws-pack\""));
+        assert!(json.contains("\"description\":\"AWS templates\""));
+        assert!(json.contains("\"templates\":["));
+    }
+
+    #[test]
+    fn test_input_info_string_type() {
+        let input = InputInfo {
+            name: "project_name".to_string(),
+            input_type: "string".to_string(),
+            description: Some("Name of the project".to_string()),
+            default: Some(serde_json::json!("my-project")),
+            required: false,
+            options: None,
+            min: None,
+            max: None,
+            conditions: None,
+        };
+
+        let json = serde_json::to_string(&input).unwrap();
+        assert!(json.contains("\"name\":\"project_name\""));
+        assert!(json.contains("\"type\":\"string\""));
+        assert!(json.contains("\"required\":false"));
+    }
+
+    #[test]
+    fn test_input_info_number_type() {
+        let input = InputInfo {
+            name: "replicas".to_string(),
+            input_type: "number".to_string(),
+            description: Some("Number of replicas".to_string()),
+            default: Some(serde_json::json!(3)),
+            required: false,
+            options: None,
+            min: Some(1.0),
+            max: Some(10.0),
+            conditions: None,
+        };
+
+        let json = serde_json::to_string(&input).unwrap();
+        assert!(json.contains("\"type\":\"number\""));
+        assert!(json.contains("\"min\":1.0"));
+        assert!(json.contains("\"max\":10.0"));
+    }
+
+    #[test]
+    fn test_input_info_select_type() {
+        let input = InputInfo {
+            name: "environment".to_string(),
+            input_type: "select".to_string(),
+            description: Some("Environment".to_string()),
+            default: Some(serde_json::json!("dev")),
+            required: false,
+            options: Some(vec![
+                SelectOption {
+                    label: "Development".to_string(),
+                    value: "dev".to_string(),
+                },
+                SelectOption {
+                    label: "Production".to_string(),
+                    value: "prod".to_string(),
+                },
+            ]),
+            min: None,
+            max: None,
+            conditions: None,
+        };
+
+        let json = serde_json::to_string(&input).unwrap();
+        assert!(json.contains("\"type\":\"select\""));
+        assert!(json.contains("\"options\":["));
+        assert!(json.contains("\"label\":\"Development\""));
+        assert!(json.contains("\"value\":\"dev\""));
+    }
+
+    #[test]
+    fn test_input_info_with_conditions() {
+        let input = InputInfo {
+            name: "ssl_cert".to_string(),
+            input_type: "string".to_string(),
+            description: Some("SSL certificate path".to_string()),
+            default: None,
+            required: true,
+            options: None,
+            min: None,
+            max: None,
+            conditions: Some(vec![InputConditionInfo {
+                field: "enable_ssl".to_string(),
+                condition: "equals".to_string(),
+                value: Some(serde_json::json!(true)),
+            }]),
+        };
+
+        let json = serde_json::to_string(&input).unwrap();
+        assert!(json.contains("\"conditions\":["));
+        assert!(json.contains("\"field\":\"enable_ssl\""));
+        assert!(json.contains("\"condition\":\"equals\""));
+    }
+
+    #[test]
+    fn test_ws_message_serialization() {
+        let msg = WsMessage {
+            msg_type: "output".to_string(),
+            data: serde_json::json!({"line": "Applying..."}),
+        };
+
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains("\"type\":\"output\""));
+        assert!(json.contains("\"data\":{"));
+    }
+
+    #[test]
+    fn test_project_info_serialization() {
+        let project = ProjectInfo {
+            name: "my-vpc".to_string(),
+            description: Some("Main VPC".to_string()),
+            kind: "VPC".to_string(),
+            path: "projects/my-vpc".to_string(),
+            environments: vec!["dev".to_string(), "prod".to_string()],
+        };
+
+        let json = serde_json::to_string(&project).unwrap();
+        assert!(json.contains("\"name\":\"my-vpc\""));
+        assert!(json.contains("\"kind\":\"VPC\""));
+        assert!(json.contains("\"environments\":["));
+    }
+
+    #[test]
+    fn test_dashboard_data_serialization() {
+        let dashboard = DashboardData {
+            infrastructure: None,
+            project_count: 5,
+            projects_by_kind: {
+                let mut m = HashMap::new();
+                m.insert("VPC".to_string(), 2);
+                m.insert("Subnet".to_string(), 3);
+                m
+            },
+            projects_by_environment: {
+                let mut m = HashMap::new();
+                m.insert("dev".to_string(), 5);
+                m.insert("prod".to_string(), 3);
+                m
+            },
+            recent_operations: vec![],
+            environments: vec!["dev".to_string(), "prod".to_string()],
+        };
+
+        let json = serde_json::to_string(&dashboard).unwrap();
+        assert!(json.contains("\"project_count\":5"));
+        assert!(json.contains("\"projects_by_kind\":{"));
+        assert!(json.contains("\"environments\":["));
+    }
+
+    #[test]
+    fn test_find_request_deserialization() {
+        let json = r#"{"name": "vpc", "kind": "VPC", "path": "/projects"}"#;
+        let request: FindRequest = serde_json::from_str(json).unwrap();
+
+        assert_eq!(request.name, Some("vpc".to_string()));
+        assert_eq!(request.kind, Some("VPC".to_string()));
+        assert_eq!(request.path, Some("/projects".to_string()));
+    }
+
+    #[test]
+    fn test_find_request_partial_deserialization() {
+        let json = r#"{"name": "vpc"}"#;
+        let request: FindRequest = serde_json::from_str(json).unwrap();
+
+        assert_eq!(request.name, Some("vpc".to_string()));
+        assert_eq!(request.kind, None);
+        assert_eq!(request.path, None);
+    }
+
+    #[test]
+    fn test_executor_request_deserialization() {
+        let json = r#"{"path": "/project/env", "executor_args": ["-auto-approve"]}"#;
+        let request: ExecutorRequest = serde_json::from_str(json).unwrap();
+
+        assert_eq!(request.path, Some("/project/env".to_string()));
+        assert_eq!(request.executor_args, vec!["-auto-approve"]);
+    }
+
+    #[test]
+    fn test_destroy_request_deserialization() {
+        let json = r#"{"path": "/project/env", "yes": true, "executor_args": []}"#;
+        let request: DestroyRequest = serde_json::from_str(json).unwrap();
+
+        assert_eq!(request.path, Some("/project/env".to_string()));
+        assert!(request.yes);
+        assert!(request.executor_args.is_empty());
+    }
+
+    #[test]
+    fn test_ws_operation_request_deserialization() {
+        let json = r#"{"operation": "apply", "path": "/project", "executor_args": ["-target=aws_vpc.main"], "yes": true}"#;
+        let request: WsOperationRequest = serde_json::from_str(json).unwrap();
+
+        assert_eq!(request.operation, "apply");
+        assert_eq!(request.path, Some("/project".to_string()));
+        assert_eq!(request.yes, Some(true));
     }
 }

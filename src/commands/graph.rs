@@ -492,3 +492,144 @@ impl GraphCommand {
         s.replace([':', '-', ' ', '.'], "_")
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sanitize_id_with_colon() {
+        assert_eq!(GraphCommand::sanitize_id("project:env"), "project_env");
+    }
+
+    #[test]
+    fn test_sanitize_id_with_hyphen() {
+        assert_eq!(GraphCommand::sanitize_id("my-project"), "my_project");
+    }
+
+    #[test]
+    fn test_sanitize_id_with_space() {
+        assert_eq!(GraphCommand::sanitize_id("my project"), "my_project");
+    }
+
+    #[test]
+    fn test_sanitize_id_with_dot() {
+        assert_eq!(GraphCommand::sanitize_id("v1.0.0"), "v1_0_0");
+    }
+
+    #[test]
+    fn test_sanitize_id_with_multiple_special_chars() {
+        assert_eq!(
+            GraphCommand::sanitize_id("my-project:dev.v1"),
+            "my_project_dev_v1"
+        );
+    }
+
+    #[test]
+    fn test_sanitize_id_already_clean() {
+        assert_eq!(GraphCommand::sanitize_id("my_project"), "my_project");
+    }
+
+    #[test]
+    fn test_generate_mermaid_all_projects_empty() {
+        let projects: HashSet<String> = HashSet::new();
+        let deps: HashMap<String, Vec<String>> = HashMap::new();
+
+        let result = GraphCommand::generate_mermaid_all_projects(&projects, &deps).unwrap();
+
+        assert!(result.starts_with("graph TD\n"));
+        assert!(!result.contains("-->"));
+    }
+
+    #[test]
+    fn test_generate_mermaid_all_projects_single_node() {
+        let mut projects: HashSet<String> = HashSet::new();
+        projects.insert("vpc:prod".to_string());
+        let deps: HashMap<String, Vec<String>> = HashMap::new();
+
+        let result = GraphCommand::generate_mermaid_all_projects(&projects, &deps).unwrap();
+
+        assert!(result.contains("graph TD"));
+        assert!(result.contains("vpc_prod"));
+        assert!(result.contains("vpc\\n(prod)"));
+    }
+
+    #[test]
+    fn test_generate_mermaid_all_projects_with_dependency() {
+        let mut projects: HashSet<String> = HashSet::new();
+        projects.insert("vpc:prod".to_string());
+        projects.insert("subnet:prod".to_string());
+
+        let mut deps: HashMap<String, Vec<String>> = HashMap::new();
+        deps.insert("subnet:prod".to_string(), vec!["vpc:prod".to_string()]);
+
+        let result = GraphCommand::generate_mermaid_all_projects(&projects, &deps).unwrap();
+
+        assert!(result.contains("graph TD"));
+        assert!(result.contains("subnet_prod --> vpc_prod"));
+    }
+
+    #[test]
+    fn test_generate_dot_all_projects_empty() {
+        let projects: HashSet<String> = HashSet::new();
+        let deps: HashMap<String, Vec<String>> = HashMap::new();
+
+        let result = GraphCommand::generate_dot_all_projects(&projects, &deps).unwrap();
+
+        assert!(result.starts_with("digraph dependencies {"));
+        assert!(result.contains("rankdir=LR"));
+        assert!(result.ends_with("}\n"));
+    }
+
+    #[test]
+    fn test_generate_dot_all_projects_single_node() {
+        let mut projects: HashSet<String> = HashSet::new();
+        projects.insert("vpc:prod".to_string());
+        let deps: HashMap<String, Vec<String>> = HashMap::new();
+
+        let result = GraphCommand::generate_dot_all_projects(&projects, &deps).unwrap();
+
+        assert!(result.contains("digraph dependencies"));
+        assert!(result.contains("vpc_prod [label="));
+        assert!(result.contains("vpc\\n(prod)"));
+    }
+
+    #[test]
+    fn test_generate_dot_all_projects_with_dependency() {
+        let mut projects: HashSet<String> = HashSet::new();
+        projects.insert("vpc:prod".to_string());
+        projects.insert("subnet:prod".to_string());
+
+        let mut deps: HashMap<String, Vec<String>> = HashMap::new();
+        deps.insert("subnet:prod".to_string(), vec!["vpc:prod".to_string()]);
+
+        let result = GraphCommand::generate_dot_all_projects(&projects, &deps).unwrap();
+
+        assert!(result.contains("digraph dependencies"));
+        assert!(result.contains("subnet_prod -> vpc_prod"));
+    }
+
+    #[test]
+    fn test_generate_dot_all_projects_multiple_deps() {
+        let mut projects: HashSet<String> = HashSet::new();
+        projects.insert("vpc:prod".to_string());
+        projects.insert("subnet-a:prod".to_string());
+        projects.insert("subnet-b:prod".to_string());
+        projects.insert("instance:prod".to_string());
+
+        let mut deps: HashMap<String, Vec<String>> = HashMap::new();
+        deps.insert("subnet-a:prod".to_string(), vec!["vpc:prod".to_string()]);
+        deps.insert("subnet-b:prod".to_string(), vec!["vpc:prod".to_string()]);
+        deps.insert(
+            "instance:prod".to_string(),
+            vec!["subnet-a:prod".to_string(), "subnet-b:prod".to_string()],
+        );
+
+        let result = GraphCommand::generate_dot_all_projects(&projects, &deps).unwrap();
+
+        assert!(result.contains("subnet_a_prod -> vpc_prod"));
+        assert!(result.contains("subnet_b_prod -> vpc_prod"));
+        assert!(result.contains("instance_prod -> subnet_a_prod"));
+        assert!(result.contains("instance_prod -> subnet_b_prod"));
+    }
+}

@@ -1,10 +1,13 @@
-use crate::collection::{CollectionDiscovery, CollectionManager};
+use crate::collection::{CollectionDiscovery, CollectionManager, DependencyNode};
 use crate::commands::project_group::ProjectGroupHandler;
+use crate::commands::{CostCommand, ExecutionHelper, PolicyCommand};
 use crate::executor::{Executor, ExecutorConfig, OpenTofuExecutor};
 use crate::hooks::{HookOutcome, HooksRunner};
+use crate::template::metadata::{FailureBehavior, ParallelConfig};
 use crate::template::{DynamicProjectEnvironmentResource, ProjectResource};
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 /// Handles the 'apply' command - runs executor apply with hooks
 pub struct ApplyCommand;
@@ -14,6 +17,9 @@ impl ApplyCommand {
     pub fn execute(
         ctx: &crate::context::Context,
         project_path: Option<&str>,
+        show_cost: bool,
+        skip_policy: bool,
+        parallel: Option<usize>,
         extra_args: &[String],
     ) -> Result<()> {
         // Check for template packs before proceeding
@@ -135,12 +141,28 @@ impl ApplyCommand {
         )?;
 
         if let Some(graph) = maybe_graph {
+            // Load collection to get parallel config
+            let (collection, _) = CollectionDiscovery::find_collection(&*ctx.fs)?
+                .context("Infrastructure is required to run commands")?;
+
+            // Build parallel config from CLI flag or infrastructure config
+            let parallel_config = Self::build_parallel_config(parallel, &collection);
+
             // Execute apply on entire dependency graph
-            crate::commands::ExecutionHelper::execute_on_graph(
-                ctx,
+            let ctx_clone = ctx.clone();
+            let executor_fn: Arc<
+                dyn Fn(&crate::context::Context, &DependencyNode) -> Result<()> + Send + Sync,
+            > = Arc::new(move |ctx, node| {
+                Self::execute_apply_on_node_wrapper(ctx, node)
+            });
+
+            ExecutionHelper::execute_on_graph_parallel(
+                &ctx_clone,
                 &graph,
                 "apply",
-                crate::commands::ExecutionHelper::execute_apply_on_node,
+                &parallel_config,
+                false,
+                executor_fn,
             )?;
 
             ctx.output.blank();
@@ -247,6 +269,24 @@ impl ApplyCommand {
             command_options,
         };
 
+        // Check cost estimation if requested (before apply)
+        if show_cost {
+            if Self::check_cost_before_apply(ctx, &env_path, &collection)? {
+                // Cost threshold exceeded and blocking is enabled
+                return Ok(());
+            }
+        }
+
+        // Run OPA policy validation (before apply)
+        if !skip_policy {
+            if !PolicyCommand::run_pre_operation_validation(ctx, &env_path, &collection)? {
+                // Policy validation failed and blocking is enabled
+                ctx.output
+                    .dimmed("Use --skip-policy to bypass policy validation");
+                return Ok(());
+            }
+        }
+
         // Run apply
         ctx.output.subsection("Running Apply");
         ctx.output
@@ -268,6 +308,93 @@ impl ApplyCommand {
         ctx.output.success("Apply completed successfully");
 
         Ok(())
+    }
+
+    /// Check cost estimation before apply and block if threshold exceeded
+    /// Returns true if apply should be blocked
+    fn check_cost_before_apply(
+        ctx: &crate::context::Context,
+        env_path: &Path,
+        collection: &crate::template::metadata::InfrastructureResource,
+    ) -> Result<bool> {
+        ctx.output.blank();
+        ctx.output.subsection("Cost Estimation");
+
+        let cost_config = collection.spec.cost.as_ref();
+        let provider = CostCommand::create_provider(cost_config)?;
+
+        if !provider.check_installed()? {
+            ctx.output.warning(&format!(
+                "{} is not installed. Skipping cost estimation.",
+                provider.get_name()
+            ));
+            ctx.output.dimmed("Install from: https://www.infracost.io/docs/");
+            return Ok(false);
+        }
+
+        ctx.output
+            .dimmed(&format!("Running {} diff...", provider.get_name()));
+
+        match provider.diff(env_path, None) {
+            Ok(diff) => {
+                ctx.output.key_value("Current Monthly", &format!("${:.2}", diff.current_monthly));
+                ctx.output.key_value("Planned Monthly", &format!("${:.2}", diff.planned_monthly));
+
+                let sign = if diff.diff_monthly >= 0.0 { "+" } else { "" };
+                let diff_desc = if diff.diff_monthly > 0.0 {
+                    "increase"
+                } else if diff.diff_monthly < 0.0 {
+                    "decrease"
+                } else {
+                    "no change"
+                };
+
+                ctx.output.key_value_highlight(
+                    "Difference",
+                    &format!(
+                        "{}${:.2} ({:.1}%) - {}",
+                        sign,
+                        diff.diff_monthly.abs(),
+                        diff.diff_percentage.abs(),
+                        diff_desc
+                    ),
+                );
+
+                // Check blocking threshold
+                if let Some(config) = cost_config {
+                    if let Some(ref thresholds) = config.thresholds {
+                        if let Some(warn) = thresholds.warn {
+                            if diff.planned_monthly > warn {
+                                ctx.output.blank();
+                                ctx.output.warning(&format!(
+                                    "Monthly cost (${:.2}) exceeds warning threshold (${:.2})",
+                                    diff.planned_monthly, warn
+                                ));
+                            }
+                        }
+
+                        if let Some(block) = thresholds.block {
+                            if diff.planned_monthly > block {
+                                ctx.output.blank();
+                                ctx.output.error(&format!(
+                                    "Monthly cost (${:.2}) exceeds blocking threshold (${:.2})",
+                                    diff.planned_monthly, block
+                                ));
+                                ctx.output.error("Apply blocked due to cost threshold violation.");
+                                ctx.output
+                                    .dimmed("Adjust the threshold in .pmp.infrastructure.yaml or reduce resource usage.");
+                                return Ok(true);
+                            }
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                ctx.output.warning(&format!("Cost estimation failed: {}", e));
+            }
+        }
+
+        Ok(false)
     }
 
     /// Detect context and select project/environment
@@ -395,5 +522,76 @@ impl ApplyCommand {
             "opentofu" => Ok(Box::new(OpenTofuExecutor::new())),
             _ => anyhow::bail!("Unknown executor: {}", name),
         }
+    }
+
+    /// Build parallel config from CLI flag or infrastructure config
+    fn build_parallel_config(
+        cli_parallel: Option<usize>,
+        collection: &crate::template::metadata::InfrastructureResource,
+    ) -> ParallelConfig {
+        // CLI flag takes precedence
+        if let Some(max) = cli_parallel {
+            return ParallelConfig {
+                max,
+                on_failure: FailureBehavior::Continue,
+            };
+        }
+
+        // Fall back to infrastructure config
+        if let Some(executor_config) = &collection.spec.executor
+            && let Some(parallel) = &executor_config.parallel
+        {
+            return parallel.clone();
+        }
+
+        // Default: sequential execution
+        ParallelConfig {
+            max: 1,
+            on_failure: FailureBehavior::Continue,
+        }
+    }
+
+    /// Wrapper for execute_apply_on_node that works with parallel execution
+    fn execute_apply_on_node_wrapper(
+        ctx: &crate::context::Context,
+        node: &DependencyNode,
+    ) -> Result<()> {
+        // Load environment resource
+        let env_file = node.environment_path.join(".pmp.environment.yaml");
+        let resource = DynamicProjectEnvironmentResource::from_file(&*ctx.fs, &env_file)
+            .context("Failed to load environment resource")?;
+
+        // Get executor configuration
+        let executor_config = resource.get_executor_config();
+
+        // Get executor
+        let executor = ExecutionHelper::get_executor(&executor_config.name)?;
+
+        // Build executor config
+        let mut command_options = std::collections::HashMap::new();
+
+        if let Some(config) = &executor_config.config {
+            for (cmd_name, cmd_config) in &config.commands {
+                command_options.insert(cmd_name.clone(), cmd_config.options.clone());
+            }
+        }
+
+        let execution_config = ExecutorConfig {
+            plan_command: None,
+            apply_command: None,
+            destroy_command: None,
+            refresh_command: None,
+            test_command: None,
+            command_options,
+        };
+
+        // Execute apply on this node
+        ExecutionHelper::execute_apply_on_node(
+            ctx,
+            node,
+            executor.as_ref(),
+            &execution_config,
+            &[],
+        )
     }
 }

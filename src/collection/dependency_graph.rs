@@ -267,6 +267,63 @@ impl DependencyGraph {
         Ok(())
     }
 
+    /// Group nodes by dependency level for parallel execution
+    /// Level 0: nodes with no dependencies (or all dependencies outside the graph)
+    /// Level N: nodes whose dependencies are all in levels < N
+    /// Returns groups where all nodes in a group can execute in parallel
+    pub fn group_by_level(&self) -> Result<Vec<Vec<DependencyNode>>> {
+        let execution_order = self.execution_order()?;
+        let mut levels: Vec<Vec<DependencyNode>> = Vec::new();
+        let mut assigned: HashSet<String> = HashSet::new();
+        let mut remaining: Vec<DependencyNode> = execution_order;
+
+        while !remaining.is_empty() {
+            let mut current_level = Vec::new();
+
+            for node in &remaining {
+                let node_key = node.key();
+
+                // Check if all dependencies are satisfied (already assigned to previous levels)
+                let deps_satisfied = self
+                    .dependencies
+                    .get(&node_key)
+                    .map(|deps| deps.iter().all(|dep| assigned.contains(&dep.key())))
+                    .unwrap_or(true); // No dependencies = satisfied
+
+                if deps_satisfied {
+                    current_level.push(node.clone());
+                    assigned.insert(node_key);
+                }
+            }
+
+            if current_level.is_empty() && !remaining.is_empty() {
+                // This shouldn't happen after execution_order (which detects cycles)
+                // but handle it gracefully by adding all remaining nodes
+                for node in &remaining {
+                    let node_key = node.key();
+
+                    if !assigned.contains(&node_key) {
+                        current_level.push(node.clone());
+                        assigned.insert(node_key);
+                    }
+                }
+            }
+
+            levels.push(current_level);
+            remaining.retain(|n| !assigned.contains(&n.key()));
+        }
+
+        Ok(levels)
+    }
+
+    /// Group nodes by level in reverse order (for destroy operations)
+    /// Dependents are destroyed before their dependencies
+    pub fn group_by_level_reversed(&self) -> Result<Vec<Vec<DependencyNode>>> {
+        let mut levels = self.group_by_level()?;
+        levels.reverse();
+        Ok(levels)
+    }
+
     /// Check if there are any dependencies
     #[allow(dead_code)]
     pub fn has_dependencies(&self) -> bool {

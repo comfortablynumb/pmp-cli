@@ -306,34 +306,9 @@ pub struct ResourceInfo {
 
 ### Template Matching
 
-```rust
-// src/import/template_matcher.rs
-pub struct TemplateMatcher {
-    templates: Vec<Template>,
-}
-
-impl TemplateMatcher {
-    pub fn find_matches(&self, analysis: &StateAnalysis) -> Vec<TemplateMatch> {
-        // Compare resources against template specs
-        // Score similarity
-        // Return ranked matches
-    }
-
-    fn calculate_similarity(&self, template: &Template, resources: &[ResourceInfo]) -> f64 {
-        // Calculate similarity score (0.0 - 1.0)
-        // Based on resource types, counts, attributes
-    }
-}
-
-pub struct TemplateMatch {
-    pub template_pack: String,
-    pub template_name: String,
-    pub confidence: f64,  // 0.0 - 1.0
-    pub matching_resources: Vec<String>,
-    pub missing_resources: Vec<String>,
-    pub extra_resources: Vec<String>,
-}
-```
+> **Note:** Template matching was planned but not implemented. Imported projects are created
+> without template association. Users can manually assign templates after import by editing
+> the `.pmp.environment.yaml` file.
 
 ### Terraform File Parser
 

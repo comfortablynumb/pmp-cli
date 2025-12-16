@@ -120,7 +120,8 @@ impl InfrastructureCommand {
         output::blank();
 
         // Step 5: Collect template inputs (if any)
-        // TODO: Implement input collection for infrastructure templates if needed
+        // Note: Infrastructure template inputs not implemented - most templates don't need them.
+        // If needed, extract input collection from create.rs into shared utility.
 
         // Step 6: Collect basic metadata
         output::subsection("Infrastructure Metadata");
@@ -213,6 +214,9 @@ impl InfrastructureCommand {
                 environments,
                 hooks: None,
                 executor: executor_config,
+                cost: None,
+                policy: None,
+                secrets: None,
             },
         };
 
@@ -721,6 +725,7 @@ impl InfrastructureCommand {
         Ok(ExecutorCollectionConfig {
             name: "opentofu".to_string(),
             config: config_map,
+            parallel: None,
         })
     }
 

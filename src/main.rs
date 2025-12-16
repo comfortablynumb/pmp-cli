@@ -1,11 +1,16 @@
 mod collection;
 mod commands;
 mod context;
+mod cost;
+mod diff;
 mod executor;
 mod hooks;
-mod import;
+mod infrastructure;
+mod marketplace;
+mod opa;
 mod output;
 mod schema;
+mod secrets;
 mod template;
 #[cfg(test)]
 mod test_helpers;
@@ -14,10 +19,11 @@ mod traits;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use commands::{
-    ApplyCommand, CiCommand, CiDetectChangesCommand, CloneCommand, CreateCommand, DepsCommand,
-    DestroyCommand, DriftCommand, EnvCommand, FindCommand, GenerateCommand, GraphCommand,
-    ImportCommand, InfrastructureCommand, PolicyCommand, PreviewCommand, RefreshCommand,
-    SearchCommand, StateCommand, TemplateCommand, TestCommand, UiCommand, UpdateCommand,
+    ApplyCommand, CiCommand, CiDetectChangesCommand, CloneCommand, CostCommand, CreateCommand,
+    DepsCommand, DestroyCommand, DriftCommand, EnvCommand, FindCommand, GenerateCommand,
+    GraphCommand, ImportCommand, InfrastructureCommand, MarketplaceCommand, PolicyCommand,
+    PreviewCommand, RefreshCommand, SearchCommand, StateCommand, TemplateCommand, TestCommand,
+    UiCommand, UpdateCommand,
 };
 
 #[derive(Parser)]
@@ -119,14 +125,15 @@ enum ProjectSubcommands {
 
     /// Clone an existing project
     #[command(
-        long_about = "Clone an existing project with a new name\n\nExamples:\n  pmp project clone my-api new-api\n  pmp project clone --source my-api --name new-api\n  pmp project clone my-api new-api --environment dev"
+        long_about = "Clone an existing project with a new name\n\nExamples:\n  pmp project clone new-api\n  pmp project clone new-api --source my-api\n  pmp project clone new-api --source my-api --environment dev"
     )]
     Clone {
-        /// Source project name (optional, prompts if not specified)
-        source: Option<String>,
-
         /// New project name
         name: String,
+
+        /// Source project name (optional, prompts if not specified)
+        #[arg(short, long)]
+        source: Option<String>,
 
         /// Environment to clone (optional, prompts if not specified)
         #[arg(short, long)]
@@ -135,12 +142,48 @@ enum ProjectSubcommands {
 
     /// Preview changes (run IaC plan)
     #[command(
-        long_about = "Preview changes (run IaC plan)\n\nYou can pass additional executor options after --:\n\nExamples:\n  pmp project preview\n  pmp project preview --path ./my-project\n  pmp project preview -- -no-color\n  pmp project preview -- -var=environment=prod"
+        long_about = "Preview changes (run IaC plan)\n\nYou can pass additional executor options after --:\n\nExamples:\n  pmp project preview\n  pmp project preview --path ./my-project\n  pmp project preview --cost\n  pmp project preview --skip-policy\n  pmp project preview --parallel 4\n  pmp project preview --diff\n  pmp project preview --diff --side-by-side\n  pmp project preview --diff --diff-format html --diff-output plan.html\n  pmp project preview -- -no-color\n  pmp project preview -- -var=environment=prod"
     )]
     Preview {
         /// Path to the project directory (defaults to current directory)
         #[arg(short, long)]
         path: Option<String>,
+
+        /// Show cost estimation after plan
+        #[arg(long)]
+        cost: bool,
+
+        /// Skip OPA policy validation
+        #[arg(long)]
+        skip_policy: bool,
+
+        /// Number of projects to execute in parallel (default: from config or 1)
+        #[arg(long)]
+        parallel: Option<usize>,
+
+        /// Show color-coded diff visualization instead of raw plan output
+        #[arg(long)]
+        diff: bool,
+
+        /// Diff output format (ascii, html)
+        #[arg(long, default_value = "ascii")]
+        diff_format: String,
+
+        /// Use side-by-side diff view (ASCII format only)
+        #[arg(long)]
+        side_by_side: bool,
+
+        /// Write diff output to file instead of stdout
+        #[arg(long)]
+        diff_output: Option<String>,
+
+        /// Show unchanged attributes in diff
+        #[arg(long)]
+        show_unchanged: bool,
+
+        /// Show sensitive values in diff output (normally hidden)
+        #[arg(long)]
+        show_sensitive: bool,
 
         /// Additional arguments to pass to the executor (after --)
         #[arg(last = true)]
@@ -149,12 +192,24 @@ enum ProjectSubcommands {
 
     /// Apply changes (run IaC apply)
     #[command(
-        long_about = "Apply changes (run IaC apply)\n\nYou can pass additional executor options after --:\n\nExamples:\n  pmp project apply\n  pmp project apply --path ./my-project\n  pmp project apply -- -auto-approve\n  pmp project apply -- -var=environment=prod -auto-approve"
+        long_about = "Apply changes (run IaC apply)\n\nYou can pass additional executor options after --:\n\nExamples:\n  pmp project apply\n  pmp project apply --path ./my-project\n  pmp project apply --cost\n  pmp project apply --skip-policy\n  pmp project apply --parallel 4\n  pmp project apply -- -auto-approve\n  pmp project apply -- -var=environment=prod -auto-approve"
     )]
     Apply {
         /// Path to the project directory (defaults to current directory)
         #[arg(short, long)]
         path: Option<String>,
+
+        /// Show cost estimation and block if threshold exceeded
+        #[arg(long)]
+        cost: bool,
+
+        /// Skip OPA policy validation
+        #[arg(long)]
+        skip_policy: bool,
+
+        /// Number of projects to execute in parallel (default: from config or 1)
+        #[arg(long)]
+        parallel: Option<usize>,
 
         /// Additional arguments to pass to the executor (after --)
         #[arg(last = true)]
@@ -163,7 +218,7 @@ enum ProjectSubcommands {
 
     /// Destroy infrastructure (run IaC destroy)
     #[command(
-        long_about = "Destroy infrastructure (run IaC destroy)\n\nWARNING: This will destroy all resources managed by the project!\nYou will be prompted for confirmation unless --yes is specified.\n\nYou can pass additional executor options after --:\n\nExamples:\n  pmp project destroy\n  pmp project destroy --yes\n  pmp project destroy --path ./my-project\n  pmp project destroy -- -auto-approve\n  pmp project destroy --yes -- -var=environment=prod"
+        long_about = "Destroy infrastructure (run IaC destroy)\n\nWARNING: This will destroy all resources managed by the project!\nYou will be prompted for confirmation unless --yes is specified.\n\nYou can pass additional executor options after --:\n\nExamples:\n  pmp project destroy\n  pmp project destroy --yes\n  pmp project destroy --path ./my-project\n  pmp project destroy --parallel 4\n  pmp project destroy -- -auto-approve\n  pmp project destroy --yes -- -var=environment=prod"
     )]
     Destroy {
         /// Path to the project directory (defaults to current directory)
@@ -173,6 +228,10 @@ enum ProjectSubcommands {
         /// Skip confirmation prompt
         #[arg(short, long)]
         yes: bool,
+
+        /// Number of projects to execute in parallel (default: from config or 1)
+        #[arg(long)]
+        parallel: Option<usize>,
 
         /// Additional arguments to pass to the executor (after --)
         #[arg(last = true)]
@@ -195,12 +254,16 @@ enum ProjectSubcommands {
 
     /// Test configuration without creating infrastructure (run IaC test)
     #[command(
-        long_about = "Test configuration without creating infrastructure (run IaC test)\n\nValidates the configuration and runs tests without actually creating or modifying resources.\nFor OpenTofu, this runs 'tofu test' which validates the configuration.\n\nYou can pass additional executor options after --:\n\nExamples:\n  pmp project test\n  pmp project test --path ./my-project\n  pmp project test -- -verbose"
+        long_about = "Test configuration without creating infrastructure (run IaC test)\n\nValidates the configuration and runs tests without actually creating or modifying resources.\nFor OpenTofu, this runs 'tofu test' which validates the configuration.\n\nYou can pass additional executor options after --:\n\nExamples:\n  pmp project test\n  pmp project test --path ./my-project\n  pmp project test --parallel 4\n  pmp project test -- -verbose"
     )]
     Test {
         /// Path to the project directory (defaults to current directory)
         #[arg(short, long)]
         path: Option<String>,
+
+        /// Number of projects to execute in parallel (default: from config or 1)
+        #[arg(long)]
+        parallel: Option<usize>,
 
         /// Additional arguments to pass to the executor (after --)
         #[arg(last = true)]
@@ -287,9 +350,9 @@ enum Commands {
         command: InfrastructureSubcommands,
     },
 
-    /// Import existing infrastructure into PMP
+    /// Import existing cloud infrastructure into OpenTofu management
     #[command(
-        long_about = "Import existing Terraform/OpenTofu infrastructure into PMP\n\nSubcommands:\n- project: Import entire project directory\n- state: Import from state file\n- resource: Import specific resources\n- bulk: Import multiple projects from config\n\nExamples:\n  pmp import project ./my-terraform-infra\n  pmp import project ./my-infra --name my-app --environment production\n  pmp import state ./terraform.tfstate --name my-app\n  pmp import resource aws_s3_bucket.my_bucket --project my-storage --environment prod\n  pmp import bulk ./import-config.yaml"
+        long_about = "Import existing cloud infrastructure into OpenTofu management\n\nCreates import blocks for resources discovered by pmp-cloud-inspector.\n\nSubcommands:\n- from-export: Import from pmp-cloud-inspector export file (recommended)\n- manual: Manually specify a resource to import\n- batch: Import multiple resources from YAML configuration\n\nExamples:\n  pmp import from-export ./cloud-inventory.json\n  pmp import from-export ./export.yaml --provider aws --region us-east-1\n  pmp import manual aws_vpc vpc-12345 --name main-vpc\n  pmp import batch ./import-config.yaml"
     )]
     Import(ImportCommand),
 
@@ -347,6 +410,15 @@ enum Commands {
         command: CiSubcommands,
     },
 
+    /// Cost estimation and analysis
+    #[command(
+        long_about = "Estimate and analyze infrastructure costs using Infracost\n\nSubcommands:\n- estimate: Show cost breakdown for a project\n- diff: Compare current vs planned costs\n- report: Generate detailed cost report\n\nExamples:\n  pmp cost estimate\n  pmp cost diff\n  pmp cost report --format html --output costs.html"
+    )]
+    Cost {
+        #[command(subcommand)]
+        command: CostSubcommands,
+    },
+
     /// Template management and scaffolding
     #[command(
         long_about = "Create and manage template packs\n\nExamples:\n  pmp template scaffold\n  pmp template scaffold --output ./my-templates"
@@ -363,6 +435,61 @@ enum Commands {
     Search {
         #[command(subcommand)]
         command: SearchSubcommands,
+    },
+
+    /// Template pack marketplace
+    #[command(
+        long_about = "Search, install, and manage template packs from registries\n\nSubcommands:\n- search: Search for template packs\n- list: List available packs\n- info: Get detailed pack info\n- install: Install a pack\n- update: Update installed packs\n- registry: Manage registries\n- generate-index: Generate registry index\n\nExamples:\n  pmp marketplace search aws\n  pmp marketplace list\n  pmp marketplace install aws-networking\n  pmp marketplace registry add official --url https://example.com/index.json"
+    )]
+    Marketplace {
+        #[command(subcommand)]
+        command: MarketplaceSubcommands,
+    },
+}
+
+#[derive(Subcommand)]
+#[command(next_display_order = None)]
+enum CostSubcommands {
+    /// Estimate infrastructure costs
+    #[command(
+        long_about = "Show estimated monthly costs for infrastructure\n\nExamples:\n  pmp cost estimate\n  pmp cost estimate --path ./my-project/environments/dev\n  pmp cost estimate --format json"
+    )]
+    Estimate {
+        /// Path to the project environment (defaults to current directory)
+        #[arg(short, long)]
+        path: Option<String>,
+
+        /// Output format (table, json, html)
+        #[arg(short, long)]
+        format: Option<String>,
+    },
+
+    /// Compare costs between current and planned state
+    #[command(
+        long_about = "Show cost differences between current state and plan\n\nExamples:\n  pmp cost diff\n  pmp cost diff --path ./my-project/environments/dev"
+    )]
+    Diff {
+        /// Path to the project environment (defaults to current directory)
+        #[arg(short, long)]
+        path: Option<String>,
+    },
+
+    /// Generate detailed cost report
+    #[command(
+        long_about = "Generate a detailed cost breakdown report\n\nExamples:\n  pmp cost report\n  pmp cost report --format html --output costs.html"
+    )]
+    Report {
+        /// Path to the project environment (defaults to current directory)
+        #[arg(short, long)]
+        path: Option<String>,
+
+        /// Output format (table, json, html)
+        #[arg(short, long)]
+        format: Option<String>,
+
+        /// Output file (defaults to stdout)
+        #[arg(short, long)]
+        output: Option<String>,
     },
 }
 
@@ -583,6 +710,68 @@ enum PolicySubcommands {
         #[arg(short, long)]
         scanner: Option<String>,
     },
+
+    /// OPA/Rego policy operations
+    #[command(subcommand)]
+    Opa(OpaSubcommands),
+}
+
+#[derive(Subcommand)]
+#[command(next_display_order = None)]
+enum OpaSubcommands {
+    /// Validate using OPA/Rego policies
+    #[command(
+        long_about = "Validate infrastructure against OPA/Rego policies\n\nPolicies are discovered from:\n- ./policies (project-local)\n- ~/.pmp/policies (global)\n- Custom paths from .pmp.infrastructure.yaml\n\nExample:\n  pmp policy opa validate\n  pmp policy opa validate --path ./my-project\n  pmp policy opa validate --policy naming"
+    )]
+    Validate {
+        /// Path to validate (defaults to current directory)
+        #[arg(short, long)]
+        path: Option<String>,
+
+        /// Filter policies by package name or file name
+        #[arg(long)]
+        policy: Option<String>,
+
+        /// JSON file to use as input (defaults to terraform plan output)
+        #[arg(long)]
+        input: Option<String>,
+    },
+
+    /// Test OPA policies with fixtures
+    #[command(
+        long_about = "Run tests for OPA/Rego policies\n\nLooks for *_test.rego or test_*.rego files\n\nExample:\n  pmp policy opa test\n  pmp policy opa test --path ./policies"
+    )]
+    Test {
+        /// Path to policy directory to test
+        #[arg(short, long)]
+        path: Option<String>,
+    },
+
+    /// List discovered OPA policies
+    #[command(long_about = "List all discovered OPA/Rego policies\n\nExample:\n  pmp policy opa list")]
+    List,
+
+    /// Generate compliance report
+    #[command(
+        long_about = "Generate a compliance report from policy validation\n\nSupported formats:\n- markdown (default)\n- json\n- html\n\nExample:\n  pmp policy opa report\n  pmp policy opa report --format json --output compliance.json\n  pmp policy opa report --format html --output compliance.html\n  pmp policy opa report --include-passed"
+    )]
+    Report {
+        /// Output format: json, markdown, html
+        #[arg(short, long, default_value = "markdown")]
+        format: String,
+
+        /// Output file (stdout if not specified)
+        #[arg(short, long)]
+        output: Option<String>,
+
+        /// Path to validate (defaults to current directory)
+        #[arg(short, long)]
+        path: Option<String>,
+
+        /// Include passing checks in report
+        #[arg(long)]
+        include_passed: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -635,6 +824,47 @@ enum CiSubcommands {
 #[derive(Subcommand)]
 #[command(next_display_order = None)] // Sort subcommands alphabetically
 enum TemplateSubcommands {
+    /// Lint template packs for common issues
+    #[command(
+        long_about = "Validate template packs for common issues\n\n\
+        Checks for:\n  \
+        - Missing required fields\n  \
+        - Unused inputs\n  \
+        - Invalid input configurations\n  \
+        - Handlebars syntax errors\n  \
+        - Circular inheritance\n  \
+        - Best practices warnings\n\n\
+        Examples:\n  \
+        pmp template lint                    # Lint all template packs\n  \
+        pmp template lint --pack my-pack     # Lint specific pack\n  \
+        pmp template lint --format json      # Output as JSON"
+    )]
+    Lint {
+        /// Lint only the specified template pack
+        #[arg(short, long)]
+        pack: Option<String>,
+
+        /// Output format (text or json)
+        #[arg(short, long, default_value = "text")]
+        format: String,
+
+        /// Include info-level suggestions
+        #[arg(short, long)]
+        include_info: bool,
+
+        /// Skip unused input detection (faster)
+        #[arg(long)]
+        skip_unused_inputs: bool,
+
+        /// Skip Handlebars syntax validation
+        #[arg(long)]
+        skip_handlebars: bool,
+
+        /// Additional template pack paths (colon-separated)
+        #[arg(long, env = "PMP_TEMPLATE_PACKS_PATHS")]
+        template_packs_paths: Option<String>,
+    },
+
     /// Scaffold a new template pack interactively
     #[command(
         long_about = "Create a new template pack with interactive prompts\n\nExample:\n  pmp template scaffold\n  pmp template scaffold --output ./custom-templates"
@@ -700,6 +930,30 @@ enum EnvSubcommands {
         #[arg(short, long)]
         project: Option<String>,
     },
+
+    /// Destroy all expired environments
+    #[command(
+        long_about = "Destroy all expired environments based on time_limit configuration\n\n\
+        By default runs in dry-run mode showing what would be destroyed.\n\
+        Use --force to actually execute destruction.\n\n\
+        Examples:\n  \
+        pmp env purge                    # Dry-run mode\n  \
+        pmp env purge --force            # Execute destruction\n  \
+        pmp env purge --environment dev  # Filter by environment"
+    )]
+    Purge {
+        /// Execute destruction (default: dry-run mode)
+        #[arg(short, long)]
+        force: bool,
+
+        /// Filter by environment name
+        #[arg(short, long)]
+        environment: Option<String>,
+
+        /// Skip confirmation prompt (requires --force)
+        #[arg(short, long)]
+        yes: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -756,6 +1010,120 @@ enum SearchSubcommands {
         /// Output format (text, json, yaml)
         #[arg(short, long)]
         format: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+#[command(next_display_order = None)]
+enum MarketplaceSubcommands {
+    /// Search for template packs
+    #[command(
+        long_about = "Search for template packs across configured registries\n\nExamples:\n  pmp marketplace search aws\n  pmp marketplace search networking --registry official"
+    )]
+    Search {
+        /// Search query
+        query: String,
+
+        /// Filter by registry name
+        #[arg(short, long)]
+        registry: Option<String>,
+    },
+
+    /// List available template packs
+    #[command(
+        long_about = "List all available template packs from configured registries\n\nExamples:\n  pmp marketplace list\n  pmp marketplace list --registry official"
+    )]
+    List {
+        /// Filter by registry name
+        #[arg(short, long)]
+        registry: Option<String>,
+    },
+
+    /// Get detailed information about a pack
+    #[command(long_about = "Get detailed information about a specific template pack\n\nExample:\n  pmp marketplace info aws-networking")]
+    Info {
+        /// Pack name
+        pack_name: String,
+    },
+
+    /// Install a template pack
+    #[command(
+        long_about = "Install a template pack from a registry\n\nExamples:\n  pmp marketplace install aws-networking\n  pmp marketplace install aws-networking --version 1.2.0"
+    )]
+    Install {
+        /// Pack name
+        pack_name: String,
+
+        /// Version to install (defaults to latest)
+        #[arg(short, long)]
+        version: Option<String>,
+    },
+
+    /// Update installed template packs
+    #[command(
+        long_about = "Update installed template packs to latest versions\n\nExamples:\n  pmp marketplace update aws-networking\n  pmp marketplace update --all"
+    )]
+    Update {
+        /// Pack name (optional if --all is specified)
+        pack_name: Option<String>,
+
+        /// Update all installed packs
+        #[arg(short, long)]
+        all: bool,
+    },
+
+    /// Manage registries
+    #[command(subcommand)]
+    Registry(MarketplaceRegistrySubcommands),
+
+    /// Generate registry index from local template packs
+    #[command(
+        long_about = "Generate a registry index from local template packs\n\nCreates index.json and index.html files for hosting\n\nExamples:\n  pmp marketplace generate-index\n  pmp marketplace generate-index --output ./dist\n  pmp marketplace generate-index --name my-registry --description 'My Packs'"
+    )]
+    GenerateIndex {
+        /// Output directory (defaults to ./dist)
+        #[arg(short, long)]
+        output: Option<String>,
+
+        /// Registry name
+        #[arg(short, long)]
+        name: Option<String>,
+
+        /// Registry description
+        #[arg(short, long)]
+        description: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+#[command(next_display_order = None)]
+enum MarketplaceRegistrySubcommands {
+    /// Add a new registry
+    #[command(
+        long_about = "Add a new template pack registry\n\nExamples:\n  pmp marketplace registry add official --url https://example.com/index.json\n  pmp marketplace registry add local-dev --path ~/my-packs"
+    )]
+    Add {
+        /// Registry name
+        name: String,
+
+        /// Registry URL (for URL-based registries)
+        #[arg(long)]
+        url: Option<String>,
+
+        /// Local path (for filesystem registries)
+        #[arg(long)]
+        path: Option<String>,
+    },
+
+    /// List configured registries
+    #[command(long_about = "List all configured template pack registries\n\nExample:\n  pmp marketplace registry list")]
+    List,
+
+    /// Remove a registry
+    #[command(long_about = "Remove a template pack registry\n\nExample:\n  pmp marketplace registry remove my-registry")]
+    Remove {
+        /// Registry name
+        name: String,
     },
 }
 
@@ -824,22 +1192,48 @@ fn main() -> Result<()> {
             }
             ProjectSubcommands::Preview {
                 path,
+                cost,
+                skip_policy,
+                parallel,
+                diff,
+                diff_format,
+                side_by_side,
+                diff_output,
+                show_unchanged,
+                show_sensitive,
                 executor_args,
             } => {
-                PreviewCommand::execute(&ctx, path.as_deref(), &executor_args)?;
+                PreviewCommand::execute(
+                    &ctx,
+                    path.as_deref(),
+                    cost,
+                    skip_policy,
+                    parallel,
+                    diff,
+                    &diff_format,
+                    side_by_side,
+                    diff_output.as_deref(),
+                    show_unchanged,
+                    show_sensitive,
+                    &executor_args,
+                )?;
             }
             ProjectSubcommands::Apply {
                 path,
+                cost,
+                skip_policy,
+                parallel,
                 executor_args,
             } => {
-                ApplyCommand::execute(&ctx, path.as_deref(), &executor_args)?;
+                ApplyCommand::execute(&ctx, path.as_deref(), cost, skip_policy, parallel, &executor_args)?;
             }
             ProjectSubcommands::Destroy {
                 path,
                 yes,
+                parallel,
                 executor_args,
             } => {
-                DestroyCommand::execute(&ctx, path.as_deref(), yes, &executor_args)?;
+                DestroyCommand::execute(&ctx, path.as_deref(), yes, parallel, &executor_args)?;
             }
             ProjectSubcommands::Refresh {
                 path,
@@ -849,9 +1243,10 @@ fn main() -> Result<()> {
             }
             ProjectSubcommands::Test {
                 path,
+                parallel,
                 executor_args,
             } => {
-                TestCommand::execute(&ctx, path.as_deref(), &executor_args)?;
+                TestCommand::execute(&ctx, path.as_deref(), parallel, &executor_args)?;
             }
             ProjectSubcommands::Graph {
                 path,
@@ -911,6 +1306,40 @@ fn main() -> Result<()> {
                 PolicySubcommands::Scan { path, scanner } => {
                     PolicyCommand::execute_scan(&ctx, path.as_deref(), scanner.as_deref())?;
                 }
+                PolicySubcommands::Opa(opa_cmd) => match opa_cmd {
+                    OpaSubcommands::Validate {
+                        path,
+                        policy,
+                        input,
+                    } => {
+                        PolicyCommand::execute_opa_validate(
+                            &ctx,
+                            path.as_deref(),
+                            policy.as_deref(),
+                            input.as_deref(),
+                        )?;
+                    }
+                    OpaSubcommands::Test { path } => {
+                        PolicyCommand::execute_opa_test(&ctx, path.as_deref())?;
+                    }
+                    OpaSubcommands::List => {
+                        PolicyCommand::execute_opa_list(&ctx)?;
+                    }
+                    OpaSubcommands::Report {
+                        format,
+                        output,
+                        path,
+                        include_passed,
+                    } => {
+                        PolicyCommand::execute_opa_report(
+                            &ctx,
+                            &format,
+                            output.as_deref(),
+                            path.as_deref(),
+                            include_passed,
+                        )?;
+                    }
+                },
             },
             ProjectSubcommands::State { command } => match command {
                 StateSubcommands::List { details } => {
@@ -973,6 +1402,13 @@ fn main() -> Result<()> {
                         project.as_deref(),
                     )?;
                 }
+                EnvSubcommands::Purge {
+                    force,
+                    environment,
+                    yes,
+                } => {
+                    EnvCommand::execute_purge(&ctx, force, environment.as_deref(), yes)?;
+                }
             },
         },
         Commands::Generate {
@@ -1022,7 +1458,45 @@ fn main() -> Result<()> {
                 )?;
             }
         },
+        Commands::Cost { command } => match command {
+            CostSubcommands::Estimate { path, format } => {
+                CostCommand::execute_estimate(&ctx, path.as_deref(), format.as_deref())?;
+            }
+            CostSubcommands::Diff { path } => {
+                CostCommand::execute_diff(&ctx, path.as_deref())?;
+            }
+            CostSubcommands::Report {
+                path,
+                format,
+                output,
+            } => {
+                CostCommand::execute_report(
+                    &ctx,
+                    path.as_deref(),
+                    format.as_deref(),
+                    output.as_deref(),
+                )?;
+            }
+        },
         Commands::Template { command } => match command {
+            TemplateSubcommands::Lint {
+                pack,
+                format,
+                include_info,
+                skip_unused_inputs,
+                skip_handlebars,
+                template_packs_paths,
+            } => {
+                TemplateCommand::execute_lint(
+                    &ctx,
+                    pack.as_deref(),
+                    &format,
+                    include_info,
+                    skip_unused_inputs,
+                    skip_handlebars,
+                    template_packs_paths.as_deref(),
+                )?;
+            }
             TemplateSubcommands::Scaffold { output } => {
                 TemplateCommand::execute_scaffold(&ctx, output.as_deref())?;
             }
@@ -1042,6 +1516,51 @@ fn main() -> Result<()> {
             }
             SearchSubcommands::ByOutput { outputs, format: _ } => {
                 SearchCommand::execute_by_output(&ctx, &outputs[0])?;
+            }
+        },
+        Commands::Marketplace { command } => match command {
+            MarketplaceSubcommands::Search { query, registry } => {
+                MarketplaceCommand::execute_search(&ctx, &query, registry.as_deref())?;
+            }
+            MarketplaceSubcommands::List { registry } => {
+                MarketplaceCommand::execute_list(&ctx, registry.as_deref())?;
+            }
+            MarketplaceSubcommands::Info { pack_name } => {
+                MarketplaceCommand::execute_info(&ctx, &pack_name)?;
+            }
+            MarketplaceSubcommands::Install { pack_name, version } => {
+                MarketplaceCommand::execute_install(&ctx, &pack_name, version.as_deref())?;
+            }
+            MarketplaceSubcommands::Update { pack_name, all } => {
+                MarketplaceCommand::execute_update(&ctx, pack_name.as_deref(), all)?;
+            }
+            MarketplaceSubcommands::Registry(reg_cmd) => match reg_cmd {
+                MarketplaceRegistrySubcommands::Add { name, url, path } => {
+                    MarketplaceCommand::execute_registry_add(
+                        &ctx,
+                        &name,
+                        url.as_deref(),
+                        path.as_deref(),
+                    )?;
+                }
+                MarketplaceRegistrySubcommands::List => {
+                    MarketplaceCommand::execute_registry_list(&ctx)?;
+                }
+                MarketplaceRegistrySubcommands::Remove { name } => {
+                    MarketplaceCommand::execute_registry_remove(&ctx, &name)?;
+                }
+            },
+            MarketplaceSubcommands::GenerateIndex {
+                output,
+                name,
+                description,
+            } => {
+                MarketplaceCommand::execute_generate_index(
+                    &ctx,
+                    output.as_deref(),
+                    name.as_deref(),
+                    description.as_deref(),
+                )?;
             }
         },
     }

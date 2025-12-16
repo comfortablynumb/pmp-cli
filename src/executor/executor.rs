@@ -86,6 +86,10 @@ pub trait Executor: Send + Sync {
     fn test(&self, config: &ExecutorConfig, working_dir: &str, extra_args: &[String])
     -> Result<()>;
 
+    /// Execute the plan command and capture output (for diff visualization)
+    /// Returns the raw Output containing stdout/stderr and exit status
+    fn plan_with_output(&self, working_dir: &str, extra_args: &[String]) -> Result<Output>;
+
     /// Get the name of this executor (e.g., "opentofu", "terraform")
     fn get_name(&self) -> &str;
 
@@ -114,6 +118,8 @@ pub trait Executor: Send + Sync {
         _project_metadata: &ProjectMetadata,
         _plugins: Option<&[crate::template::metadata::AddedPlugin]>,
         _template_reference_projects: &[crate::template::metadata::TemplateReferenceProject],
+        _secrets: &HashMap<String, crate::template::metadata::SecretReference>,
+        _secrets_config: Option<&crate::template::metadata::SecretsConfig>,
     ) -> Result<()> {
         // Default: do nothing - only OpenTofu executor generates _common.tf
         Ok(())

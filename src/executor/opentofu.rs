@@ -709,6 +709,339 @@ fn generate_backend_config_map(
 }
 
 // ============================================================================
+// Secrets Terraform Generation
+// ============================================================================
+
+/// Generate Terraform code for secrets (providers, data sources, and locals)
+pub fn generate_secrets_terraform(
+    secrets: &HashMap<String, crate::template::metadata::SecretReference>,
+    secrets_config: Option<&crate::template::metadata::SecretsConfig>,
+    executor_config: &HashMap<String, serde_json::Value>,
+    environment: &str,
+) -> Result<String> {
+    if secrets.is_empty() {
+        return Ok(String::new());
+    }
+
+    let secrets_cfg = match secrets_config {
+        Some(cfg) => cfg,
+        None => return Ok(String::new()),
+    };
+
+    let registry = crate::secrets::SecretsProviderRegistry::new();
+    let mut hcl = String::new();
+
+    // Track which managers we've already generated providers for
+    let mut generated_providers: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut remote_states: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    // Collect all secrets grouped by manager
+    let mut secrets_by_manager: HashMap<String, Vec<(&String, &crate::template::metadata::SecretReference)>> =
+        HashMap::new();
+
+    for (input_name, secret_ref) in secrets {
+        secrets_by_manager
+            .entry(secret_ref.manager.clone())
+            .or_default()
+            .push((input_name, secret_ref));
+    }
+
+    // Generate remote state data sources for project-based managers
+    for manager_name in secrets_by_manager.keys() {
+        let manager_config = secrets_cfg.managers.iter().find(|m| m.name == *manager_name);
+
+        if let Some(config) = manager_config
+            && let Some(project_ref) = &config.project
+            && !remote_states.contains(&project_ref.name)
+        {
+            let remote_state_hcl = generate_remote_state_for_project(
+                &project_ref.name,
+                project_ref.environment.as_deref().unwrap_or(environment),
+                executor_config,
+            )?;
+
+            if !remote_state_hcl.is_empty() {
+                hcl.push_str(&remote_state_hcl);
+                remote_states.insert(project_ref.name.clone());
+            }
+        }
+    }
+
+    // Generate provider blocks
+    for (manager_name, _secrets_list) in &secrets_by_manager {
+        if generated_providers.contains(manager_name) {
+            continue;
+        }
+
+        let manager_config = secrets_cfg.managers.iter().find(|m| m.name == *manager_name);
+
+        if let Some(config) = manager_config {
+            let provider = registry
+                .get(&config.manager_type)
+                .context(format!("Unknown secret manager type: {}", config.manager_type))?;
+
+            let provider_hcl = generate_secrets_provider_block(
+                config,
+                provider.as_ref(),
+                environment,
+            )?;
+
+            if !provider_hcl.is_empty() {
+                hcl.push_str(&provider_hcl);
+            }
+
+            generated_providers.insert(manager_name.clone());
+        }
+    }
+
+    // Generate data sources for each secret
+    let mut data_source_names: Vec<(String, String, Option<String>)> = Vec::new();
+
+    for (manager_name, secrets_list) in &secrets_by_manager {
+        let manager_config = secrets_cfg.managers.iter().find(|m| m.name == *manager_name);
+
+        if let Some(config) = manager_config {
+            let provider = registry
+                .get(&config.manager_type)
+                .context(format!("Unknown secret manager type: {}", config.manager_type))?;
+
+            for (input_name, secret_ref) in secrets_list {
+                let data_source_hcl = generate_secret_data_source(
+                    secret_ref,
+                    provider.as_ref(),
+                )?;
+
+                hcl.push_str(&data_source_hcl);
+
+                // Track for locals generation
+                data_source_names.push((
+                    secret_ref.data_source_name.clone(),
+                    config.manager_type.clone(),
+                    secret_ref.secret_key.clone(),
+                ));
+            }
+        }
+    }
+
+    // Generate locals block for easy access
+    if !data_source_names.is_empty() {
+        hcl.push_str("\n# Secret values (from secret managers)\nlocals {\n");
+
+        for (data_source_name, manager_type, secret_key) in &data_source_names {
+            let local_value = get_secret_local_value(&data_source_name, &manager_type, secret_key.as_deref());
+            hcl.push_str(&format!("  {} = {}\n", data_source_name, local_value));
+        }
+
+        hcl.push_str("}\n\n");
+    }
+
+    Ok(hcl)
+}
+
+/// Generate remote state data source for a PMP project (for project-based secret manager config)
+fn generate_remote_state_for_project(
+    project_name: &str,
+    environment: &str,
+    executor_config: &HashMap<String, serde_json::Value>,
+) -> Result<String> {
+    let backend_config = executor_config
+        .get("backend")
+        .and_then(|b| b.as_object());
+
+    let Some(backend_config) = backend_config else {
+        return Ok(String::new());
+    };
+
+    let backend_type = backend_config
+        .get("type")
+        .and_then(|t| t.as_str())
+        .unwrap_or("local");
+
+    let sanitized_name = crate::secrets::sanitize_name(project_name);
+    let mut hcl = String::new();
+
+    hcl.push_str(&format!(
+        "# Remote state for secret manager project: {}\n",
+        project_name
+    ));
+    hcl.push_str(&format!(
+        "data \"terraform_remote_state\" \"secrets_{}\" {{\n",
+        sanitized_name
+    ));
+    hcl.push_str(&format!("  backend = \"{}\"\n", backend_type));
+
+    // Generate config block based on backend type
+    let config_hcl = generate_backend_config_map(
+        executor_config,
+        None, // We don't know the apiVersion of the referenced project
+        None, // We don't know the kind
+        Some(environment),
+        Some(project_name),
+    )?;
+
+    if !config_hcl.is_empty() {
+        hcl.push_str("  config = {\n");
+        hcl.push_str(&config_hcl);
+        hcl.push_str("  }\n");
+    }
+
+    hcl.push_str("}\n\n");
+    Ok(hcl)
+}
+
+/// Generate provider block for a secret manager
+fn generate_secrets_provider_block(
+    config: &crate::template::metadata::SecretManagerConfig,
+    provider: &dyn crate::secrets::SecretsProvider,
+    _environment: &str,
+) -> Result<String> {
+    let provider_type = provider.get_type();
+    let mut hcl = String::new();
+
+    hcl.push_str(&format!("# {} provider for secret manager: {}\n", provider_type, config.name));
+
+    match provider_type {
+        "vault" => {
+            hcl.push_str("provider \"vault\" {\n");
+
+            if let Some(project_ref) = &config.project {
+                let sanitized_name = crate::secrets::sanitize_name(&project_ref.name);
+
+                if let Some(addr_output) = project_ref.outputs.get("address") {
+                    hcl.push_str(&format!(
+                        "  address = data.terraform_remote_state.secrets_{}.outputs.{}\n",
+                        sanitized_name, addr_output
+                    ));
+                }
+
+                if let Some(ns_output) = project_ref.outputs.get("namespace") {
+                    hcl.push_str(&format!(
+                        "  namespace = data.terraform_remote_state.secrets_{}.outputs.{}\n",
+                        sanitized_name, ns_output
+                    ));
+                }
+            } else {
+                if let Some(addr) = config.config.get("address").and_then(|v| v.as_str()) {
+                    hcl.push_str(&format!("  address = \"{}\"\n", escape_hcl_string(addr)));
+                }
+
+                if let Some(ns) = config.config.get("namespace").and_then(|v| v.as_str()) {
+                    hcl.push_str(&format!("  namespace = \"{}\"\n", escape_hcl_string(ns)));
+                }
+            }
+
+            hcl.push_str("}\n\n");
+        }
+        "aws_secrets_manager" => {
+            hcl.push_str("provider \"aws\" {\n");
+            hcl.push_str("  alias = \"secrets\"\n");
+
+            if let Some(project_ref) = &config.project {
+                let sanitized_name = crate::secrets::sanitize_name(&project_ref.name);
+
+                if let Some(region_output) = project_ref.outputs.get("region") {
+                    hcl.push_str(&format!(
+                        "  region = data.terraform_remote_state.secrets_{}.outputs.{}\n",
+                        sanitized_name, region_output
+                    ));
+                }
+            } else if let Some(region) = config.config.get("region").and_then(|v| v.as_str()) {
+                hcl.push_str(&format!("  region = \"{}\"\n", escape_hcl_string(region)));
+            }
+
+            hcl.push_str("}\n\n");
+        }
+        _ => {}
+    }
+
+    Ok(hcl)
+}
+
+/// Generate data source for a specific secret
+fn generate_secret_data_source(
+    secret_ref: &crate::template::metadata::SecretReference,
+    provider: &dyn crate::secrets::SecretsProvider,
+) -> Result<String> {
+    let provider_type = provider.get_type();
+    let mut hcl = String::new();
+
+    match provider_type {
+        "vault" => {
+            hcl.push_str(&format!(
+                "data \"vault_generic_secret\" \"{}\" {{\n",
+                secret_ref.data_source_name
+            ));
+            hcl.push_str(&format!(
+                "  path = \"{}\"\n",
+                escape_hcl_string(&secret_ref.secret_id)
+            ));
+            hcl.push_str("}\n\n");
+        }
+        "aws_secrets_manager" => {
+            // First get the secret
+            hcl.push_str(&format!(
+                "data \"aws_secretsmanager_secret\" \"{}\" {{\n",
+                secret_ref.data_source_name
+            ));
+            hcl.push_str("  provider = aws.secrets\n");
+            hcl.push_str(&format!(
+                "  name     = \"{}\"\n",
+                escape_hcl_string(&secret_ref.secret_id)
+            ));
+            hcl.push_str("}\n\n");
+
+            // Then get the secret version
+            hcl.push_str(&format!(
+                "data \"aws_secretsmanager_secret_version\" \"{}_version\" {{\n",
+                secret_ref.data_source_name
+            ));
+            hcl.push_str("  provider  = aws.secrets\n");
+            hcl.push_str(&format!(
+                "  secret_id = data.aws_secretsmanager_secret.{}.id\n",
+                secret_ref.data_source_name
+            ));
+            hcl.push_str("}\n\n");
+        }
+        _ => {}
+    }
+
+    Ok(hcl)
+}
+
+/// Get the HCL expression for accessing a secret value in locals
+fn get_secret_local_value(
+    data_source_name: &str,
+    manager_type: &str,
+    secret_key: Option<&str>,
+) -> String {
+    match manager_type {
+        "vault" => {
+            let key = secret_key.unwrap_or("value");
+            format!(
+                "data.vault_generic_secret.{}.data[\"{}\"]",
+                data_source_name, key
+            )
+        }
+        "aws_secrets_manager" => {
+            if let Some(key) = secret_key {
+                // JSON secret with specific key
+                format!(
+                    "jsondecode(data.aws_secretsmanager_secret_version.{}_version.secret_string)[\"{}\"]",
+                    data_source_name, key
+                )
+            } else {
+                // Plain string secret
+                format!(
+                    "data.aws_secretsmanager_secret_version.{}_version.secret_string",
+                    data_source_name
+                )
+            }
+        }
+        _ => format!("\"unknown_secret_type_{}\"", data_source_name),
+    }
+}
+
+// ============================================================================
 // OpenTofu Executor Implementation
 // ============================================================================
 
@@ -1040,6 +1373,8 @@ impl Executor for OpenTofuExecutor {
         project_metadata: &ProjectMetadata,
         plugins: Option<&[crate::template::metadata::AddedPlugin]>,
         template_reference_projects: &[crate::template::metadata::TemplateReferenceProject],
+        secrets: &HashMap<String, crate::template::metadata::SecretReference>,
+        secrets_config: Option<&crate::template::metadata::SecretsConfig>,
     ) -> Result<()> {
         ctx.output
             .dimmed("  Generating _common.tf with backend configuration...");
@@ -1081,23 +1416,40 @@ impl Executor for OpenTofuExecutor {
             String::new()
         };
 
-        // Combine backend, data sources, variables, and modules
+        // Generate secrets data sources and locals
+        let secrets_hcl = generate_secrets_terraform(
+            secrets,
+            secrets_config,
+            executor_config,
+            project_metadata.environment,
+        )
+        .context("Failed to generate secrets Terraform code")?;
+
+        // Combine backend, data sources, variables, modules, and secrets
         let mut combined_hcl = backend_hcl;
+
         if !template_data_sources_hcl.is_empty() {
             combined_hcl.push_str(&template_data_sources_hcl);
         }
+
         if !plugin_data_sources_hcl.is_empty() {
             combined_hcl.push_str(&plugin_data_sources_hcl);
         }
+
         if !variables_hcl.is_empty() {
             combined_hcl.push_str(&variables_hcl);
         }
+
         if !modules_hcl.is_empty() {
             combined_hcl.push_str(&modules_hcl);
         }
 
+        if !secrets_hcl.is_empty() {
+            combined_hcl.push_str(&secrets_hcl);
+        }
+
         if combined_hcl.is_empty() {
-            // No backend config, data sources, variables, or modules to write
+            // No backend config, data sources, variables, modules, or secrets to write
             return Ok(());
         }
 
@@ -1116,24 +1468,11 @@ impl Executor for OpenTofuExecutor {
     fn file_extension(&self) -> &str {
         ".tf"
     }
-}
 
-impl Default for OpenTofuExecutor {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-// Additional methods for OpenTofuExecutor (not part of the Executor trait)
-impl OpenTofuExecutor {
-    /// Run plan and capture output for drift detection
-    /// Uses -detailed-exitcode which returns:
-    /// - 0: no changes
-    /// - 1: error
-    /// - 2: changes detected
-    pub fn plan_with_output(&self, working_dir: &str, extra_args: &[&str]) -> Result<Output> {
+    fn plan_with_output(&self, working_dir: &str, extra_args: &[String]) -> Result<Output> {
         let mut args = vec!["plan", "-detailed-exitcode", "-no-color"];
-        args.extend(extra_args);
+        let extra_str_args: Vec<&str> = extra_args.iter().map(|s| s.as_str()).collect();
+        args.extend(extra_str_args);
 
         let output = Command::new("tofu")
             .args(&args)
@@ -1144,6 +1483,13 @@ impl OpenTofuExecutor {
         Ok(output)
     }
 }
+
+impl Default for OpenTofuExecutor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 
 #[cfg(test)]
 mod tests {

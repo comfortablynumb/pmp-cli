@@ -1,4 +1,5 @@
 use std::sync::Mutex;
+use tokio::sync::broadcast;
 
 /// Output message captured by MockOutput for testing
 #[derive(Debug, Clone, PartialEq)]
@@ -371,5 +372,158 @@ impl Output for MockOutput {
             .lock()
             .unwrap()
             .push(OutputMessage::Info(message));
+    }
+}
+
+/// Streaming output implementation for WebSocket communication
+/// Sends output messages through a broadcast channel for real-time streaming
+pub struct StreamingOutput {
+    sender: broadcast::Sender<OutputMessage>,
+    messages: Mutex<Vec<OutputMessage>>,
+}
+
+#[allow(dead_code)]
+impl StreamingOutput {
+    /// Create new streaming output with a broadcast channel
+    pub fn new() -> (Self, broadcast::Receiver<OutputMessage>) {
+        let (sender, receiver) = broadcast::channel(256);
+        (
+            Self {
+                sender,
+                messages: Mutex::new(Vec::new()),
+            },
+            receiver,
+        )
+    }
+
+    /// Get a new receiver for the broadcast channel
+    pub fn subscribe(&self) -> broadcast::Receiver<OutputMessage> {
+        self.sender.subscribe()
+    }
+
+    /// Get all captured messages (for final summary)
+    pub fn get_messages(&self) -> Vec<OutputMessage> {
+        self.messages.lock().unwrap().clone()
+    }
+
+    /// Get all messages formatted as text
+    pub fn to_text(&self) -> String {
+        self.messages
+            .lock()
+            .unwrap()
+            .iter()
+            .map(format_output_message)
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn send_message(&self, message: OutputMessage) {
+        self.messages.lock().unwrap().push(message.clone());
+        let _ = self.sender.send(message);
+    }
+}
+
+impl Default for StreamingOutput {
+    fn default() -> Self {
+        Self::new().0
+    }
+}
+
+impl Output for StreamingOutput {
+    fn success(&self, message: &str) {
+        self.send_message(OutputMessage::Success(message.to_string()));
+    }
+
+    fn error(&self, message: &str) {
+        self.send_message(OutputMessage::Error(message.to_string()));
+    }
+
+    fn warning(&self, message: &str) {
+        self.send_message(OutputMessage::Warning(message.to_string()));
+    }
+
+    fn info(&self, message: &str) {
+        self.send_message(OutputMessage::Info(message.to_string()));
+    }
+
+    fn section(&self, title: &str) {
+        self.send_message(OutputMessage::Section(title.to_string()));
+    }
+
+    fn subsection(&self, title: &str) {
+        self.send_message(OutputMessage::Subsection(title.to_string()));
+    }
+
+    fn key_value(&self, key: &str, value: &str) {
+        self.send_message(OutputMessage::KeyValue(
+            key.to_string(),
+            value.to_string(),
+        ));
+    }
+
+    fn key_value_highlight(&self, key: &str, value: &str) {
+        self.send_message(OutputMessage::KeyValue(
+            key.to_string(),
+            value.to_string(),
+        ));
+    }
+
+    fn dimmed(&self, message: &str) {
+        self.send_message(OutputMessage::Dimmed(message.to_string()));
+    }
+
+    fn dark_yellow(&self, message: &str) {
+        self.send_message(OutputMessage::DarkYellow(message.to_string()));
+    }
+
+    fn cyan(&self, message: &str) {
+        self.send_message(OutputMessage::Cyan(message.to_string()));
+    }
+
+    fn bright_white(&self, message: &str) {
+        self.send_message(OutputMessage::BrightWhite(message.to_string()));
+    }
+
+    fn lavender(&self, message: &str) {
+        self.send_message(OutputMessage::Lavender(message.to_string()));
+    }
+
+    fn blank(&self) {
+        self.send_message(OutputMessage::Blank);
+    }
+
+    fn environment_badge(&self, env_name: &str) {
+        self.send_message(OutputMessage::KeyValue(
+            "Environment".to_string(),
+            env_name.to_string(),
+        ));
+    }
+
+    fn status_check(&self, item: &str, available: bool) {
+        let message = if available {
+            format!("{} is available", item)
+        } else {
+            format!("{} is NOT available", item)
+        };
+        self.send_message(OutputMessage::Info(message));
+    }
+}
+
+/// Format an output message as text (shared utility)
+pub fn format_output_message(msg: &OutputMessage) -> String {
+    match msg {
+        OutputMessage::Success(s) => format!("✓ {}", s),
+        OutputMessage::Error(s) => format!("✗ {}", s),
+        OutputMessage::Warning(s) => format!("⚠ {}", s),
+        OutputMessage::Info(s) => s.clone(),
+        OutputMessage::Section(s) => format!("\n=== {} ===", s),
+        OutputMessage::Subsection(s) => format!("\n--- {} ---", s),
+        OutputMessage::KeyValue(k, v) => format!("{}: {}", k, v),
+        OutputMessage::Dimmed(s) => s.clone(),
+        OutputMessage::DarkYellow(s) => s.clone(),
+        OutputMessage::Cyan(s) => s.clone(),
+        OutputMessage::BrightWhite(s) => s.clone(),
+        OutputMessage::Lavender(s) => s.clone(),
+        OutputMessage::Blank => String::new(),
     }
 }

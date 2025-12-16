@@ -6,7 +6,9 @@ use crate::template::metadata::{
     AddedPlugin, AddedPluginReference, InputType, PluginProjectReference,
 };
 use crate::template::utils::interpolate_all;
-use crate::template::{TemplateDiscovery, TemplateInfo, TemplatePackInfo, TemplateRenderer};
+use crate::template::{
+    TemplateDiscovery, TemplateInfo, TemplatePackInfo, TemplateRenderer, TemplateResolver,
+};
 use anyhow::{Context, Result};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -434,7 +436,14 @@ impl CreateCommand {
                 module_path = module_path.join(&first_ref.name);
             }
 
-            let renderer = TemplateRenderer::new();
+            // Derive pack path from plugin path ({pack}/plugins/{plugin_name}/)
+            let pack_path = plugin_info
+                .plugin_path
+                .parent() // plugins/
+                .and_then(|p| p.parent()); // pack root
+
+            let renderer = TemplateRenderer::new_with_partials(&*ctx.fs, pack_path)
+                .context("Failed to initialize template renderer with partials")?;
             let plugin_context = Some((
                 plugin_info.template_pack_name.as_str(),
                 plugin_info.plugin_name.as_str(),
@@ -1075,36 +1084,137 @@ impl CreateCommand {
             )
         };
 
-        // Find the selected template and config
-        let mut selected_template_info: Option<(
+        // Find all templates matching the name (may have multiple versions)
+        // Also capture the pack path for partial discovery
+        let mut matching_templates: Vec<(
             TemplateInfo,
             Option<crate::template::metadata::TemplateConfig>,
-        )> = None;
+            std::path::PathBuf, // pack_path
+        )> = Vec::new();
+
         for (pack, templates) in &filtered_packs_with_templates {
             for (template, config) in templates {
                 if pack.resource.metadata.name == selected_pack_name
                     && template.resource.metadata.name == selected_template_name
                 {
-                    selected_template_info = Some((template.clone(), config.clone()));
-                    break;
+                    matching_templates.push((template.clone(), config.clone(), pack.path.clone()));
                 }
-            }
-            if selected_template_info.is_some() {
-                break;
             }
         }
 
-        let (selected_template, template_config) = selected_template_info
-            .context("Selected template not found in discovered templates")?;
+        if matching_templates.is_empty() {
+            anyhow::bail!("Selected template not found in discovered templates");
+        }
+
+        // If multiple versions exist, let user select one
+        let (selected_template, template_config, selected_version, selected_pack_path) =
+            if matching_templates.len() == 1 {
+                let (template, config, pack_path) = matching_templates.into_iter().next().unwrap();
+                let version = template
+                    .version
+                    .as_ref()
+                    .map(|v| v.to_string())
+                    .unwrap_or_else(|| "0.0.1".to_string());
+                (template, config, version, pack_path)
+            } else {
+                // Sort by version descending (latest first)
+                matching_templates.sort_by(|a, b| {
+                    match (&b.0.version, &a.0.version) {
+                        (Some(vb), Some(va)) => vb.cmp(va),
+                        (Some(_), None) => std::cmp::Ordering::Less,
+                        (None, Some(_)) => std::cmp::Ordering::Greater,
+                        (None, None) => std::cmp::Ordering::Equal,
+                    }
+                });
+
+                ctx.output.subsection("Select Version");
+                ctx.output.dimmed(&format!(
+                    "Template '{}' has {} versions available",
+                    selected_template_name,
+                    matching_templates.len()
+                ));
+                ctx.output.blank();
+
+                let version_options: Vec<String> = matching_templates
+                    .iter()
+                    .map(|(t, _, _)| {
+                        t.version
+                            .as_ref()
+                            .map(|v| v.to_string())
+                            .unwrap_or_else(|| "0.0.1 (legacy)".to_string())
+                    })
+                    .collect();
+
+                let selected_version_str = ctx
+                    .input
+                    .select("Version:", version_options.clone(), Some(0))
+                    .context("Failed to select version")?;
+
+                let version_index = version_options
+                    .iter()
+                    .position(|v| v == &selected_version_str)
+                    .context("Version not found")?;
+
+                let (template, config, pack_path) =
+                    matching_templates.into_iter().nth(version_index).unwrap();
+                let version = selected_version_str.replace(" (legacy)", "");
+                (template, config, version, pack_path)
+            };
 
         // Display selected template info
         ctx.output.subsection("Selected Template");
         ctx.output
             .key_value_highlight("Template", &selected_template.resource.metadata.name);
+        ctx.output.key_value("Version", &selected_version);
         if let Some(desc) = &selected_template.resource.metadata.description {
             ctx.output.key_value("Description", desc);
         }
         ctx.output.blank();
+
+        // Step 5.5: Resolve template inheritance (if extends is set)
+        // Capture path before potential move
+        let original_template_path = selected_template.path.clone();
+        let (selected_template, resolved_base_paths) =
+            if selected_template.resource.spec.extends.is_some() {
+                // Find the template pack for inheritance resolution
+                let template_pack = all_template_packs
+                    .iter()
+                    .find(|p| p.resource.metadata.name == selected_pack_name)
+                    .context("Template pack not found for inheritance resolution")?;
+
+                ctx.output
+                    .dimmed("Resolving template inheritance chain...");
+
+                let resolved = TemplateResolver::resolve(
+                    &*ctx.fs,
+                    &*ctx.output,
+                    &selected_template,
+                    template_pack,
+                    &all_template_packs,
+                )
+                .context("Failed to resolve template inheritance")?;
+
+                // Show inheritance chain
+                if resolved.inheritance_chain.len() > 1 {
+                    ctx.output.key_value(
+                        "Inheritance",
+                        &resolved.inheritance_chain.join(" -> "),
+                    );
+                }
+                ctx.output.blank();
+
+                // Create a new TemplateInfo with the merged resource
+                let merged_template = TemplateInfo {
+                    resource: resolved.resource,
+                    path: resolved.path,
+                    version: resolved.version,
+                };
+
+                (merged_template, resolved.base_paths)
+            } else {
+                // No inheritance, use template as-is
+                (selected_template, vec![original_template_path])
+            };
 
         // Step 5 (OLD): Select template pack - REPLACED BY CATEGORY NAVIGATION
         /*
@@ -1782,6 +1892,13 @@ impl CreateCommand {
             serde_json::Value::String(project_name_underscores),
         );
 
+        // Step 11b: Collect secret references for inputs with secret_manager enabled
+        let collected_secrets = Self::collect_secret_inputs(
+            ctx,
+            &selected_template.resource.spec.inputs,
+            infrastructure.spec.secrets.as_ref(),
+        )?;
+
         // Step 12: Determine project root path
         // Project path format: projects/{project_name}
         let project_root = if let Some(path) = output_path {
@@ -1838,18 +1955,26 @@ impl CreateCommand {
             template_inputs.insert("_plugins".to_string(), plugins_data);
         }
 
-        // Then render template
+        // Then render template (with inheritance support)
+        // Render from all base paths in order (base first, child last)
+        // Child files overwrite base files with the same name
         ctx.output.dimmed("Rendering template...");
-        let renderer = TemplateRenderer::new();
-        let _generated_files = renderer
-            .render_template(
-                ctx,
-                template_src,
-                environment_path.as_path(),
-                &template_inputs,
-                None,
-            )
-            .context("Failed to render template")?;
+        let renderer = TemplateRenderer::new_with_partials(&*ctx.fs, Some(&selected_pack_path))
+            .context("Failed to initialize template renderer with partials")?;
+
+        for base_path in &resolved_base_paths {
+            if ctx.fs.exists(base_path) {
+                let _generated_files = renderer
+                    .render_template(
+                        ctx,
+                        base_path,
+                        environment_path.as_path(),
+                        &template_inputs,
+                        None,
+                    )
+                    .context("Failed to render template")?;
+            }
+        }
 
         // Step 15.5: Generate common file (e.g., _common.tf) if executor config is present
         // The executor itself decides whether to generate anything (only opentofu does)
@@ -1886,6 +2011,8 @@ impl CreateCommand {
                     &metadata,
                     plugins_ref,
                     &template_reference_projects,
+                    &collected_secrets,
+                    infrastructure.spec.secrets.as_ref(),
                 )
                 .context("Failed to generate common file")?;
         }
@@ -1911,8 +2038,10 @@ impl CreateCommand {
             &project_name,
             &selected_template.resource,
             &inputs,
+            &collected_secrets,
             &selected_pack_name,
             &selected_template.resource.metadata.name,
+            &selected_version,
             &template_reference_projects,
             &added_plugins,
             &project_dependencies,
@@ -1952,7 +2081,7 @@ impl CreateCommand {
             let env_path_str = environment_path
                 .to_str()
                 .context("Failed to convert environment path to string")?;
-            ApplyCommand::execute(ctx, Some(env_path_str), &[])?;
+            ApplyCommand::execute(ctx, Some(env_path_str), false, false, None, &[])?;
         } else {
             let next_steps_list = vec![
                 format!(
@@ -2672,9 +2801,10 @@ impl CreateCommand {
                                 continue;
                             }
 
-                            // TODO: Check labels if specified (labels not yet implemented in ProjectSpec)
-                            // For now, ignore label filtering
-                            let _ = labels;
+                            // Check labels if specified
+                            if !Self::labels_match(&env_resource.metadata.labels, labels) {
+                                continue;
+                            }
 
                             return true; // At least one environment matches
                         }
@@ -2751,9 +2881,10 @@ impl CreateCommand {
                                 continue;
                             }
 
-                            // TODO: Check labels if specified (labels not yet implemented in ProjectSpec)
-                            // For now, ignore label filtering
-                            let _ = labels;
+                            // Check labels if specified
+                            if !Self::labels_match(&env_resource.metadata.labels, labels) {
+                                continue;
+                            }
 
                             return true;
                         }
@@ -4169,6 +4300,41 @@ impl CreateCommand {
                 template_name, template_pack_name
             ))?;
 
+        // Step 4.5: Resolve template inheritance (if extends is set)
+        let (template, resolved_base_paths) = if template.resource.spec.extends.is_some() {
+            ctx.output
+                .dimmed("Resolving template inheritance chain...");
+
+            let resolved = TemplateResolver::resolve(
+                &*ctx.fs,
+                &*ctx.output,
+                template,
+                template_pack,
+                &all_template_packs,
+            )
+            .context("Failed to resolve template inheritance")?;
+
+            // Show inheritance chain
+            if resolved.inheritance_chain.len() > 1 {
+                ctx.output.key_value(
+                    "Inheritance",
+                    &resolved.inheritance_chain.join(" -> "),
+                );
+            }
+
+            // Create a new TemplateInfo with the merged resource
+            let merged_template = TemplateInfo {
+                resource: resolved.resource,
+                path: resolved.path.clone(),
+                version: resolved.version,
+            };
+
+            (merged_template, resolved.base_paths)
+        } else {
+            // No inheritance, use template as-is
+            (template.clone(), vec![template.path.clone()])
+        };
+
         // Step 5: Build inputs - use provided inputs and fill with defaults
         let mut final_inputs: std::collections::HashMap<String, serde_json::Value> = inputs.clone();
 
@@ -4280,18 +4446,25 @@ impl CreateCommand {
             final_inputs.insert("_plugins".to_string(), plugins_data);
         }
 
-        // Step 10: Render template files
-        let template_src = &template.path;
-        let renderer = TemplateRenderer::new();
-        renderer
-            .render_template(
-                ctx,
-                template_src,
-                environment_path.as_path(),
-                &final_inputs,
-                None,
-            )
-            .context("Failed to render template")?;
+        // Step 10: Render template files (with inheritance support)
+        // Render from all base paths in order (base first, child last)
+        // Child files overwrite base files with the same name
+        let renderer = TemplateRenderer::new_with_partials(&*ctx.fs, Some(&template_pack.path))
+            .context("Failed to initialize template renderer with partials")?;
+
+        for base_path in &resolved_base_paths {
+            if ctx.fs.exists(base_path) {
+                renderer
+                    .render_template(
+                        ctx,
+                        base_path,
+                        environment_path.as_path(),
+                        &final_inputs,
+                        None,
+                    )
+                    .context("Failed to render template")?;
+            }
+        }
 
         // Step 11: Generate _common.tf if needed (only opentofu executor does this)
         let template_executor_name = template.resource.spec.executor.name();
@@ -4318,6 +4491,8 @@ impl CreateCommand {
                     &metadata,
                     Some(&added_plugins),
                     reference_projects,
+                    &std::collections::HashMap::new(), // No secrets in predefined project mode
+                    infrastructure.spec.secrets.as_ref(),
                 )
                 .context("Failed to generate common file")?;
         }
@@ -4332,6 +4507,12 @@ impl CreateCommand {
         )?;
 
         // Step 13: Generate .pmp.environment.yaml
+        let template_version = template
+            .version
+            .as_ref()
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "0.0.1".to_string());
+
         Self::generate_project_environment_yaml(
             ctx,
             &environment_path,
@@ -4339,8 +4520,10 @@ impl CreateCommand {
             project_name,
             &template.resource,
             &final_inputs,
+            &std::collections::HashMap::new(), // No secrets in predefined project mode
             template_pack_name,
             template_name,
+            &template_version,
             reference_projects,
             &added_plugins,
             &[], // No project dependencies (the caller handles this)
@@ -4407,8 +4590,10 @@ impl CreateCommand {
         project_name: &str,
         template: &crate::template::metadata::TemplateResource,
         inputs: &std::collections::HashMap<String, serde_json::Value>,
+        secrets: &std::collections::HashMap<String, crate::template::metadata::SecretReference>,
         template_pack_name: &str,
         template_name: &str,
+        template_version: &str,
         template_reference_projects: &[crate::template::metadata::TemplateReferenceProject],
         added_plugins: &[crate::template::metadata::AddedPlugin],
         project_dependencies: &[crate::template::metadata::ProjectDependency],
@@ -4484,6 +4669,7 @@ impl CreateCommand {
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string()),
                 labels: template.metadata.labels.clone(), // Propagate labels from template
+                created_at: Some(chrono::Utc::now()), // Set creation timestamp for TTL calculations
             },
             spec: ProjectSpec {
                 resource: ResourceDefinition {
@@ -4492,6 +4678,7 @@ impl CreateCommand {
                 },
                 executor: merged_executor_config,
                 inputs: inputs.clone(),
+                secrets: secrets.clone(),
                 custom: None, // Templates no longer have custom field
                 plugins: if !added_plugins.is_empty() {
                     Some(ProjectPlugins {
@@ -4503,6 +4690,7 @@ impl CreateCommand {
                 template: Some(TemplateReference {
                     template_pack_name: template_pack_name.to_string(),
                     name: template_name.to_string(),
+                    version: template_version.to_string(),
                 }),
                 environment: Some(EnvironmentReference {
                     name: environment_name.to_string(),
@@ -4511,6 +4699,7 @@ impl CreateCommand {
                 dependencies: all_dependencies,
                 projects: template_projects,
                 hooks: template.spec.hooks.clone(), // Copy hooks from template
+                time_limit: None, // Time limit can be added manually to environment files
             },
         };
 
@@ -4533,6 +4722,185 @@ impl CreateCommand {
             .dimmed(&format!("  Created: {}", pmp_env_yaml_path.display()));
 
         Ok(())
+    }
+
+    // ============================================================================
+    // Secrets Management Functions
+    // ============================================================================
+
+    /// Collect secret references for inputs that have secret_manager.enabled = true
+    fn collect_secret_inputs(
+        ctx: &crate::context::Context,
+        inputs_spec: &[crate::template::metadata::InputDefinition],
+        secrets_config: Option<&crate::template::metadata::SecretsConfig>,
+    ) -> Result<HashMap<String, crate::template::metadata::SecretReference>> {
+        use crate::secrets::SecretsProviderRegistry;
+
+        let mut secrets = HashMap::new();
+
+        // Check if any inputs have secret_manager enabled
+        let secret_inputs: Vec<_> = inputs_spec
+            .iter()
+            .filter(|input| {
+                input
+                    .secret_manager
+                    .as_ref()
+                    .map(|sm| sm.enabled)
+                    .unwrap_or(false)
+            })
+            .collect();
+
+        if secret_inputs.is_empty() {
+            return Ok(secrets);
+        }
+
+        // Verify secrets config is available
+        let secrets_cfg = secrets_config.ok_or_else(|| {
+            anyhow::anyhow!(
+                "Template has inputs with secret_manager enabled, but no secrets configuration found in infrastructure.\n\
+                Please add a 'secrets' section to your .pmp.infrastructure.yaml"
+            )
+        })?;
+
+        if secrets_cfg.managers.is_empty() {
+            anyhow::bail!(
+                "Template has inputs with secret_manager enabled, but no secret managers are configured.\n\
+                Please add managers to the 'secrets' section in your .pmp.infrastructure.yaml"
+            );
+        }
+
+        ctx.output.blank();
+        ctx.output.subsection("Secret Manager Configuration");
+
+        let registry = SecretsProviderRegistry::new();
+
+        for input_def in secret_inputs {
+            let secret_config = input_def.secret_manager.as_ref().unwrap();
+            let description = input_def
+                .description
+                .as_deref()
+                .unwrap_or(&input_def.name);
+
+            ctx.output.dimmed(&format!("Configuring secret: {}", description));
+
+            let secret_ref = Self::prompt_for_secret_input(
+                ctx,
+                &input_def.name,
+                description,
+                secret_config,
+                secrets_cfg,
+                &registry,
+            )?;
+
+            secrets.insert(input_def.name.clone(), secret_ref);
+        }
+
+        Ok(secrets)
+    }
+
+    /// Prompt user to select a secret manager and provide secret ID
+    fn prompt_for_secret_input(
+        ctx: &crate::context::Context,
+        input_name: &str,
+        description: &str,
+        secret_config: &crate::template::metadata::SecretManagerInputConfig,
+        secrets_cfg: &crate::template::metadata::SecretsConfig,
+        registry: &crate::secrets::SecretsProviderRegistry,
+    ) -> Result<crate::template::metadata::SecretReference> {
+        use crate::secrets::sanitize_name;
+        use crate::template::metadata::SecretReference;
+
+        // Step 1: Select secret manager (or use pre-configured one)
+        let selected_manager = if let Some(ref manager_name) = secret_config.manager {
+            // Use pre-configured manager
+            secrets_cfg
+                .managers
+                .iter()
+                .find(|m| &m.name == manager_name)
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "Pre-configured secret manager '{}' not found in infrastructure",
+                        manager_name
+                    )
+                })?
+        } else {
+            // Prompt user to select manager
+            let mut manager_names: Vec<_> = secrets_cfg.managers.iter().collect();
+            manager_names.sort_by(|a, b| a.name.cmp(&b.name));
+
+            let options: Vec<String> = manager_names
+                .iter()
+                .map(|m| {
+                    let provider = registry.get(&m.manager_type);
+                    let type_desc = provider
+                        .map(|p| p.get_description().to_string())
+                        .unwrap_or_else(|| m.manager_type.clone());
+                    format!("{} ({})", m.name, type_desc)
+                })
+                .collect();
+
+            let selected = ctx
+                .input
+                .select(
+                    &format!("Select secret manager for '{}'", description),
+                    options,
+                    None,
+                )
+                .context("Failed to select secret manager")?;
+
+            let manager_name = selected.split(" (").next().unwrap_or(&selected);
+            secrets_cfg
+                .managers
+                .iter()
+                .find(|m| m.name == manager_name)
+                .ok_or_else(|| anyhow::anyhow!("Selected manager not found"))?
+        };
+
+        // Get the provider for validation
+        let provider = registry.get(&selected_manager.manager_type).ok_or_else(|| {
+            anyhow::anyhow!(
+                "Unsupported secret manager type: {}",
+                selected_manager.manager_type
+            )
+        })?;
+
+        // Step 2: Get secret ID (or use pre-configured one)
+        let secret_id = if let Some(ref id) = secret_config.secret_id {
+            // Use pre-configured secret ID
+            provider.validate_secret_id(id)?;
+            id.clone()
+        } else {
+            // Prompt user for secret ID
+            let prompt = provider.get_secret_id_prompt();
+            let example = provider.get_secret_id_example();
+
+            ctx.output.dimmed(&format!("  Example: {}", example));
+
+            loop {
+                let answer = ctx
+                    .input
+                    .text(&format!("{} for '{}'", prompt, description), None)
+                    .context("Failed to get secret ID")?;
+
+                match provider.validate_secret_id(&answer) {
+                    Ok(()) => break answer,
+                    Err(e) => {
+                        ctx.output.warning(&format!("Invalid secret ID: {}", e));
+                        continue;
+                    }
+                }
+            }
+        };
+
+        // Generate data source name
+        let data_source_name = format!("secret_{}", sanitize_name(input_name));
+
+        Ok(SecretReference {
+            manager: selected_manager.name.clone(),
+            secret_id,
+            data_source_name,
+            secret_key: secret_config.secret_key.clone(),
+        })
     }
 }
 
@@ -5466,9 +5834,9 @@ spec:
         );
     }
 
-    // NOTE: Progressive interpolation tests removed because HashMap doesn't guarantee iteration order
-    // This means inputs referencing other inputs may be processed in unpredictable order
-    // TODO: Consider using IndexMap or BTreeMap to enable ordered input processing
+    // NOTE: Progressive interpolation tests removed because HashMap doesn't guarantee iteration order.
+    // Inputs referencing other inputs may be processed in unpredictable order.
+    // If ordered input processing is needed, consider using IndexMap or BTreeMap.
 
     #[test]
     fn test_string_interpolation_in_infrastructure_override() {
@@ -7478,7 +7846,7 @@ resource "deployment" "main" {
     // =====================================================================
 
     #[test]
-    #[ignore] // TODO: Template pack discovery needs refinement for custom test packs
+    #[ignore] // Integration test: requires template discovery to use injected mock filesystem
     fn test_create_project_with_installed_plugin_team_members() {
         let fs = Arc::new(MockFileSystem::new());
         let current_dir = std::env::current_dir().unwrap();
@@ -8036,7 +8404,7 @@ resource "app" "main" {
     }
 
     #[test]
-    #[ignore] // TODO: Mock executor needs to be used to avoid running real tofu commands
+    #[ignore] // Integration test: requires mock executor to avoid running real tofu commands
     fn test_create_project_multiple_environments() {
         let fs = Arc::new(MockFileSystem::new());
         let current_dir = std::env::current_dir().unwrap();

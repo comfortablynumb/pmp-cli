@@ -1,10 +1,15 @@
 use crate::collection::CollectionDiscovery;
 use crate::context::Context;
+use crate::opa::{
+    ComplianceReporter, OpaSeverity, OpaProvider, PolicyDiscovery, RegorusProvider,
+    ValidationParams, ValidationSummary,
+};
+use crate::opa::compliance::ReportContext;
 use crate::output;
 use crate::template::DynamicProjectEnvironmentResource;
 use anyhow::{Context as AnyhowContext, Result};
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub struct PolicyCommand;
 
@@ -760,5 +765,562 @@ impl PolicyCommand {
             ctx.output.dimmed(&format!("  → {}", details));
         }
         output::blank();
+    }
+
+    // ==================== OPA Integration ====================
+
+    /// Run OPA policy validation before apply/preview
+    /// Returns Ok(true) if validation passed or was skipped, Ok(false) if blocked
+    pub fn run_pre_operation_validation(
+        ctx: &Context,
+        env_path: &Path,
+        infrastructure: &crate::template::metadata::InfrastructureResource,
+    ) -> Result<bool> {
+        let policy_config = infrastructure.spec.policy.as_ref();
+
+        // Check if policy validation is enabled
+        let enabled = policy_config.map(|c| c.enabled).unwrap_or(false);
+
+        if !enabled {
+            return Ok(true);
+        }
+
+        ctx.output.subsection("OPA Policy Validation");
+
+        let opa_config = policy_config.and_then(|c| c.opa.as_ref());
+
+        // Get custom paths from config
+        let custom_paths: Vec<String> = opa_config
+            .map(|c| c.paths.clone())
+            .unwrap_or_default();
+
+        // Get entrypoint from config
+        let entrypoint = opa_config
+            .map(|c| c.entrypoint.as_str())
+            .unwrap_or("data.pmp");
+
+        // Create and configure provider
+        let mut provider = RegorusProvider::new();
+
+        // Load policies from discovered paths
+        let loaded = PolicyDiscovery::load_all_policies(&*ctx.fs, &mut provider, &custom_paths)?;
+
+        if loaded == 0 {
+            ctx.output.dimmed("No OPA policies found. Skipping validation.");
+            return Ok(true);
+        }
+
+        ctx.output.dimmed(&format!("Loaded {} policies", loaded));
+
+        // Try to load plan.json from environment path
+        let plan_json = env_path.join("plan.json");
+        let input = if ctx.fs.exists(&plan_json) {
+            let content = ctx.fs.read_to_string(&plan_json)?;
+            serde_json::from_str(&content)
+                .context("Failed to parse plan.json")?
+        } else {
+            // No plan file - use empty input (policies may still have static checks)
+            serde_json::json!({})
+        };
+
+        // Validate
+        let params = ValidationParams {
+            input: &input,
+            policy_filter: None,
+            entrypoint,
+        };
+
+        let summary = provider.validate(&params)?;
+
+        // Display compact summary
+        if summary.total_violations == 0 {
+            ctx.output.success("Policy validation passed");
+            return Ok(true);
+        }
+
+        // Display violations
+        ctx.output.key_value("Errors", &summary.errors.to_string());
+        ctx.output.key_value("Warnings", &summary.warnings.to_string());
+
+        for eval in &summary.evaluations {
+            for v in &eval.violations {
+                let symbol = match v.severity {
+                    OpaSeverity::Error => "✗",
+                    OpaSeverity::Warning => "⚠",
+                    OpaSeverity::Info => "ℹ",
+                };
+                ctx.output.dimmed(&format!("{} {}", symbol, v.message));
+            }
+        }
+
+        // Check if we should block
+        let fail_on_violation = policy_config
+            .map(|c| c.fail_on_violation)
+            .unwrap_or(true);
+
+        let thresholds = opa_config.and_then(|o| o.thresholds.as_ref());
+        let block_on_error = thresholds.map(|t| t.block_on_error).unwrap_or(true);
+
+        if summary.errors > 0 && fail_on_violation && block_on_error {
+            output::blank();
+            ctx.output.error(&format!(
+                "Blocked by OPA policy: {} error(s) found",
+                summary.errors
+            ));
+            return Ok(false);
+        }
+
+        // Check warnings threshold
+        if let Some(max) = thresholds.and_then(|t| t.max_warnings) {
+            if summary.warnings > max && fail_on_violation {
+                output::blank();
+                ctx.output.error(&format!(
+                    "Blocked by OPA policy: {} warnings exceed threshold of {}",
+                    summary.warnings, max
+                ));
+                return Ok(false);
+            }
+        }
+
+        output::blank();
+        Ok(true)
+    }
+
+    // ==================== OPA Commands ====================
+
+    /// Execute OPA validate command
+    pub fn execute_opa_validate(
+        ctx: &Context,
+        path: Option<&str>,
+        policy_filter: Option<&str>,
+        input_file: Option<&str>,
+    ) -> Result<()> {
+        ctx.output.section("OPA Policy Validation");
+
+        // Find infrastructure for config
+        let (infrastructure, _) = CollectionDiscovery::find_collection(&*ctx.fs)?
+            .context("Infrastructure is required. Run 'pmp init' first.")?;
+
+        // Get policy config
+        let policy_config = infrastructure.spec.policy.as_ref();
+        let opa_config = policy_config.and_then(|c| c.opa.as_ref());
+
+        // Get custom paths from config
+        let custom_paths: Vec<String> = opa_config
+            .map(|c| c.paths.clone())
+            .unwrap_or_default();
+
+        // Get entrypoint from config
+        let entrypoint = opa_config
+            .map(|c| c.entrypoint.as_str())
+            .unwrap_or("data.pmp");
+
+        // Create and configure provider
+        let mut provider = RegorusProvider::new();
+
+        // Load policies from discovered paths
+        let loaded = PolicyDiscovery::load_all_policies(&*ctx.fs, &mut provider, &custom_paths)?;
+        ctx.output.info(&format!("Loaded {} policies", loaded));
+
+        if loaded == 0 {
+            ctx.output.warning("No policies found. Create .rego files in ./policies or ~/.pmp/policies");
+            return Ok(());
+        }
+
+        // Load input
+        let input = Self::load_opa_input(ctx, path, input_file)?;
+
+        output::blank();
+
+        // Validate
+        let params = ValidationParams {
+            input: &input,
+            policy_filter,
+            entrypoint,
+        };
+
+        let summary = provider.validate(&params)?;
+
+        // Display results
+        Self::display_opa_summary(ctx, &summary)?;
+
+        // Check thresholds
+        Self::check_opa_thresholds(ctx, &summary, policy_config)?;
+
+        Ok(())
+    }
+
+    /// Load input for OPA validation
+    fn load_opa_input(
+        ctx: &Context,
+        path: Option<&str>,
+        input_file: Option<&str>,
+    ) -> Result<serde_json::Value> {
+        if let Some(file) = input_file {
+            let content = ctx.fs.read_to_string(Path::new(file))?;
+            return serde_json::from_str(&content)
+                .context("Failed to parse input JSON file");
+        }
+
+        // Try to find terraform plan output
+        let base_path = path.map(PathBuf::from).unwrap_or_else(|| {
+            std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+        });
+
+        let plan_json = base_path.join("plan.json");
+
+        if ctx.fs.exists(&plan_json) {
+            let content = ctx.fs.read_to_string(&plan_json)?;
+            return serde_json::from_str(&content)
+                .context("Failed to parse plan.json");
+        }
+
+        // Return empty input if no plan file found
+        ctx.output.warning("No plan.json found. Using empty input.");
+        ctx.output.dimmed("Tip: Run 'tofu plan -out=plan.tfplan && tofu show -json plan.tfplan > plan.json'");
+        output::blank();
+
+        Ok(serde_json::json!({}))
+    }
+
+    /// Display OPA validation summary
+    fn display_opa_summary(ctx: &Context, summary: &ValidationSummary) -> Result<()> {
+        ctx.output.subsection("Validation Summary");
+        ctx.output.key_value("Total Policies", &summary.total_policies.to_string());
+        ctx.output.key_value("Passed", &summary.passed_policies.to_string());
+        ctx.output.key_value("Failed", &summary.failed_policies.to_string());
+        ctx.output.key_value("Errors", &summary.errors.to_string());
+        ctx.output.key_value("Warnings", &summary.warnings.to_string());
+        output::blank();
+
+        if summary.total_violations == 0 {
+            ctx.output.success("✓ All OPA policy checks passed");
+            return Ok(());
+        }
+
+        // Display violations grouped by severity
+        Self::display_opa_violations_by_severity(ctx, summary, OpaSeverity::Error, "Errors")?;
+        Self::display_opa_violations_by_severity(ctx, summary, OpaSeverity::Warning, "Warnings")?;
+        Self::display_opa_violations_by_severity(ctx, summary, OpaSeverity::Info, "Info")?;
+
+        Ok(())
+    }
+
+    /// Display OPA violations filtered by severity
+    fn display_opa_violations_by_severity(
+        ctx: &Context,
+        summary: &ValidationSummary,
+        severity: OpaSeverity,
+        label: &str,
+    ) -> Result<()> {
+        let violations: Vec<_> = summary
+            .evaluations
+            .iter()
+            .flat_map(|e| e.violations.iter())
+            .filter(|v| v.severity == severity)
+            .collect();
+
+        if violations.is_empty() {
+            return Ok(());
+        }
+
+        ctx.output.subsection(label);
+
+        for v in violations {
+            let symbol = match severity {
+                OpaSeverity::Error => "✗",
+                OpaSeverity::Warning => "⚠",
+                OpaSeverity::Info => "ℹ",
+            };
+
+            ctx.output.dimmed(&format!("{} {}", symbol, v.message));
+
+            if let Some(resource) = &v.resource {
+                ctx.output.dimmed(&format!("  Resource: {}", resource));
+            }
+        }
+
+        output::blank();
+        Ok(())
+    }
+
+    /// Check OPA thresholds and fail if exceeded
+    fn check_opa_thresholds(
+        ctx: &Context,
+        summary: &ValidationSummary,
+        policy_config: Option<&crate::template::PolicyConfig>,
+    ) -> Result<()> {
+        let fail_on_violation = policy_config
+            .map(|c| c.fail_on_violation)
+            .unwrap_or(true);
+
+        let thresholds = policy_config
+            .and_then(|c| c.opa.as_ref())
+            .and_then(|o| o.thresholds.as_ref());
+
+        let block_on_error = thresholds
+            .map(|t| t.block_on_error)
+            .unwrap_or(true);
+
+        let max_warnings = thresholds.and_then(|t| t.max_warnings);
+
+        // Check errors
+        if summary.errors > 0 && fail_on_violation && block_on_error {
+            anyhow::bail!(
+                "OPA policy validation failed with {} error(s)",
+                summary.errors
+            );
+        }
+
+        // Check warnings threshold
+        if let Some(max) = max_warnings {
+            if summary.warnings > max {
+                ctx.output.warning(&format!(
+                    "Warning threshold exceeded: {} warnings (max: {})",
+                    summary.warnings, max
+                ));
+
+                if fail_on_violation {
+                    anyhow::bail!("OPA policy validation failed: too many warnings");
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Execute OPA test command
+    pub fn execute_opa_test(ctx: &Context, path: Option<&str>) -> Result<()> {
+        ctx.output.section("OPA Policy Tests");
+
+        let test_path = path
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("./policies"));
+
+        if !ctx.fs.exists(&test_path) {
+            ctx.output.warning(&format!("Test directory not found: {:?}", test_path));
+            return Ok(());
+        }
+
+        let provider = RegorusProvider::new();
+        let results = provider.test_policies(&test_path)?;
+
+        if results.is_empty() {
+            ctx.output.info("No test files found (*_test.rego or test_*.rego)");
+            return Ok(());
+        }
+
+        let mut total_passed = 0;
+        let mut total_failed = 0;
+
+        for result in &results {
+            ctx.output.subsection(&result.test_file);
+            ctx.output.key_value("Passed", &result.passed.to_string());
+            ctx.output.key_value("Failed", &result.failed.to_string());
+
+            total_passed += result.passed;
+            total_failed += result.failed;
+
+            for case in &result.test_cases {
+                let symbol = if case.passed { "✓" } else { "✗" };
+                let status = if case.passed { "PASS" } else { "FAIL" };
+
+                ctx.output.dimmed(&format!("  {} {} {}", symbol, status, case.name));
+
+                if let Some(msg) = &case.message {
+                    ctx.output.dimmed(&format!("    {}", msg));
+                }
+            }
+
+            output::blank();
+        }
+
+        ctx.output.subsection("Summary");
+        ctx.output.key_value("Total Passed", &total_passed.to_string());
+        ctx.output.key_value("Total Failed", &total_failed.to_string());
+
+        if total_failed > 0 {
+            anyhow::bail!("OPA policy tests failed: {} test(s) failed", total_failed);
+        }
+
+        ctx.output.success("✓ All OPA policy tests passed");
+        Ok(())
+    }
+
+    /// Execute OPA list command
+    pub fn execute_opa_list(ctx: &Context) -> Result<()> {
+        ctx.output.section("Discovered OPA Policies");
+
+        // Find infrastructure for config
+        let infrastructure = CollectionDiscovery::find_collection(&*ctx.fs)?;
+        let custom_paths: Vec<String> = infrastructure
+            .as_ref()
+            .and_then(|(i, _)| i.spec.policy.as_ref())
+            .and_then(|p| p.opa.as_ref())
+            .map(|o| o.paths.clone())
+            .unwrap_or_default();
+
+        let policies = PolicyDiscovery::get_all_policy_info(&*ctx.fs, &custom_paths)?;
+
+        if policies.is_empty() {
+            ctx.output.warning("No policies found");
+            ctx.output.dimmed("Create .rego files in ./policies or ~/.pmp/policies");
+            return Ok(());
+        }
+
+        ctx.output.info(&format!("Found {} policies", policies.len()));
+        output::blank();
+
+        for policy in policies {
+            ctx.output.subsection(&policy.path);
+            ctx.output.key_value("Package", &policy.package_name);
+
+            if let Some(desc) = &policy.description {
+                ctx.output.key_value("Description", desc);
+            }
+
+            if !policy.entrypoints.is_empty() {
+                ctx.output.key_value("Entrypoints", &policy.entrypoints.join(", "));
+            }
+
+            output::blank();
+        }
+
+        Ok(())
+    }
+
+    /// Execute OPA compliance report command
+    pub fn execute_opa_report(
+        ctx: &Context,
+        format: &str,
+        output_file: Option<&str>,
+        path: Option<&str>,
+        _include_passed: bool,
+    ) -> Result<()> {
+        ctx.output.section("OPA Compliance Report");
+
+        // Find infrastructure for config
+        let (infrastructure, _) = CollectionDiscovery::find_collection(&*ctx.fs)?
+            .context("Infrastructure is required. Run 'pmp init' first.")?;
+
+        // Get policy config
+        let policy_config = infrastructure.spec.policy.as_ref();
+        let opa_config = policy_config.and_then(|c| c.opa.as_ref());
+
+        // Get custom paths from config
+        let custom_paths: Vec<String> = opa_config
+            .map(|c| c.paths.clone())
+            .unwrap_or_default();
+
+        // Get entrypoint from config
+        let entrypoint = opa_config
+            .map(|c| c.entrypoint.as_str())
+            .unwrap_or("data.pmp");
+
+        // Create and configure provider
+        let mut provider = RegorusProvider::new();
+
+        // Load policies from discovered paths
+        let loaded = PolicyDiscovery::load_all_policies(&*ctx.fs, &mut provider, &custom_paths)?;
+        ctx.output.info(&format!("Loaded {} policies", loaded));
+
+        if loaded == 0 {
+            ctx.output.warning("No policies found. Create .rego files in ./policies or ~/.pmp/policies");
+            return Ok(());
+        }
+
+        // Load input
+        let input = Self::load_opa_input(ctx, path, None)?;
+        output::blank();
+
+        // Validate
+        let params = ValidationParams {
+            input: &input,
+            policy_filter: None,
+            entrypoint,
+        };
+
+        let summary = provider.validate(&params)?;
+
+        // Create report context
+        let report_context = Self::build_report_context(&infrastructure, path)?;
+
+        // Generate report
+        let report = ComplianceReporter::generate_report(&summary, &report_context)?;
+
+        // Format output
+        let output_content = match format.to_lowercase().as_str() {
+            "json" => ComplianceReporter::format_json(&report)?,
+            "html" => ComplianceReporter::format_html(&report)?,
+            "markdown" | "md" => ComplianceReporter::format_markdown(&report)?,
+            _ => {
+                anyhow::bail!("Unsupported format: {}. Use: json, markdown, html", format);
+            }
+        };
+
+        // Write output
+        if let Some(file) = output_file {
+            std::fs::write(file, &output_content)
+                .with_context(|| format!("Failed to write report to {}", file))?;
+            ctx.output.success(&format!("Report written to {}", file));
+        } else {
+            println!("{}", output_content);
+        }
+
+        // Display summary
+        output::blank();
+        ctx.output.subsection("Summary");
+        ctx.output.key_value("Compliance Score", &format!("{:.1}%", report.summary.compliance_score));
+        ctx.output.key_value("Total Checks", &report.summary.total_checks.to_string());
+        ctx.output.key_value("Passed", &report.summary.passed.to_string());
+        ctx.output.key_value("Failed", &report.summary.failed.to_string());
+
+        if !report.by_framework.is_empty() {
+            output::blank();
+            ctx.output.subsection("Frameworks");
+
+            for (name, framework) in &report.by_framework {
+                ctx.output.key_value(
+                    name,
+                    &format!("{}/{} controls passed", framework.passed, framework.total_controls),
+                );
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Build report context from infrastructure and path
+    fn build_report_context(
+        infrastructure: &crate::template::metadata::InfrastructureResource,
+        path: Option<&str>,
+    ) -> Result<ReportContext> {
+        let mut project = None;
+        let mut environment = None;
+
+        if let Some(p) = path {
+            let path_buf = PathBuf::from(p);
+
+            // Try to extract project and environment from path
+            if let Some(env_name) = path_buf.file_name() {
+                environment = Some(env_name.to_string_lossy().to_string());
+            }
+
+            if let Some(parent) = path_buf.parent() {
+                if parent.file_name().map(|n| n == "environments").unwrap_or(false) {
+                    if let Some(project_dir) = parent.parent() {
+                        if let Some(proj_name) = project_dir.file_name() {
+                            project = Some(proj_name.to_string_lossy().to_string());
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(ReportContext {
+            infrastructure: infrastructure.metadata.name.clone(),
+            project,
+            environment,
+        })
     }
 }

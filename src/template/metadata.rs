@@ -147,6 +147,11 @@ pub struct TemplateMetadata {
 /// Template specification
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TemplateSpec {
+    /// Reference to a base template that this template extends
+    /// When set, this template inherits inputs, dependencies, hooks from the base
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extends: Option<TemplateExtendsRef>,
+
     /// API version of the generated resource (e.g., "pmp.io/v1")
     #[serde(rename = "apiVersion")]
     pub api_version: String,
@@ -237,6 +242,7 @@ where
                     description: input_spec.description,
                     validation: input_spec.validation,
                     conditions: input_spec.conditions,
+                    secret_manager: input_spec.secret_manager,
                 });
             }
             Ok(inputs)
@@ -910,6 +916,10 @@ pub struct InputSpec {
     /// Conditional visibility - only show this input if all conditions are met
     #[serde(default, skip_serializing_if = "Vec::is_empty", rename = "if")]
     pub conditions: Vec<InputCondition>,
+
+    /// Secret manager configuration (if this input should be fetched from a secret manager)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secret_manager: Option<SecretManagerInputConfig>,
 }
 
 /// Input definition with a name (used in array format)
@@ -941,6 +951,10 @@ pub struct InputDefinition {
     /// Conditional visibility - only show this input if all conditions are met
     #[serde(default, skip_serializing_if = "Vec::is_empty", rename = "if")]
     pub conditions: Vec<InputCondition>,
+
+    /// Secret manager configuration (if this input should be fetched from a secret manager)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secret_manager: Option<SecretManagerInputConfig>,
 }
 
 impl InputDefinition {
@@ -953,6 +967,7 @@ impl InputDefinition {
             description: self.description.clone(),
             validation: self.validation.clone(),
             conditions: self.conditions.clone(),
+            secret_manager: self.secret_manager.clone(),
         }
     }
 
@@ -1128,6 +1143,11 @@ pub struct ProjectPlugins {
     pub added: Vec<AddedPlugin>,
 }
 
+/// Default version for legacy templates without version directory
+fn default_template_version() -> String {
+    "0.0.1".to_string()
+}
+
 /// Reference to the template used to generate this project
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TemplateReference {
@@ -1136,6 +1156,24 @@ pub struct TemplateReference {
 
     /// Name of the template within the pack
     pub name: String,
+
+    /// Version of the template (defaults to "0.0.1" for legacy templates)
+    #[serde(default = "default_template_version")]
+    pub version: String,
+}
+
+/// Reference to a base template that this template extends
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TemplateExtendsRef {
+    /// Name of the template pack containing the base template
+    pub template_pack: String,
+
+    /// Name of the base template
+    pub template: String,
+
+    /// Optional version of the base template
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
 }
 
 /// Reference to the environment for this project
@@ -1374,6 +1412,11 @@ pub struct ProjectSpec {
     /// User inputs collected during project creation
     pub inputs: HashMap<String, Value>,
 
+    /// Secret references for inputs that use secret managers
+    #[serde(default)]
+    #[serde(skip_serializing_if = "HashMap::is_empty")]
+    pub secrets: HashMap<String, SecretReference>,
+
     /// Optional: Custom fields from template
     #[serde(default)]
     pub custom: Option<HashMap<String, Value>>,
@@ -1414,6 +1457,29 @@ pub struct ProjectSpec {
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hooks: Option<HooksConfig>,
+
+    /// Time limit configuration for environment expiration
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub time_limit: Option<TimeLimit>,
+}
+
+// ============================================================================
+// Time Limit Configuration
+// ============================================================================
+
+/// Time limit configuration for environment expiration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TimeLimit {
+    /// Fixed expiration date/time (ISO 8601 format)
+    /// Mutually exclusive with `ttl`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
+
+    /// Time-to-live duration from creation (e.g., "7d", "24h", "30m")
+    /// Mutually exclusive with `expires_at`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ttl: Option<String>,
 }
 
 // ============================================================================
@@ -1471,6 +1537,11 @@ pub struct DynamicProjectEnvironmentMetadata {
     #[serde(default)]
     #[serde(skip_serializing_if = "HashMap::is_empty")]
     pub labels: HashMap<String, String>,
+
+    /// Creation timestamp for TTL calculations
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 /// Dynamic project environment resource (new format with dynamic kind)
@@ -1610,6 +1681,51 @@ pub struct InfrastructureSpec {
     /// Optional: Executor configuration for all projects in this infrastructure
     #[serde(default)]
     pub executor: Option<ExecutorCollectionConfig>,
+
+    /// Optional: Cost estimation configuration
+    #[serde(default)]
+    pub cost: Option<CostConfig>,
+
+    /// Optional: OPA policy validation configuration
+    #[serde(default)]
+    pub policy: Option<PolicyConfig>,
+
+    /// Optional: Secrets management configuration
+    #[serde(default)]
+    pub secrets: Option<SecretsConfig>,
+}
+
+/// Parallel execution configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ParallelConfig {
+    /// Maximum number of concurrent executions (default: 1 = sequential)
+    #[serde(default = "default_max_parallel")]
+    pub max: usize,
+
+    /// Behavior on failure: "stop", "continue" (default), or "finish_level"
+    #[serde(default)]
+    pub on_failure: FailureBehavior,
+}
+
+fn default_max_parallel() -> usize {
+    1
+}
+
+/// Behavior when a project fails during parallel execution
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+pub enum FailureBehavior {
+    /// Stop all execution immediately
+    #[serde(rename = "stop")]
+    Stop,
+
+    /// Continue executing remaining projects despite failures (default)
+    #[default]
+    #[serde(rename = "continue")]
+    Continue,
+
+    /// Let all projects at current level complete, then stop
+    #[serde(rename = "finish_level")]
+    FinishLevel,
 }
 
 /// Executor configuration at the infrastructure level
@@ -1621,6 +1737,210 @@ pub struct ExecutorCollectionConfig {
     /// Executor-specific configuration (e.g., backend configuration)
     #[serde(default)]
     pub config: HashMap<String, Value>,
+
+    /// Parallel execution configuration
+    #[serde(default)]
+    pub parallel: Option<ParallelConfig>,
+}
+
+/// Cost estimation configuration at the infrastructure level
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct CostConfig {
+    /// Cost provider name (e.g., "infracost")
+    #[serde(default = "default_cost_provider")]
+    pub provider: String,
+
+    /// Environment variable name containing API key
+    #[serde(default)]
+    pub api_key_env: Option<String>,
+
+    /// Cost thresholds for warnings and blocking
+    #[serde(default)]
+    pub thresholds: Option<CostThresholds>,
+
+    /// CI/CD integration settings
+    #[serde(default)]
+    pub ci: Option<CostCiConfig>,
+}
+
+fn default_cost_provider() -> String {
+    "infracost".to_string()
+}
+
+/// Cost thresholds for budget management
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct CostThresholds {
+    /// Monthly cost threshold for warnings (in dollars)
+    #[serde(default)]
+    pub warn: Option<f64>,
+
+    /// Monthly cost threshold for blocking apply (in dollars)
+    #[serde(default)]
+    pub block: Option<f64>,
+}
+
+/// CI/CD cost estimation configuration
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct CostCiConfig {
+    /// Enable cost estimation in CI pipelines
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Post cost comments on pull requests
+    #[serde(default)]
+    pub comment_on_pr: bool,
+
+    /// Fail CI if cost exceeds block threshold
+    #[serde(default)]
+    pub fail_on_threshold: bool,
+}
+
+/// OPA policy configuration at the infrastructure level
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PolicyConfig {
+    /// Enable/disable policy validation globally
+    #[serde(default = "default_policy_enabled")]
+    pub enabled: bool,
+
+    /// Fail operations on policy violations (default: true for errors)
+    #[serde(default = "default_fail_on_violation")]
+    pub fail_on_violation: bool,
+
+    /// OPA-specific policy configuration
+    #[serde(default)]
+    pub opa: Option<OpaPolicyConfig>,
+}
+
+fn default_policy_enabled() -> bool {
+    true
+}
+
+fn default_fail_on_violation() -> bool {
+    true
+}
+
+/// OPA-specific policy configuration
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct OpaPolicyConfig {
+    /// Additional policy directories (beyond ./policies and ~/.pmp/policies)
+    #[serde(default)]
+    pub paths: Vec<String>,
+
+    /// Entrypoint for validation (default: data.pmp)
+    #[serde(default = "default_opa_entrypoint")]
+    pub entrypoint: String,
+
+    /// Data files to load alongside policies
+    #[serde(default)]
+    pub data_files: Vec<String>,
+
+    /// Policy severity thresholds
+    #[serde(default)]
+    pub thresholds: Option<PolicyThresholds>,
+}
+
+fn default_opa_entrypoint() -> String {
+    "data.pmp".to_string()
+}
+
+/// Policy thresholds for blocking/warning
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PolicyThresholds {
+    /// Maximum allowed warnings before blocking
+    #[serde(default)]
+    pub max_warnings: Option<usize>,
+
+    /// Block on any error (default: true)
+    #[serde(default = "default_block_on_error")]
+    pub block_on_error: bool,
+}
+
+fn default_block_on_error() -> bool {
+    true
+}
+
+// ============================================================================
+// Secrets Management Configuration
+// ============================================================================
+
+/// Secrets management configuration at the infrastructure level
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SecretsConfig {
+    /// List of available secret managers
+    #[serde(default)]
+    pub managers: Vec<SecretManagerConfig>,
+}
+
+/// Configuration for a single secret manager
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecretManagerConfig {
+    /// Unique name for this manager (e.g., "production-vault")
+    pub name: String,
+
+    /// Type of secret manager ("vault" or "aws_secrets_manager")
+    #[serde(rename = "type")]
+    pub manager_type: String,
+
+    /// Static manager-specific configuration (address, region, etc.)
+    #[serde(default)]
+    pub config: HashMap<String, Value>,
+
+    /// Dynamic configuration from a PMP project's outputs
+    #[serde(default)]
+    pub project: Option<SecretManagerProjectRef>,
+}
+
+/// Reference to a PMP project that provides secret manager configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecretManagerProjectRef {
+    /// Name of the PMP project (e.g., "vault-cluster")
+    pub name: String,
+
+    /// Environment to use (defaults to same environment as consuming project)
+    #[serde(default)]
+    pub environment: Option<String>,
+
+    /// Mapping of config keys to project output names
+    /// e.g., { "address": "vault_url", "namespace": "vault_namespace" }
+    #[serde(default)]
+    pub outputs: HashMap<String, String>,
+}
+
+/// Secret manager configuration for an input field
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SecretManagerInputConfig {
+    /// Whether this input should be fetched from a secret manager
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Optional: Pre-selected manager name (skip selection prompt)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub manager: Option<String>,
+
+    /// Optional: Pre-configured secret ID (skip input prompt)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secret_id: Option<String>,
+
+    /// Optional: Specific key within the secret (for JSON secrets)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secret_key: Option<String>,
+}
+
+/// Reference to a secret stored in a secret manager (stored in environment YAML)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecretReference {
+    /// Name of the secret manager (matches infrastructure config)
+    pub manager: String,
+
+    /// Secret identifier (ARN for AWS, path for Vault)
+    pub secret_id: String,
+
+    /// Name of the Terraform data source generated for this secret
+    pub data_source_name: String,
+
+    /// Optional: Specific key within the secret (for JSON secrets)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secret_key: Option<String>,
 }
 
 /// Configuration for a command hook
@@ -2339,6 +2659,9 @@ mod tests {
                 environments: HashMap::new(),
                 hooks: None,
                 executor: None,
+                cost: None,
+                policy: None,
+                secrets: None,
             },
         };
 
@@ -2378,6 +2701,9 @@ mod tests {
                 environments: HashMap::new(),
                 hooks: None,
                 executor: None,
+                cost: None,
+                policy: None,
+                secrets: None,
             },
         };
 
@@ -2423,6 +2749,9 @@ mod tests {
                 environments: HashMap::new(),
                 hooks: None,
                 executor: None,
+                cost: None,
+                policy: None,
+                secrets: None,
             },
         };
 
@@ -2649,6 +2978,9 @@ spec:
                 environments: HashMap::new(),
                 hooks: None,
                 executor: None,
+                cost: None,
+                policy: None,
+                secrets: None,
             },
         };
 
@@ -2715,6 +3047,9 @@ spec:
                 environments: HashMap::new(),
                 hooks: None,
                 executor: None,
+                cost: None,
+                policy: None,
+                secrets: None,
             },
         };
 
@@ -2946,6 +3281,7 @@ spec:
                 config: None,
             },
             inputs: HashMap::new(),
+            secrets: HashMap::new(),
             custom: None,
             plugins: None,
             template: None,
@@ -2972,6 +3308,7 @@ spec:
                 },
             ],
             hooks: None,
+            time_limit: None,
         };
 
         let yaml = serde_yaml::to_string(&project_spec).unwrap();
@@ -3077,6 +3414,7 @@ spec:
             description: Some("A simple input".to_string()),
             validation: None,
             conditions: vec![], // No conditions
+            secret_manager: None,
         };
 
         let inputs = HashMap::new();
@@ -3096,6 +3434,7 @@ spec:
                 input_name: "status".to_string(),
                 equals: Some(Value::String("active".to_string())),
             }],
+            secret_manager: None,
         };
 
         let mut inputs = HashMap::new();
@@ -3117,6 +3456,7 @@ spec:
                 input_name: "status".to_string(),
                 equals: Some(Value::String("active".to_string())),
             }],
+            secret_manager: None,
         };
 
         let mut inputs = HashMap::new();
@@ -3144,6 +3484,7 @@ spec:
                     equals: Some(Value::String("active".to_string())),
                 },
             ],
+            secret_manager: None,
         };
 
         let mut inputs = HashMap::new();
@@ -3175,6 +3516,7 @@ spec:
                     equals: Some(Value::String("active".to_string())),
                 },
             ],
+            secret_manager: None,
         };
 
         let mut inputs = HashMap::new();

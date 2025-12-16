@@ -516,4 +516,200 @@ impl SearchCommand {
 
         Ok(())
     }
+
+    /// Parse tag filters from CLI input
+    #[cfg(test)]
+    fn parse_tag_filters(filters: &[String]) -> HashMap<String, Option<String>> {
+        let mut filter_map: HashMap<String, Option<String>> = HashMap::new();
+
+        for filter in filters {
+            let parts: Vec<&str> = filter.splitn(2, '=').collect();
+            if parts.len() == 2 {
+                filter_map.insert(parts[0].to_string(), Some(parts[1].to_string()));
+            } else {
+                filter_map.insert(parts[0].to_string(), None);
+            }
+        }
+
+        filter_map
+    }
+
+    /// Check if tags match filter criteria
+    #[cfg(test)]
+    fn tags_match_filters(
+        tags: &HashMap<String, String>,
+        filters: &HashMap<String, Option<String>>,
+    ) -> bool {
+        for (filter_key, filter_value) in filters {
+            match tags.get(filter_key) {
+                Some(tag_value) => {
+                    if let Some(expected_value) = filter_value {
+                        if tag_value != expected_value {
+                            return false;
+                        }
+                    }
+                }
+                None => return false,
+            }
+        }
+        true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_tag_filters_key_value() {
+        let filters = vec!["env=production".to_string()];
+        let result = SearchCommand::parse_tag_filters(&filters);
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result.get("env"), Some(&Some("production".to_string())));
+    }
+
+    #[test]
+    fn test_parse_tag_filters_key_only() {
+        let filters = vec!["monitored".to_string()];
+        let result = SearchCommand::parse_tag_filters(&filters);
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result.get("monitored"), Some(&None));
+    }
+
+    #[test]
+    fn test_parse_tag_filters_mixed() {
+        let filters = vec![
+            "env=production".to_string(),
+            "team=platform".to_string(),
+            "critical".to_string(),
+        ];
+        let result = SearchCommand::parse_tag_filters(&filters);
+
+        assert_eq!(result.len(), 3);
+        assert_eq!(result.get("env"), Some(&Some("production".to_string())));
+        assert_eq!(result.get("team"), Some(&Some("platform".to_string())));
+        assert_eq!(result.get("critical"), Some(&None));
+    }
+
+    #[test]
+    fn test_parse_tag_filters_value_with_equals() {
+        let filters = vec!["url=https://example.com?foo=bar".to_string()];
+        let result = SearchCommand::parse_tag_filters(&filters);
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(
+            result.get("url"),
+            Some(&Some("https://example.com?foo=bar".to_string()))
+        );
+    }
+
+    #[test]
+    fn test_tags_match_filters_exact_match() {
+        let mut tags = HashMap::new();
+        tags.insert("env".to_string(), "production".to_string());
+        tags.insert("team".to_string(), "platform".to_string());
+
+        let mut filters = HashMap::new();
+        filters.insert("env".to_string(), Some("production".to_string()));
+
+        assert!(SearchCommand::tags_match_filters(&tags, &filters));
+    }
+
+    #[test]
+    fn test_tags_match_filters_key_exists() {
+        let mut tags = HashMap::new();
+        tags.insert("env".to_string(), "production".to_string());
+        tags.insert("monitored".to_string(), "true".to_string());
+
+        let mut filters = HashMap::new();
+        filters.insert("monitored".to_string(), None);
+
+        assert!(SearchCommand::tags_match_filters(&tags, &filters));
+    }
+
+    #[test]
+    fn test_tags_match_filters_value_mismatch() {
+        let mut tags = HashMap::new();
+        tags.insert("env".to_string(), "staging".to_string());
+
+        let mut filters = HashMap::new();
+        filters.insert("env".to_string(), Some("production".to_string()));
+
+        assert!(!SearchCommand::tags_match_filters(&tags, &filters));
+    }
+
+    #[test]
+    fn test_tags_match_filters_key_missing() {
+        let mut tags = HashMap::new();
+        tags.insert("env".to_string(), "production".to_string());
+
+        let mut filters = HashMap::new();
+        filters.insert("team".to_string(), Some("platform".to_string()));
+
+        assert!(!SearchCommand::tags_match_filters(&tags, &filters));
+    }
+
+    #[test]
+    fn test_tags_match_filters_multiple_conditions() {
+        let mut tags = HashMap::new();
+        tags.insert("env".to_string(), "production".to_string());
+        tags.insert("team".to_string(), "platform".to_string());
+        tags.insert("critical".to_string(), "true".to_string());
+
+        let mut filters = HashMap::new();
+        filters.insert("env".to_string(), Some("production".to_string()));
+        filters.insert("team".to_string(), Some("platform".to_string()));
+        filters.insert("critical".to_string(), None);
+
+        assert!(SearchCommand::tags_match_filters(&tags, &filters));
+    }
+
+    #[test]
+    fn test_tags_match_filters_empty_filters() {
+        let mut tags = HashMap::new();
+        tags.insert("env".to_string(), "production".to_string());
+
+        let filters: HashMap<String, Option<String>> = HashMap::new();
+
+        assert!(SearchCommand::tags_match_filters(&tags, &filters));
+    }
+
+    #[test]
+    fn test_search_result_serialization() {
+        let result = SearchResult {
+            project: "my-vpc".to_string(),
+            environment: "prod".to_string(),
+            match_type: MatchType::Tag,
+            matches: vec![Match {
+                field: "env".to_string(),
+                value: "production".to_string(),
+                context: None,
+            }],
+        };
+
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(json.contains("my-vpc"));
+        assert!(json.contains("prod"));
+        assert!(json.contains("Tag"));
+    }
+
+    #[test]
+    fn test_match_type_variants() {
+        let tag = MatchType::Tag;
+        let resource = MatchType::Resource;
+        let name = MatchType::Name;
+        let output = MatchType::Output;
+
+        let tag_json = serde_json::to_string(&tag).unwrap();
+        let resource_json = serde_json::to_string(&resource).unwrap();
+        let name_json = serde_json::to_string(&name).unwrap();
+        let output_json = serde_json::to_string(&output).unwrap();
+
+        assert_eq!(tag_json, "\"Tag\"");
+        assert_eq!(resource_json, "\"Resource\"");
+        assert_eq!(name_json, "\"Name\"");
+        assert_eq!(output_json, "\"Output\"");
+    }
 }

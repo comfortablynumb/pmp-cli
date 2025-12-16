@@ -235,4 +235,132 @@ impl CloneCommand {
 
         Ok(())
     }
+
+    /// Sanitize project name for use in file paths
+    #[cfg(test)]
+    fn sanitize_name(name: &str) -> String {
+        name.to_lowercase()
+            .chars()
+            .map(|c| if c.is_alphanumeric() || c == '-' { c } else { '-' })
+            .collect()
+    }
+
+    /// Validate project name according to PMP naming rules
+    #[cfg(test)]
+    fn validate_name(name: &str) -> Result<()> {
+        if name.is_empty() {
+            anyhow::bail!("Project name cannot be empty");
+        }
+
+        if name.starts_with('-') || name.ends_with('-') {
+            anyhow::bail!("Project name cannot start or end with hyphen");
+        }
+
+        if name.chars().next().unwrap().is_numeric() {
+            anyhow::bail!("Project name cannot start with a number");
+        }
+
+        if name.chars().last().unwrap().is_numeric() {
+            anyhow::bail!("Project name cannot end with a number");
+        }
+
+        if !name.chars().all(|c| c.is_lowercase() || c.is_numeric() || c == '-') {
+            anyhow::bail!("Project name can only contain lowercase letters, numbers, and hyphens");
+        }
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sanitize_name_lowercase() {
+        assert_eq!(CloneCommand::sanitize_name("MyProject"), "myproject");
+    }
+
+    #[test]
+    fn test_sanitize_name_special_chars() {
+        assert_eq!(CloneCommand::sanitize_name("my_project"), "my-project");
+    }
+
+    #[test]
+    fn test_sanitize_name_spaces() {
+        assert_eq!(CloneCommand::sanitize_name("my project"), "my-project");
+    }
+
+    #[test]
+    fn test_sanitize_name_mixed() {
+        assert_eq!(CloneCommand::sanitize_name("My_Project Name"), "my-project-name");
+    }
+
+    #[test]
+    fn test_sanitize_name_already_valid() {
+        assert_eq!(CloneCommand::sanitize_name("my-project"), "my-project");
+    }
+
+    #[test]
+    fn test_validate_name_valid() {
+        assert!(CloneCommand::validate_name("my-project").is_ok());
+        assert!(CloneCommand::validate_name("vpc").is_ok());
+        assert!(CloneCommand::validate_name("project-a").is_ok());
+    }
+
+    #[test]
+    fn test_validate_name_empty() {
+        let result = CloneCommand::validate_name("");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("empty"));
+    }
+
+    #[test]
+    fn test_validate_name_starts_with_hyphen() {
+        let result = CloneCommand::validate_name("-project");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("start or end with hyphen"));
+    }
+
+    #[test]
+    fn test_validate_name_ends_with_hyphen() {
+        let result = CloneCommand::validate_name("project-");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("start or end with hyphen"));
+    }
+
+    #[test]
+    fn test_validate_name_starts_with_number() {
+        let result = CloneCommand::validate_name("1project");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("start with a number"));
+    }
+
+    #[test]
+    fn test_validate_name_ends_with_number() {
+        let result = CloneCommand::validate_name("project1");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("end with a number"));
+    }
+
+    #[test]
+    fn test_validate_name_uppercase() {
+        let result = CloneCommand::validate_name("MyProject");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("lowercase"));
+    }
+
+    #[test]
+    fn test_validate_name_underscore() {
+        let result = CloneCommand::validate_name("my_project");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("lowercase letters, numbers, and hyphens"));
+    }
+
+    #[test]
+    fn test_validate_name_with_internal_numbers() {
+        // Numbers in the middle should be OK
+        assert!(CloneCommand::validate_name("project-v2-api").is_ok());
+        assert!(CloneCommand::validate_name("vpc-a1b2c").is_ok());
+    }
 }

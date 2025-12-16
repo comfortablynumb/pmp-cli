@@ -4,6 +4,8 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::path::Path;
 
+use super::partials::{PartialDiscovery, PartialInfo};
+
 /// Renders templates using Handlebars
 pub struct TemplateRenderer {
     handlebars: Handlebars<'static>,
@@ -19,8 +21,43 @@ impl TemplateRenderer {
         handlebars.register_helper("contains", Box::new(contains_helper));
         handlebars.register_helper("k8s_name", Box::new(k8s_name_helper));
         handlebars.register_helper("bool", Box::new(bool_helper));
+        handlebars.register_helper("secret", Box::new(secret_helper));
 
         Self { handlebars }
+    }
+
+    /// Create a new template renderer with partials loaded
+    /// Discovers partials from:
+    /// 1. Pack partials (highest priority): {pack_path}/partials/*.hbs
+    /// 2. Global partials: ~/.pmp/partials/*.hbs
+    pub fn new_with_partials(
+        fs: &dyn crate::traits::FileSystem,
+        pack_path: Option<&Path>,
+    ) -> Result<Self> {
+        let mut renderer = Self::new();
+
+        // Discover and register partials
+        let partials = PartialDiscovery::discover_all(fs, pack_path)?;
+        renderer.register_partials(&partials)?;
+
+        Ok(renderer)
+    }
+
+    /// Register Handlebars partials
+    /// Partials can be used in templates with {{> partial_name}} syntax
+    pub fn register_partials(&mut self, partials: &[PartialInfo]) -> Result<()> {
+        for partial in partials {
+            self.handlebars
+                .register_partial(&partial.name, &partial.content)
+                .with_context(|| {
+                    format!(
+                        "Failed to register partial '{}' from {:?}",
+                        partial.name, partial.source
+                    )
+                })?;
+        }
+
+        Ok(())
     }
 
     /// Render all template files from src directory to output directory
@@ -286,6 +323,39 @@ fn bool_helper(
         }
     }
 
+    Ok(())
+}
+
+/// Secret helper: {{secret input_name}} outputs local.secret_<input_name>
+/// This references the local value generated in _common.tf for secret inputs
+fn secret_helper(
+    h: &Helper,
+    _: &Handlebars,
+    _: &handlebars::Context,
+    _: &mut RenderContext,
+    out: &mut dyn Output,
+) -> HelperResult {
+    let input_name = h
+        .param(0)
+        .ok_or_else(|| {
+            handlebars::RenderError::from(handlebars::RenderErrorReason::Other(
+                "secret helper requires an input name parameter".to_string(),
+            ))
+        })?
+        .value();
+
+    let name_str = match input_name {
+        Value::String(s) => s.clone(),
+        _ => input_name.to_string().trim_matches('"').to_string(),
+    };
+
+    // Sanitize the name for use as a Terraform local variable name
+    let sanitized = name_str
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { '_' })
+        .collect::<String>();
+
+    out.write(&format!("local.secret_{}", sanitized))?;
     Ok(())
 }
 

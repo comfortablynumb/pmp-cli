@@ -16,8 +16,15 @@
                     <h1 class="text-xl font-bold">PMP Web Interface</h1>
                     <p class="text-xs text-indigo-100">Infrastructure as Code Management</p>
                 </div>
-                <div class="text-xs text-right">
-                    <div id="currentContext" class="text-indigo-100"></div>
+                <div class="flex items-center gap-4">
+                    <nav class="flex gap-2">
+                        <button id="navDashboard" class="px-3 py-1 rounded text-sm bg-white/20 hover:bg-white/30 transition">Dashboard</button>
+                        <button id="navProjects" class="px-3 py-1 rounded text-sm hover:bg-white/20 transition">Projects</button>
+                        <button id="navGraph" class="px-3 py-1 rounded text-sm hover:bg-white/20 transition">Graph</button>
+                    </nav>
+                    <div class="text-xs text-right">
+                        <div id="currentContext" class="text-indigo-100"></div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -28,56 +35,183 @@
         <!-- Status Message Area -->
         <div id="statusMessage" class="hidden mb-6"></div>
 
-        <!-- Read-Only Notice -->
-        <div class="mb-6 p-4 bg-blue-50 rounded-lg border border-blue-400">
-            <div class="flex items-start gap-3">
-                <svg class="w-6 h-6 text-blue-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                          d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                </svg>
-                <div class="flex-1">
-                    <h3 class="font-semibold text-blue-800 mb-1">Read-Only Mode</h3>
-                    <p class="text-sm text-blue-700">This interface displays your infrastructure and projects in read-only mode. Use the CLI commands to manage projects.</p>
+        <!-- Dashboard View -->
+        <div id="dashboardView" class="mb-6">
+            <!-- Dashboard Stats -->
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+                <div class="bg-white rounded-lg shadow-md p-4">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-sm text-gray-500">Total Projects</p>
+                            <p id="statProjectCount" class="text-2xl font-bold text-indigo-600">0</p>
+                        </div>
+                        <div class="text-3xl text-indigo-200">&#128193;</div>
+                    </div>
+                </div>
+                <div class="bg-white rounded-lg shadow-md p-4">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-sm text-gray-500">Environments</p>
+                            <p id="statEnvironmentCount" class="text-2xl font-bold text-green-600">0</p>
+                        </div>
+                        <div class="text-3xl text-green-200">&#127760;</div>
+                    </div>
+                </div>
+                <div class="bg-white rounded-lg shadow-md p-4">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-sm text-gray-500">Resource Types</p>
+                            <p id="statKindCount" class="text-2xl font-bold text-purple-600">0</p>
+                        </div>
+                        <div class="text-3xl text-purple-200">&#128203;</div>
+                    </div>
+                </div>
+                <div class="bg-white rounded-lg shadow-md p-4">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-sm text-gray-500">Operations</p>
+                            <p id="statOperationCount" class="text-2xl font-bold text-orange-600">0</p>
+                        </div>
+                        <div class="text-3xl text-orange-200">&#9881;</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Dashboard Charts Row -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                <!-- Projects by Kind -->
+                <div class="bg-white rounded-lg shadow-md p-4">
+                    <h3 class="text-lg font-semibold text-gray-700 mb-3">Projects by Resource Type</h3>
+                    <div id="kindDistribution" class="space-y-2">
+                        <!-- Will be populated dynamically -->
+                    </div>
+                </div>
+
+                <!-- Projects by Environment -->
+                <div class="bg-white rounded-lg shadow-md p-4">
+                    <h3 class="text-lg font-semibold text-gray-700 mb-3">Projects by Environment</h3>
+                    <div id="envDistribution" class="space-y-2">
+                        <!-- Will be populated dynamically -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Recent Operations -->
+            <div class="bg-white rounded-lg shadow-md p-4">
+                <h3 class="text-lg font-semibold text-gray-700 mb-3">Recent Operations</h3>
+                <div id="recentOperations" class="space-y-2">
+                    <p class="text-gray-500 text-sm">No operations yet</p>
                 </div>
             </div>
         </div>
 
-        <!-- Template Pack Warning (shown only when no template packs found) -->
-        <div id="templatePackWarning" class="hidden mb-6 p-4 bg-yellow-50 rounded-lg border border-yellow-400">
-            <div class="flex items-start gap-3">
-                <svg class="w-6 h-6 text-yellow-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                          d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
-                </svg>
-                <div class="flex-1">
-                    <h3 class="font-semibold text-yellow-800 mb-1">No Template Packs Found</h3>
-                    <p class="text-sm text-yellow-700">Template packs are required for most PMP commands. Install template packs using the CLI: <code class="bg-yellow-100 px-1 rounded font-mono text-xs">pmp create</code> will offer to install them automatically.</p>
+        <!-- Projects View (hidden by default) -->
+        <div id="projectsView" class="hidden">
+            <!-- Create Project Section (collapsible) -->
+            <div class="mb-6">
+                <details class="bg-white rounded-lg shadow-md">
+                    <summary class="px-4 py-3 cursor-pointer font-semibold text-indigo-700 hover:bg-gray-50">
+                        + Create New Project
+                    </summary>
+                    <div class="px-4 pb-4 border-t">
+                        <form id="createProjectForm" class="mt-4 space-y-4">
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1" for="createTemplatePack">Template Pack</label>
+                                    <select id="createTemplatePack" class="w-full px-3 py-2 border border-gray-300 rounded text-sm" required>
+                                        <option value="">Select a template pack...</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1" for="createTemplate">Template</label>
+                                    <select id="createTemplate" class="w-full px-3 py-2 border border-gray-300 rounded text-sm" required disabled>
+                                        <option value="">Select a template...</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1" for="createEnvironment">Environment</label>
+                                    <select id="createEnvironment" class="w-full px-3 py-2 border border-gray-300 rounded text-sm" required>
+                                        <option value="">Select an environment...</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1" for="createProjectName">Project Name</label>
+                                    <input type="text" id="createProjectName" pattern="^[a-z][a-z0-9-]*[a-z0-9]$|^[a-z]$"
+                                        class="w-full px-3 py-2 border border-gray-300 rounded text-sm"
+                                        placeholder="my-project" required>
+                                    <p class="text-xs text-gray-500 mt-1">Lowercase letters, numbers, hyphens. Must start with a letter.</p>
+                                </div>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1" for="createProjectDescription">Description (optional)</label>
+                                <input type="text" id="createProjectDescription"
+                                    class="w-full px-3 py-2 border border-gray-300 rounded text-sm"
+                                    placeholder="A brief description">
+                            </div>
+                            <!-- Template Inputs Section -->
+                            <div id="createTemplateInputsSection" class="hidden border-t pt-4">
+                                <h4 class="text-sm font-semibold text-gray-700 mb-3">Template Inputs</h4>
+                                <div id="createTemplateInputs" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <!-- Dynamic inputs will be rendered here -->
+                                </div>
+                            </div>
+                            <div class="pt-2">
+                                <button type="submit" class="bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700 text-sm font-semibold">
+                                    Create Project
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </details>
+            </div>
+
+            <!-- Template Pack Warning (shown only when no template packs found) -->
+            <div id="templatePackWarning" class="hidden mb-6 p-4 bg-yellow-50 rounded-lg border border-yellow-400">
+                <div class="flex items-start gap-3">
+                    <svg class="w-6 h-6 text-yellow-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                              d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+                    </svg>
+                    <div class="flex-1">
+                        <h3 class="font-semibold text-yellow-800 mb-1">No Template Packs Found</h3>
+                        <p class="text-sm text-yellow-700">Template packs are required for most PMP commands. Install template packs using the CLI: <code class="bg-yellow-100 px-1 rounded font-mono text-xs">pmp create</code> will offer to install them automatically.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Main Content -->
+            <div class="bg-white rounded-lg shadow-md p-6">
+                <div class="flex items-center justify-between mb-4">
+                    <div>
+                        <h2 class="text-2xl font-bold text-indigo-700">&#128193; <span id="infraName">Infrastructure</span></h2>
+                        <p class="text-sm text-gray-500 mt-1" id="infraPath"></p>
+                    </div>
+                </div>
+
+                <div class="mb-4">
+                    <input type="text" id="projectSearch"
+                           class="w-full border border-gray-300 rounded px-4 py-2"
+                           placeholder="Search projects by name, kind, or environment...">
+                </div>
+
+                <div id="projectSearchResults" class="text-sm text-gray-500 mb-3">
+                    Loading projects...
+                </div>
+
+                <div id="projectsList" class="space-y-2">
+                    <!-- Projects will be loaded here -->
                 </div>
             </div>
         </div>
 
-        <!-- Main Content -->
-        <div class="bg-white rounded-lg shadow-md p-6">
-            <div class="flex items-center justify-between mb-4">
-                <div>
-                    <h2 class="text-2xl font-bold text-indigo-700">📂 <span id="infraName">Infrastructure</span></h2>
-                    <p class="text-sm text-gray-500 mt-1" id="infraPath"></p>
+        <!-- Graph View (hidden by default) -->
+        <div id="graphView" class="hidden">
+            <div class="bg-white rounded-lg shadow-md p-6">
+                <h2 class="text-2xl font-bold text-indigo-700 mb-4">Dependency Graph</h2>
+                <div id="graphContainer" class="min-h-[400px] border rounded bg-gray-50 p-4">
+                    <pre id="mermaidCode" class="text-sm overflow-auto"></pre>
                 </div>
-                <!-- Create Project button removed - UI is read-only -->
-            </div>
-
-            <div class="mb-4">
-                <input type="text" id="projectSearch"
-                       class="w-full border border-gray-300 rounded px-4 py-2"
-                       placeholder="Search projects by name, kind, or environment...">
-            </div>
-
-            <div id="projectSearchResults" class="text-sm text-gray-500 mb-3">
-                Loading projects...
-            </div>
-
-            <div id="projectsList" class="space-y-2">
-                <!-- Projects will be loaded here -->
+                <p class="text-sm text-gray-500 mt-2">Copy the Mermaid code above and paste it into <a href="https://mermaid.live" target="_blank" class="text-indigo-600 hover:underline">mermaid.live</a> to visualize.</p>
             </div>
         </div>
 
@@ -106,7 +240,7 @@
             </div>
         </div>
 
-        <!-- Console Modal -->
+        <!-- Console Modal with WebSocket Streaming -->
         <div id="consoleModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
             <div class="bg-gray-900 rounded-lg shadow-xl max-w-5xl w-full mx-4 max-h-[85vh] flex flex-col">
                 <div class="p-4 border-b border-gray-700 flex justify-between items-center bg-gray-800">
@@ -118,6 +252,7 @@
                             </svg>
                         </div>
                         <h3 id="consoleTitle" class="text-lg font-semibold text-green-400 font-mono"></h3>
+                        <span id="consoleStatus" class="text-xs px-2 py-1 rounded bg-yellow-600 text-white">Connecting...</span>
                     </div>
                     <button id="closeConsole" class="text-gray-400 hover:text-white">
                         <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">

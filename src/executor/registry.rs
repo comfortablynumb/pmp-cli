@@ -176,6 +176,15 @@ mod tests {
         fn default_test_command(&self) -> &str {
             "mock test"
         }
+
+        fn plan_with_output(&self, _working_dir: &str, _extra_args: &[String]) -> Result<Output> {
+            // Return a mock successful output
+            Ok(Output {
+                status: std::process::ExitStatus::default(),
+                stdout: b"No changes. Infrastructure is up to date.".to_vec(),
+                stderr: Vec::new(),
+            })
+        }
     }
 
     #[test]

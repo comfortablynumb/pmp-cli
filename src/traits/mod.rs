@@ -5,7 +5,7 @@ pub mod user_input;
 
 pub use command::{CommandExecutor, RealCommandExecutor};
 pub use filesystem::{FileSystem, RealFileSystem};
-pub use output::{Output, TerminalOutput};
+pub use output::{Output, StreamingOutput, TerminalOutput, format_output_message};
 pub use user_input::{InquireUserInput, UserInput};
 
 #[cfg(test)]

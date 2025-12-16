@@ -1,11 +1,120 @@
 use crate::context::Context;
 use crate::output;
+use crate::template::{
+    discovery::parse_colon_separated_paths, LintFormatter, LintOptions, TemplateLinter,
+    TemplateDiscovery,
+};
 use anyhow::{Context as AnyhowContext, Result};
 use std::path::PathBuf;
 
 pub struct TemplateCommand;
 
 impl TemplateCommand {
+    /// Execute the template lint command
+    pub fn execute_lint(
+        ctx: &Context,
+        pack_filter: Option<&str>,
+        format: &str,
+        include_info: bool,
+        skip_unused_inputs: bool,
+        skip_handlebars: bool,
+        template_packs_paths: Option<&str>,
+    ) -> Result<()> {
+        // Parse custom paths for template pack discovery
+        let custom_paths_owned: Vec<String> = template_packs_paths
+            .map(|p| parse_colon_separated_paths(p))
+            .unwrap_or_default();
+
+        let custom_paths_refs: Vec<&str> = custom_paths_owned.iter().map(|s| s.as_str()).collect();
+
+        // Discover all template packs
+        let all_packs = TemplateDiscovery::discover_template_packs_with_custom_paths(
+            ctx.fs.as_ref(),
+            ctx.output.as_ref(),
+            &custom_paths_refs,
+        )?;
+
+        if all_packs.is_empty() {
+            ctx.output.warning("No template packs found");
+            return Ok(());
+        }
+
+        // Filter packs if specified
+        let packs_to_lint: Vec<_> = if let Some(filter) = pack_filter {
+            all_packs
+                .iter()
+                .filter(|p| p.resource.metadata.name == filter)
+                .collect()
+        } else {
+            all_packs.iter().collect()
+        };
+
+        if packs_to_lint.is_empty() {
+            if let Some(filter) = pack_filter {
+                anyhow::bail!("Template pack '{}' not found", filter);
+            }
+            ctx.output.warning("No template packs to lint");
+            return Ok(());
+        }
+
+        let options = LintOptions {
+            skip_unused_inputs,
+            skip_handlebars,
+            include_info,
+        };
+
+        let mut total_errors = 0;
+        let mut total_warnings = 0;
+        let mut all_results = Vec::new();
+
+        for pack in &packs_to_lint {
+            let result =
+                TemplateLinter::lint_pack(ctx.fs.as_ref(), ctx.output.as_ref(), pack, &all_packs, &options)?;
+
+            total_errors += result.count_by_severity(crate::template::lint::LintSeverity::Error);
+            total_warnings += result.count_by_severity(crate::template::lint::LintSeverity::Warning);
+
+            all_results.push(result);
+        }
+
+        // Output results
+        match format {
+            "json" => {
+                let json = serde_json::to_string_pretty(&all_results)?;
+                println!("{}", json);
+            }
+            _ => {
+                for result in &all_results {
+                    let text = LintFormatter::format_text(result);
+                    print!("{}", text);
+                }
+
+                output::blank();
+
+                if total_errors > 0 {
+                    ctx.output.error(&format!(
+                        "Linting failed: {} error(s), {} warning(s)",
+                        total_errors, total_warnings
+                    ));
+                } else if total_warnings > 0 {
+                    ctx.output.warning(&format!(
+                        "Linting completed with {} warning(s)",
+                        total_warnings
+                    ));
+                } else {
+                    ctx.output.success("Linting passed - no issues found");
+                }
+            }
+        }
+
+        // Exit with error if there are errors
+        if total_errors > 0 {
+            std::process::exit(1);
+        }
+
+        Ok(())
+    }
+
     /// Execute the template scaffold command
     pub fn execute_scaffold(ctx: &Context, output_dir: Option<&str>) -> Result<()> {
         ctx.output.section("Template Scaffolding");

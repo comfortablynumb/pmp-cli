@@ -148,30 +148,115 @@ impl TemplateDiscovery {
             return Ok(templates);
         }
 
-        // Walk through template subdirectories recursively looking for .pmp.template.yaml files
-        let entries = fs.walk_dir(&templates_dir, 100)?;
+        // Get immediate subdirectories of templates/ (each is a template)
+        let template_dirs = fs.read_dir(&templates_dir)?;
 
-        for entry_path in entries {
-            if fs.is_file(&entry_path)
-                && entry_path.file_name() == Some(std::ffi::OsStr::new(".pmp.template.yaml"))
-                && let Some(template_dir) = entry_path.parent()
-            {
-                match TemplateResource::from_file(fs, &entry_path) {
+        for template_dir in template_dirs {
+            if !fs.is_dir(&template_dir) {
+                continue;
+            }
+
+            let versions_dir = template_dir.join("versions");
+
+            if fs.exists(&versions_dir) && fs.is_dir(&versions_dir) {
+                // Versioned template: scan versions/ for semver directories
+                templates.extend(Self::discover_versioned_templates(
+                    fs,
+                    output,
+                    &template_dir,
+                    &versions_dir,
+                )?);
+            } else {
+                // Legacy template: look for .pmp.template.yaml directly
+                let template_yaml = template_dir.join(".pmp.template.yaml");
+
+                if fs.exists(&template_yaml) {
+                    match TemplateResource::from_file(fs, &template_yaml) {
+                        Ok(resource) => {
+                            templates.push(TemplateInfo {
+                                resource,
+                                path: template_dir.clone(),
+                                version: None, // Legacy template defaults to 0.0.1
+                            });
+                        }
+                        Err(e) => {
+                            output.warning(&format!(
+                                "Failed to load template from {:?}: {}",
+                                template_yaml, e
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(templates)
+    }
+
+    /// Discover templates from a versioned template directory
+    /// Scans versions/ for semver-named subdirectories
+    fn discover_versioned_templates(
+        fs: &dyn crate::traits::FileSystem,
+        output: &dyn crate::traits::Output,
+        _template_dir: &Path,
+        versions_dir: &Path,
+    ) -> Result<Vec<TemplateInfo>> {
+        let mut templates = Vec::new();
+
+        let version_dirs = fs.read_dir(versions_dir)?;
+
+        for version_dir in version_dirs {
+            if !fs.is_dir(&version_dir) {
+                continue;
+            }
+
+            // Try to parse directory name as semver
+            let version_str = version_dir
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("");
+
+            let version = match semver::Version::parse(version_str) {
+                Ok(v) => v,
+                Err(_) => {
+                    output.warning(&format!(
+                        "Skipping invalid version directory: {:?} (not a valid semver)",
+                        version_dir
+                    ));
+                    continue;
+                }
+            };
+
+            let template_yaml = version_dir.join(".pmp.template.yaml");
+
+            if fs.exists(&template_yaml) {
+                match TemplateResource::from_file(fs, &template_yaml) {
                     Ok(resource) => {
                         templates.push(TemplateInfo {
                             resource,
-                            path: template_dir.to_path_buf(),
+                            path: version_dir.clone(),
+                            version: Some(version),
                         });
                     }
                     Err(e) => {
                         output.warning(&format!(
                             "Failed to load template from {:?}: {}",
-                            entry_path, e
+                            template_yaml, e
                         ));
                     }
                 }
             }
         }
+
+        // Sort by version descending (latest first)
+        templates.sort_by(|a, b| {
+            match (&b.version, &a.version) {
+                (Some(vb), Some(va)) => vb.cmp(va),
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (None, None) => std::cmp::Ordering::Equal,
+            }
+        });
 
         Ok(templates)
     }
@@ -338,11 +423,15 @@ impl TemplateDiscovery {
                 && entry_path.file_name() == Some(std::ffi::OsStr::new(".pmp.template.yaml"))
                 && let Some(template_dir) = entry_path.parent()
             {
+                // Try to detect if this is a versioned template by checking path structure
+                let version = Self::detect_version_from_path(template_dir);
+
                 match TemplateResource::from_file(fs, &entry_path) {
                     Ok(resource) => {
                         templates.push(TemplateInfo {
                             resource,
                             path: template_dir.to_path_buf(),
+                            version,
                         });
                     }
                     Err(e) => {
@@ -356,6 +445,22 @@ impl TemplateDiscovery {
         }
 
         Ok(templates)
+    }
+
+    /// Detect version from template path structure
+    /// Returns Some(Version) if path contains versions/{semver}/, None otherwise
+    fn detect_version_from_path(template_dir: &Path) -> Option<semver::Version> {
+        // Check if parent directory is "versions"
+        if let Some(parent) = template_dir.parent() {
+            if parent.file_name() == Some(std::ffi::OsStr::new("versions")) {
+                // Try to parse template_dir name as semver
+                if let Some(version_str) = template_dir.file_name().and_then(|n| n.to_str()) {
+                    return semver::Version::parse(version_str).ok();
+                }
+            }
+        }
+
+        None // Legacy template
     }
 
     /// Group templates by resource kind
@@ -401,6 +506,8 @@ pub struct TemplateInfo {
     pub resource: TemplateResource,
     /// Path to the template directory
     pub path: PathBuf,
+    /// Semantic version of the template (None for legacy templates which default to 0.0.1)
+    pub version: Option<semver::Version>,
 }
 
 /// Information about a discovered plugin

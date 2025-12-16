@@ -27,8 +27,11 @@ cargo run -- state list                  # List state across projects
 cargo run -- state drift                 # Detect configuration drift
 cargo run -- ci generate github          # Generate CI/CD workflows
 cargo run -- template scaffold           # Create new template pack
+cargo run -- template lint               # Lint template packs
 cargo run -- clone source target         # Clone existing project
 cargo run -- env diff dev staging        # Compare environments
+cargo run -- project preview --diff      # Preview with color-coded diff
+cargo run -- env purge                   # Destroy expired environments
 ```
 
 ## Architecture
@@ -433,6 +436,7 @@ resource "github_team_membership" "member_{{@index}}" {
 **Handlebars Helpers**:
 - `{{bool variable_name}}` - Boolean to HCL (true/false)
 - `{{json variable_name}}` - JSON stringify
+- `{{secret input_name}}` - Secret reference (`local.secret_<input_name>`)
 - `{{#if variable}}...{{/if}}` - Conditional rendering
 - `{{#each array}}...{{/each}}` - Array iteration
 - `{{#eq a b}}...{{/eq}}` - Equality comparison
@@ -526,9 +530,126 @@ spec:
       backend:
         type: s3  # or azurerm, gcs, kubernetes, pg, consul, etc.
         # ... backend-specific parameters
+    parallel:
+      max: 4  # Max concurrent projects (default: 1 = sequential)
+      on_failure: continue  # stop, continue (default), or finish_level
 ```
 
 **Supported Backends**: local, s3, azurerm, gcs, http, kubernetes, pg, consul, cos, oss, remote
+
+### Parallel Execution
+
+Execute multiple projects at the same dependency level concurrently:
+
+**Configuration** (`.pmp.infrastructure.yaml`):
+```yaml
+spec:
+  executor:
+    parallel:
+      max: 4                   # Maximum concurrent executions
+      on_failure: continue     # Behavior on failure
+```
+
+**CLI Override**:
+```bash
+pmp project preview --parallel 4   # Override config
+pmp project apply --parallel 4     # Execute up to 4 projects in parallel
+pmp project destroy --parallel 4   # Destroy with parallelism
+pmp project test --parallel 4      # Test with parallelism
+```
+
+**Failure Behaviors**:
+- `stop`: Stop execution immediately on any failure
+- `continue` (default): Continue executing remaining projects
+- `finish_level`: Finish current level, then stop
+
+**How it works**:
+- Projects grouped by dependency level (level 0 = no dependencies)
+- All projects in a level execute concurrently (up to `max`)
+- Respects dependency order (level N completes before level N+1)
+- For destroy, levels are reversed (dependents destroyed first)
+
+**Secrets Configuration** (Optional):
+```yaml
+spec:
+  secrets:
+    managers:
+      # Static configuration
+      - name: dev-vault
+        type: vault
+        config:
+          address: https://vault-dev.example.com
+          namespace: dev
+
+      # Dynamic configuration from PMP project outputs
+      - name: production-vault
+        type: vault
+        project:
+          name: vault-cluster
+          environment: production  # Optional
+          outputs:
+            address: vault_url
+            namespace: vault_namespace
+
+      # AWS Secrets Manager
+      - name: aws-secrets
+        type: aws_secrets_manager
+        config:
+          region: us-east-1
+```
+
+### Secrets Integration
+
+**Secret-enabled inputs** (`spec.inputs`):
+```yaml
+- name: database_password
+  type: password
+  description: Database password
+  secret_manager:
+    enabled: true
+```
+
+**Environment file** (`.pmp.environment.yaml`):
+```yaml
+spec:
+  secrets:
+    database_password:
+      manager: production-vault
+      secret_id: secret/data/myapp/db
+      data_source_name: secret_database_password
+      secret_key: value  # Optional, for JSON secrets
+```
+
+**Generated Terraform** (`_common.tf`):
+- Vault provider with remote state reference (for project-based config)
+- Data sources: `vault_generic_secret`, `aws_secretsmanager_secret_version`
+- Locals: `local.secret_<input_name>` for easy access
+
+**Template helper**: `{{secret input_name}}` outputs `local.secret_<input_name>`
+
+### Environment Time Limits
+
+Environments can be configured with expiration time limits. When expired, they can be destroyed using `pmp env purge`.
+
+**Time Limit Configuration** (`.pmp.environment.yaml`):
+```yaml
+metadata:
+  name: my-project
+  environment_name: dev
+  created_at: "2024-12-15T10:30:00Z"  # Auto-set on creation
+spec:
+  time_limit:
+    # Option 1: Fixed expiration date (ISO 8601)
+    expires_at: "2025-03-01T00:00:00Z"
+    # OR Option 2: TTL from creation
+    ttl: "7d"  # Supports: s, m, h, d, w (e.g., "1d12h", "2w")
+```
+
+**Commands**:
+- `pmp env purge` - Dry-run: show expired environments
+- `pmp env purge --force` - Destroy expired environments
+- `pmp env purge --environment dev` - Filter by environment
+- `pmp env purge --force --yes` - Skip confirmation
 
 ### Dependencies
 
@@ -630,6 +751,7 @@ spec:
 - `pmp env promote <source> <target>` - Promote configs (with backup)
 - `pmp env sync` - Find common settings
 - `pmp env variables` - View environment variables
+- `pmp env purge` - Destroy all expired environments (dry-run by default, use `--force` to execute)
 
 ## Implementation Details
 

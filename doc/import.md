@@ -410,9 +410,9 @@ pmp apply
 ## Related Documentation
 
 - [Design Document](import-system-design.md) - Detailed architecture and implementation
-- [CLI Reference](CLI.md) - Complete command reference
-- [Project Structure](STRUCTURE.md) - PMP project organization
-- [Migration Guide](MIGRATION.md) - Migrating from standalone Terraform
+- [Projects](projects.md) - PMP project management
+- [Templates](templates.md) - Template system documentation
+- [Dependencies](dependencies.md) - Dependency management
 
 ## Support
 

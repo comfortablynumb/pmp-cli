@@ -675,6 +675,8 @@ impl UpdateCommand {
                     &metadata,
                     plugins,
                     &merged_template_reference_projects,
+                    &current_env_resource.spec.secrets,
+                    collection.spec.secrets.as_ref(),
                 )
                 .context("Failed to generate common file")?;
         } else {
@@ -745,7 +747,7 @@ impl UpdateCommand {
             let env_path_str = env_path
                 .to_str()
                 .context("Failed to convert environment path to string")?;
-            ApplyCommand::execute(ctx, Some(env_path_str), &[])?;
+            ApplyCommand::execute(ctx, Some(env_path_str), false, false, None, &[])?;
         } else {
             let next_steps_list = vec![
                 format!("Review the regenerated files in {}", env_path.display()),
@@ -1564,6 +1566,8 @@ impl UpdateCommand {
                     &metadata,
                     plugins,
                     template_reference_projects,
+                    &env_resource.spec.secrets,
+                    collection.spec.secrets.as_ref(),
                 )
                 .context("Failed to regenerate common file")?;
         }
@@ -1748,6 +1752,8 @@ impl UpdateCommand {
                     &metadata,
                     plugins,
                     template_reference_projects,
+                    &env_resource.spec.secrets,
+                    collection.spec.secrets.as_ref(),
                 )
                 .context("Failed to regenerate common file")?;
         }
@@ -1996,6 +2002,8 @@ impl UpdateCommand {
                     &metadata,
                     plugins,
                     template_reference_projects,
+                    &env_resource.spec.secrets,
+                    collection.spec.secrets.as_ref(),
                 )
                 .context("Failed to regenerate common file")?;
         }
@@ -3044,6 +3052,8 @@ impl UpdateCommand {
                 } else {
                     template.metadata.labels.clone()
                 },
+                // Preserve created_at timestamp from original environment
+                created_at: current_env.metadata.created_at,
             },
             spec: ProjectSpec {
                 resource: ResourceDefinition {
@@ -3055,11 +3065,13 @@ impl UpdateCommand {
                     config: template.spec.executor.config().cloned(),
                 },
                 inputs: inputs.clone(),
+                secrets: current_env.spec.secrets.clone(), // Preserve secrets from current env
                 custom: None, // Templates no longer have custom field
                 plugins: merged_plugins.cloned(), // Use merged plugins (existing + newly added)
                 template: Some(TemplateReference {
                     template_pack_name: template_pack_name.to_string(),
                     name: template_name.to_string(),
+                    version: "0.0.1".to_string(), // Default version for legacy templates
                 }),
                 environment: Some(EnvironmentReference {
                     name: environment_name.to_string(),
@@ -3072,6 +3084,7 @@ impl UpdateCommand {
                     .hooks
                     .clone()
                     .or_else(|| template.spec.hooks.clone()), // Preserve existing hooks, or use template hooks
+                time_limit: current_env.spec.time_limit.clone(), // Preserve time limit configuration
             },
         };
 

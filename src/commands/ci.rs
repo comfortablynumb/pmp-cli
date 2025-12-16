@@ -1,8 +1,8 @@
 use crate::collection::CollectionDiscovery;
 use crate::context::Context;
 use crate::output;
+use crate::template::metadata::{CostConfig, ProjectReference};
 use crate::template::DynamicProjectEnvironmentResource;
-use crate::template::metadata::ProjectReference;
 use anyhow::{Context as AnyhowContext, Result};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -64,6 +64,17 @@ impl CiCommand {
                 "Dynamic (changed projects)"
             },
         );
+
+        // Get cost configuration
+        let cost_config = infrastructure.spec.cost.as_ref();
+        let cost_ci_enabled = cost_config
+            .and_then(|c| c.ci.as_ref())
+            .is_some_and(|ci| ci.enabled);
+
+        if cost_ci_enabled {
+            ctx.output.key_value("Cost Estimation", "Enabled");
+        }
+
         output::blank();
 
         // Discover all projects
@@ -84,30 +95,30 @@ impl CiCommand {
             // Static mode: Generate pipeline that runs all projects
             match pipeline {
                 PipelineType::GitHubActions => {
-                    Self::generate_github_actions_static(&project_infos, environment)?
+                    Self::generate_github_actions_static(&project_infos, environment, cost_config)?
                 }
                 PipelineType::GitLabCI => {
-                    Self::generate_gitlab_ci_static(&project_infos, environment)?
+                    Self::generate_gitlab_ci_static(&project_infos, environment, cost_config)?
                 }
                 PipelineType::Jenkins => {
-                    Self::generate_jenkins_static(&project_infos, environment)?
+                    Self::generate_jenkins_static(&project_infos, environment, cost_config)?
                 }
             }
         } else {
             // Dynamic mode: Generate pipeline with change detection
             match pipeline {
                 PipelineType::GitHubActions => {
-                    Self::generate_github_actions_dynamic(&project_infos, environment)?
+                    Self::generate_github_actions_dynamic(&project_infos, environment, cost_config)?
                 }
                 PipelineType::GitLabCI => {
-                    Self::generate_gitlab_ci_dynamic(&project_infos, environment)?
+                    Self::generate_gitlab_ci_dynamic(&project_infos, environment, cost_config)?
                 }
                 PipelineType::Jenkins => {
                     // Jenkins doesn't support dynamic mode yet, fall back to static
                     ctx.output.warning(
                         "Jenkins does not support dynamic mode yet. Generating static pipeline.",
                     );
-                    Self::generate_jenkins_static(&project_infos, environment)?
+                    Self::generate_jenkins_static(&project_infos, environment, cost_config)?
                 }
             }
         };
@@ -182,8 +193,15 @@ impl CiCommand {
     fn generate_github_actions_static(
         projects: &[ProjectInfo],
         _environment: Option<&str>,
+        cost_config: Option<&CostConfig>,
     ) -> Result<String> {
         let mut yaml = String::new();
+
+        // Get cost CI settings
+        let cost_ci = cost_config.and_then(|c| c.ci.as_ref());
+        let cost_enabled = cost_ci.is_some_and(|ci| ci.enabled);
+        let comment_on_pr = cost_ci.is_some_and(|ci| ci.comment_on_pr);
+        let fail_on_threshold = cost_ci.is_some_and(|ci| ci.fail_on_threshold);
 
         yaml.push_str("name: PMP Infrastructure Deployment\n\n");
 
@@ -197,8 +215,13 @@ impl CiCommand {
         yaml.push_str("  workflow_dispatch:\n\n");
 
         yaml.push_str("env:\n");
-        yaml.push_str("  TOFU_VERSION: \"1.6.0\"\n\n");
+        yaml.push_str("  TOFU_VERSION: \"1.6.0\"\n");
 
+        if cost_enabled {
+            yaml.push_str("  INFRACOST_API_KEY: ${{ secrets.INFRACOST_API_KEY }}\n");
+        }
+
+        yaml.push_str("\n");
         yaml.push_str("jobs:\n");
 
         // Group projects by dependency level for parallel execution
@@ -239,22 +262,72 @@ impl CiCommand {
             yaml.push_str("        with:\n");
             yaml.push_str("          tofu_version: ${{ env.TOFU_VERSION }}\n\n");
 
-            yaml.push_str("      # TODO: Install PMP binary\n");
-            yaml.push_str("      # - name: Install PMP\n");
-            yaml.push_str("      #   run: |\n");
-            yaml.push_str("      #     # Download and install PMP\n\n");
+            yaml.push_str("      - name: Install PMP\n");
+            yaml.push_str("        run: |\n");
+            yaml.push_str("          curl -fsSL https://raw.githubusercontent.com/pmp-project/pmp-cli/main/install.sh | bash\n");
+            yaml.push_str("          echo \"$HOME/.pmp/bin\" >> $GITHUB_PATH\n\n");
+
+            // Add Infracost setup if cost estimation is enabled
+            if cost_enabled {
+                yaml.push_str("      - name: Setup Infracost\n");
+                yaml.push_str("        uses: infracost/actions/setup@v3\n");
+                yaml.push_str("        with:\n");
+                yaml.push_str("          api-key: ${{ env.INFRACOST_API_KEY }}\n\n");
+            }
 
             yaml.push_str("      - name: Preview (Plan)\n");
             yaml.push_str("        if: github.event_name == 'pull_request'\n");
             yaml.push_str("        working-directory: ${{ matrix.project.path }}\n");
-            yaml.push_str("        run: pmp project preview\n\n");
+
+            if cost_enabled && fail_on_threshold {
+                yaml.push_str("        run: pmp project preview --cost\n\n");
+            } else {
+                yaml.push_str("        run: pmp project preview\n\n");
+            }
+
+            // Add cost estimation step for PRs
+            if cost_enabled {
+                yaml.push_str("      - name: Cost Estimation\n");
+                yaml.push_str("        if: github.event_name == 'pull_request'\n");
+                yaml.push_str("        working-directory: ${{ matrix.project.path }}\n");
+                yaml.push_str("        run: |\n");
+                yaml.push_str("          pmp cost diff\n");
+
+                if fail_on_threshold {
+                    yaml.push_str("        continue-on-error: false\n\n");
+                } else {
+                    yaml.push_str("        continue-on-error: true\n\n");
+                }
+
+                // Add PR comment step if enabled
+                if comment_on_pr {
+                    yaml.push_str("      - name: Generate Cost Report\n");
+                    yaml.push_str("        if: github.event_name == 'pull_request'\n");
+                    yaml.push_str("        working-directory: ${{ matrix.project.path }}\n");
+                    yaml.push_str("        run: |\n");
+                    yaml.push_str("          infracost breakdown --path . --format json > /tmp/infracost-${{ matrix.project.name }}.json\n");
+                    yaml.push_str("        continue-on-error: true\n\n");
+
+                    yaml.push_str("      - name: Post Cost Comment\n");
+                    yaml.push_str("        if: github.event_name == 'pull_request'\n");
+                    yaml.push_str("        uses: infracost/actions/comment@v1\n");
+                    yaml.push_str("        with:\n");
+                    yaml.push_str("          path: /tmp/infracost-${{ matrix.project.name }}.json\n");
+                    yaml.push_str("          behavior: update\n\n");
+                }
+            }
 
             yaml.push_str("      - name: Apply\n");
             yaml.push_str(
                 "        if: github.ref == 'refs/heads/main' && github.event_name == 'push'\n",
             );
             yaml.push_str("        working-directory: ${{ matrix.project.path }}\n");
-            yaml.push_str("        run: pmp project apply\n\n");
+
+            if cost_enabled && fail_on_threshold {
+                yaml.push_str("        run: pmp project apply --cost\n\n");
+            } else {
+                yaml.push_str("        run: pmp project apply\n\n");
+            }
         }
 
         Ok(yaml)
@@ -264,8 +337,15 @@ impl CiCommand {
     fn generate_github_actions_dynamic(
         _projects: &[ProjectInfo],
         _environment: Option<&str>,
+        cost_config: Option<&CostConfig>,
     ) -> Result<String> {
         let mut yaml = String::new();
+
+        // Get cost CI settings
+        let cost_ci = cost_config.and_then(|c| c.ci.as_ref());
+        let cost_enabled = cost_ci.is_some_and(|ci| ci.enabled);
+        let comment_on_pr = cost_ci.is_some_and(|ci| ci.comment_on_pr);
+        let fail_on_threshold = cost_ci.is_some_and(|ci| ci.fail_on_threshold);
 
         yaml.push_str("name: PMP Infrastructure Deployment\n\n");
 
@@ -281,8 +361,13 @@ impl CiCommand {
         yaml.push_str("  workflow_dispatch:\n\n");
 
         yaml.push_str("env:\n");
-        yaml.push_str("  TOFU_VERSION: \"1.6.0\"\n\n");
+        yaml.push_str("  TOFU_VERSION: \"1.6.0\"\n");
 
+        if cost_enabled {
+            yaml.push_str("  INFRACOST_API_KEY: ${{ secrets.INFRACOST_API_KEY }}\n");
+        }
+
+        yaml.push_str("\n");
         yaml.push_str("jobs:\n");
 
         // Detect changes job
@@ -298,12 +383,10 @@ impl CiCommand {
         yaml.push_str("        with:\n");
         yaml.push_str("          fetch-depth: 0  # Need full history for git diff\n\n");
 
-        // TODO: Add PMP installation step here (could be from GitHub release or build from source)
-        yaml.push_str("      # TODO: Install PMP binary (from GitHub release or build)\n");
-        yaml.push_str("      # - name: Install PMP\n");
-        yaml.push_str("      #   run: |\n");
-        yaml.push_str("      #     # Download and install PMP from GitHub releases\n");
-        yaml.push_str("      #     # or build from source\n\n");
+        yaml.push_str("      - name: Install PMP\n");
+        yaml.push_str("        run: |\n");
+        yaml.push_str("          curl -fsSL https://raw.githubusercontent.com/pmp-project/pmp-cli/main/install.sh | bash\n");
+        yaml.push_str("          echo \"$HOME/.pmp/bin\" >> $GITHUB_PATH\n\n");
 
         yaml.push_str("      - name: Detect changed projects\n");
         yaml.push_str("        id: detect\n");
@@ -359,14 +442,56 @@ impl CiCommand {
         yaml.push_str("        with:\n");
         yaml.push_str("          tofu_version: ${{ env.TOFU_VERSION }}\n\n");
 
-        yaml.push_str("      # TODO: Install PMP binary\n");
-        yaml.push_str("      # - name: Install PMP\n");
-        yaml.push_str("      #   run: |\n");
-        yaml.push_str("      #     # Download and install PMP\n\n");
+        yaml.push_str("      - name: Install PMP\n");
+        yaml.push_str("        run: |\n");
+        yaml.push_str("          curl -fsSL https://raw.githubusercontent.com/pmp-project/pmp-cli/main/install.sh | bash\n");
+        yaml.push_str("          echo \"$HOME/.pmp/bin\" >> $GITHUB_PATH\n\n");
+
+        // Add Infracost setup if cost estimation is enabled
+        if cost_enabled {
+            yaml.push_str("      - name: Setup Infracost\n");
+            yaml.push_str("        uses: infracost/actions/setup@v3\n");
+            yaml.push_str("        with:\n");
+            yaml.push_str("          api-key: ${{ env.INFRACOST_API_KEY }}\n\n");
+        }
 
         yaml.push_str("      - name: Preview changes\n");
         yaml.push_str("        working-directory: ${{ matrix.project.path }}\n");
-        yaml.push_str("        run: pmp project preview\n\n");
+
+        if cost_enabled && fail_on_threshold {
+            yaml.push_str("        run: pmp project preview --cost\n\n");
+        } else {
+            yaml.push_str("        run: pmp project preview\n\n");
+        }
+
+        // Add cost estimation step for PRs
+        if cost_enabled {
+            yaml.push_str("      - name: Cost Estimation\n");
+            yaml.push_str("        working-directory: ${{ matrix.project.path }}\n");
+            yaml.push_str("        run: |\n");
+            yaml.push_str("          pmp cost diff\n");
+
+            if fail_on_threshold {
+                yaml.push_str("        continue-on-error: false\n\n");
+            } else {
+                yaml.push_str("        continue-on-error: true\n\n");
+            }
+
+            // Add PR comment step if enabled
+            if comment_on_pr {
+                yaml.push_str("      - name: Generate Cost Report\n");
+                yaml.push_str("        working-directory: ${{ matrix.project.path }}\n");
+                yaml.push_str("        run: |\n");
+                yaml.push_str("          infracost breakdown --path . --format json > /tmp/infracost-${{ matrix.project.name }}.json\n");
+                yaml.push_str("        continue-on-error: true\n\n");
+
+                yaml.push_str("      - name: Post Cost Comment\n");
+                yaml.push_str("        uses: infracost/actions/comment@v1\n");
+                yaml.push_str("        with:\n");
+                yaml.push_str("          path: /tmp/infracost-${{ matrix.project.name }}.json\n");
+                yaml.push_str("          behavior: update\n\n");
+            }
+        }
 
         // Apply job (on push to main or tags)
         yaml.push_str("  apply:\n");
@@ -387,14 +512,27 @@ impl CiCommand {
         yaml.push_str("        with:\n");
         yaml.push_str("          tofu_version: ${{ env.TOFU_VERSION }}\n\n");
 
-        yaml.push_str("      # TODO: Install PMP binary\n");
-        yaml.push_str("      # - name: Install PMP\n");
-        yaml.push_str("      #   run: |\n");
-        yaml.push_str("      #     # Download and install PMP\n\n");
+        yaml.push_str("      - name: Install PMP\n");
+        yaml.push_str("        run: |\n");
+        yaml.push_str("          curl -fsSL https://raw.githubusercontent.com/pmp-project/pmp-cli/main/install.sh | bash\n");
+        yaml.push_str("          echo \"$HOME/.pmp/bin\" >> $GITHUB_PATH\n\n");
+
+        // Add Infracost setup if cost estimation is enabled
+        if cost_enabled {
+            yaml.push_str("      - name: Setup Infracost\n");
+            yaml.push_str("        uses: infracost/actions/setup@v3\n");
+            yaml.push_str("        with:\n");
+            yaml.push_str("          api-key: ${{ env.INFRACOST_API_KEY }}\n\n");
+        }
 
         yaml.push_str("      - name: Apply changes\n");
         yaml.push_str("        working-directory: ${{ matrix.project.path }}\n");
-        yaml.push_str("        run: pmp project apply\n\n");
+
+        if cost_enabled && fail_on_threshold {
+            yaml.push_str("        run: pmp project apply --cost\n\n");
+        } else {
+            yaml.push_str("        run: pmp project apply\n\n");
+        }
 
         Ok(yaml)
     }
@@ -403,8 +541,14 @@ impl CiCommand {
     fn generate_gitlab_ci_static(
         projects: &[ProjectInfo],
         _environment: Option<&str>,
+        cost_config: Option<&CostConfig>,
     ) -> Result<String> {
         let mut yaml = String::new();
+
+        // Get cost CI settings
+        let cost_ci = cost_config.and_then(|c| c.ci.as_ref());
+        let cost_enabled = cost_ci.is_some_and(|ci| ci.enabled);
+        let fail_on_threshold = cost_ci.is_some_and(|ci| ci.fail_on_threshold);
 
         yaml.push_str("# GitLab CI/CD Pipeline for PMP Infrastructure\n\n");
 
@@ -420,7 +564,13 @@ impl CiCommand {
         yaml.push('\n');
 
         yaml.push_str("variables:\n");
-        yaml.push_str("  TOFU_VERSION: \"1.6.0\"\n\n");
+        yaml.push_str("  TOFU_VERSION: \"1.6.0\"\n");
+
+        if cost_enabled {
+            yaml.push_str("  INFRACOST_API_KEY: $INFRACOST_API_KEY\n");
+        }
+
+        yaml.push('\n');
 
         yaml.push_str("default:\n");
         yaml.push_str("  image: alpine:latest\n");
@@ -428,7 +578,16 @@ impl CiCommand {
         yaml.push_str("    - apk add --no-cache curl\n");
         yaml.push_str("    - curl -Lo /usr/local/bin/tofu https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}/tofu_${TOFU_VERSION}_linux_amd64.zip\n");
         yaml.push_str("    - chmod +x /usr/local/bin/tofu\n");
-        yaml.push_str("    # TODO: Install PMP binary\n\n");
+        yaml.push_str("    - curl -fsSL https://raw.githubusercontent.com/pmp-project/pmp-cli/main/install.sh | bash\n");
+        yaml.push_str("    - export PATH=\"$HOME/.pmp/bin:$PATH\"\n");
+
+        if cost_enabled {
+            yaml.push_str("    - |\n");
+            yaml.push_str("      # Install Infracost\n");
+            yaml.push_str("      curl -fsSL https://raw.githubusercontent.com/infracost/infracost/master/scripts/install.sh | sh\n");
+        }
+
+        yaml.push('\n');
 
         // Generate jobs for each stage
         for (level, group_projects) in execution_groups.iter().enumerate() {
@@ -447,9 +606,25 @@ impl CiCommand {
                 yaml.push_str(
                     "      if [ \"$CI_PIPELINE_SOURCE\" == \"merge_request_event\" ]; then\n",
                 );
-                yaml.push_str("        pmp project preview\n");
+
+                if cost_enabled && fail_on_threshold {
+                    yaml.push_str("        pmp project preview --cost\n");
+                    yaml.push_str("        pmp cost diff\n");
+                } else if cost_enabled {
+                    yaml.push_str("        pmp project preview\n");
+                    yaml.push_str("        pmp cost diff || true\n");
+                } else {
+                    yaml.push_str("        pmp project preview\n");
+                }
+
                 yaml.push_str("      elif [ \"$CI_COMMIT_BRANCH\" == \"main\" ]; then\n");
-                yaml.push_str("        pmp project apply\n");
+
+                if cost_enabled && fail_on_threshold {
+                    yaml.push_str("        pmp project apply --cost\n");
+                } else {
+                    yaml.push_str("        pmp project apply\n");
+                }
+
                 yaml.push_str("      fi\n");
                 yaml.push_str("  rules:\n");
                 yaml.push_str("    - if: $CI_PIPELINE_SOURCE == \"merge_request_event\"\n");
@@ -464,8 +639,14 @@ impl CiCommand {
     fn generate_gitlab_ci_dynamic(
         _projects: &[ProjectInfo],
         _environment: Option<&str>,
+        cost_config: Option<&CostConfig>,
     ) -> Result<String> {
         let mut yaml = String::new();
+
+        // Get cost CI settings
+        let cost_ci = cost_config.and_then(|c| c.ci.as_ref());
+        let cost_enabled = cost_ci.is_some_and(|ci| ci.enabled);
+        let fail_on_threshold = cost_ci.is_some_and(|ci| ci.fail_on_threshold);
 
         yaml.push_str(
             "# GitLab CI/CD Pipeline for PMP Infrastructure (Dynamic - Change Detection)\n\n",
@@ -477,7 +658,13 @@ impl CiCommand {
         yaml.push_str("  - apply\n\n");
 
         yaml.push_str("variables:\n");
-        yaml.push_str("  TOFU_VERSION: \"1.6.0\"\n\n");
+        yaml.push_str("  TOFU_VERSION: \"1.6.0\"\n");
+
+        if cost_enabled {
+            yaml.push_str("  INFRACOST_API_KEY: $INFRACOST_API_KEY\n");
+        }
+
+        yaml.push('\n');
 
         yaml.push_str("default:\n");
         yaml.push_str("  image: alpine:latest\n");
@@ -488,14 +675,24 @@ impl CiCommand {
         yaml.push_str("      curl -Lo /tmp/tofu.tar.gz https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}/tofu_${TOFU_VERSION}_linux_amd64.tar.gz\n");
         yaml.push_str("      tar -xzf /tmp/tofu.tar.gz -C /usr/local/bin\n");
         yaml.push_str("      chmod +x /usr/local/bin/tofu\n");
-        yaml.push_str("    # TODO: Install PMP binary\n\n");
+        yaml.push_str("    - curl -fsSL https://raw.githubusercontent.com/pmp-project/pmp-cli/main/install.sh | bash\n");
+        yaml.push_str("    - export PATH=\"$HOME/.pmp/bin:$PATH\"\n");
+
+        if cost_enabled {
+            yaml.push_str("    - |\n");
+            yaml.push_str("      # Install Infracost\n");
+            yaml.push_str("      curl -fsSL https://raw.githubusercontent.com/infracost/infracost/master/scripts/install.sh | sh\n");
+        }
+
+        yaml.push('\n');
 
         // Detect changes job
         yaml.push_str("detect-changes:\n");
         yaml.push_str("  stage: detect\n");
         yaml.push_str("  before_script:\n");
-        yaml.push_str("    - apk add --no-cache git\n");
-        yaml.push_str("    # TODO: Install PMP binary (from release or build from source)\n");
+        yaml.push_str("    - apk add --no-cache git curl\n");
+        yaml.push_str("    - curl -fsSL https://raw.githubusercontent.com/pmp-project/pmp-cli/main/install.sh | bash\n");
+        yaml.push_str("    - export PATH=\"$HOME/.pmp/bin:$PATH\"\n");
         yaml.push_str("  script:\n");
         yaml.push_str("    - |\n");
         yaml.push_str("      # Determine base ref\n");
@@ -541,7 +738,17 @@ impl CiCommand {
         yaml.push_str("      echo \"$CHANGED_PROJECTS\" | jq -r '.[] | \"\\(.path)\"' | while read -r project_path; do\n");
         yaml.push_str("        echo \"Previewing project: $project_path\"\n");
         yaml.push_str("        cd \"$project_path\"\n");
-        yaml.push_str("        pmp project preview\n");
+
+        if cost_enabled && fail_on_threshold {
+            yaml.push_str("        pmp project preview --cost\n");
+            yaml.push_str("        pmp cost diff\n");
+        } else if cost_enabled {
+            yaml.push_str("        pmp project preview\n");
+            yaml.push_str("        pmp cost diff || true\n");
+        } else {
+            yaml.push_str("        pmp project preview\n");
+        }
+
         yaml.push_str("        cd -\n");
         yaml.push_str("      done\n\n");
 
@@ -560,7 +767,13 @@ impl CiCommand {
         yaml.push_str("      echo \"$CHANGED_PROJECTS\" | jq -r '.[] | \"\\(.path)\"' | while read -r project_path; do\n");
         yaml.push_str("        echo \"Applying project: $project_path\"\n");
         yaml.push_str("        cd \"$project_path\"\n");
-        yaml.push_str("        pmp project apply\n");
+
+        if cost_enabled && fail_on_threshold {
+            yaml.push_str("        pmp project apply --cost\n");
+        } else {
+            yaml.push_str("        pmp project apply\n");
+        }
+
         yaml.push_str("        cd -\n");
         yaml.push_str("      done\n\n");
 
@@ -577,8 +790,14 @@ impl CiCommand {
     fn generate_jenkins_static(
         projects: &[ProjectInfo],
         _environment: Option<&str>,
+        cost_config: Option<&CostConfig>,
     ) -> Result<String> {
         let mut groovy = String::new();
+
+        // Get cost CI settings
+        let cost_ci = cost_config.and_then(|c| c.ci.as_ref());
+        let cost_enabled = cost_ci.is_some_and(|ci| ci.enabled);
+        let fail_on_threshold = cost_ci.is_some_and(|ci| ci.fail_on_threshold);
 
         groovy.push_str("// Jenkinsfile for PMP Infrastructure\n\n");
 
@@ -587,6 +806,11 @@ impl CiCommand {
 
         groovy.push_str("    environment {\n");
         groovy.push_str("        TOFU_VERSION = '1.6.0'\n");
+
+        if cost_enabled {
+            groovy.push_str("        INFRACOST_API_KEY = credentials('infracost-api-key')\n");
+        }
+
         groovy.push_str("    }\n\n");
 
         groovy.push_str("    stages {\n");
@@ -614,12 +838,28 @@ impl CiCommand {
                 );
                 groovy.push_str("                                if (env.CHANGE_ID) {\n");
                 groovy.push_str("                                    // Pull request\n");
-                groovy.push_str("                                    sh 'pmp project preview'\n");
+
+                if cost_enabled && fail_on_threshold {
+                    groovy.push_str("                                    sh 'pmp project preview --cost'\n");
+                    groovy.push_str("                                    sh 'pmp cost diff'\n");
+                } else if cost_enabled {
+                    groovy.push_str("                                    sh 'pmp project preview'\n");
+                    groovy.push_str("                                    sh 'pmp cost diff || true'\n");
+                } else {
+                    groovy.push_str("                                    sh 'pmp project preview'\n");
+                }
+
                 groovy.push_str(
                     "                                } else if (env.BRANCH_NAME == 'main') {\n",
                 );
                 groovy.push_str("                                    // Main branch\n");
-                groovy.push_str("                                    sh 'pmp project apply'\n");
+
+                if cost_enabled && fail_on_threshold {
+                    groovy.push_str("                                    sh 'pmp project apply --cost'\n");
+                } else {
+                    groovy.push_str("                                    sh 'pmp project apply'\n");
+                }
+
                 groovy.push_str("                                }\n");
                 groovy.push_str("                            }\n");
                 groovy.push_str("                        }\n");

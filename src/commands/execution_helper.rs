@@ -1,11 +1,15 @@
 use crate::collection::{DependencyGraph, DependencyNode};
+use crate::commands::parallel::{
+    ContinueDecision, display_level_results, execute_level_parallel, should_continue_after_failures,
+};
 use crate::executor::{Executor, ExecutorConfig, NoneExecutor, OpenTofuExecutor};
 use crate::hooks::{HookOutcome, HooksRunner};
 use crate::template::DynamicProjectEnvironmentResource;
-use crate::template::metadata::InfrastructureResource;
+use crate::template::metadata::{InfrastructureResource, ParallelConfig};
 use anyhow::{Context, Result};
 use std::path::Path;
 use std::process::Command;
+use std::sync::Arc;
 
 /// Helper functions for executing commands with dependency support
 pub struct ExecutionHelper;
@@ -213,6 +217,160 @@ impl ExecutionHelper {
 
             // Execute the command on this node
             executor_fn(ctx, node, executor.as_ref(), &execution_config, &[])?;
+        }
+
+        Ok(())
+    }
+
+    /// Execute a command on a dependency graph with parallel execution support
+    ///
+    /// This function groups nodes by dependency level and executes each level in parallel.
+    /// If `parallel_config.max <= 1`, it falls back to sequential execution.
+    pub fn execute_on_graph_parallel(
+        ctx: &crate::context::Context,
+        graph: &DependencyGraph,
+        command_name: &str,
+        parallel_config: &ParallelConfig,
+        reverse_order: bool,
+        executor_fn: Arc<
+            dyn Fn(&crate::context::Context, &DependencyNode) -> Result<()> + Send + Sync,
+        >,
+    ) -> Result<()> {
+        // Fall back to sequential if max <= 1
+        if parallel_config.max <= 1 {
+            return Self::execute_on_graph_sequential(ctx, graph, command_name, executor_fn);
+        }
+
+        // Group nodes by dependency level
+        let levels = if reverse_order {
+            graph.group_by_level_reversed()?
+        } else {
+            graph.group_by_level()?
+        };
+
+        let total_projects: usize = levels.iter().map(|l| l.len()).sum();
+
+        ctx.output.blank();
+        ctx.output.section(&format!(
+            "Executing {} on {} projects ({} levels, max {} parallel)",
+            command_name,
+            total_projects,
+            levels.len(),
+            parallel_config.max
+        ));
+
+        let mut total_failures = 0;
+        let ctx_for_closure = Arc::new(ctx.clone());
+
+        // Execute each level
+        for (level_idx, level_nodes) in levels.iter().enumerate() {
+            ctx.output.blank();
+            ctx.output.subsection(&format!(
+                "Level {}/{} ({} project{})",
+                level_idx + 1,
+                levels.len(),
+                level_nodes.len(),
+                if level_nodes.len() == 1 { "" } else { "s" }
+            ));
+
+            // Display projects in this level
+            for node in level_nodes {
+                ctx.output.dimmed(&format!(
+                    "  • {} ({})",
+                    node.project_name, node.environment_name
+                ));
+            }
+
+            ctx.output.blank();
+
+            // Execute level in parallel
+            let executor_fn_clone = executor_fn.clone();
+            let ctx_clone = ctx_for_closure.clone();
+
+            let results = tokio::runtime::Runtime::new()
+                .context("Failed to create tokio runtime")?
+                .block_on(execute_level_parallel(
+                    level_nodes.clone(),
+                    parallel_config,
+                    move |node| {
+                        executor_fn_clone(&ctx_clone, &node).map_err(|e| e.to_string())
+                    },
+                ));
+
+            // Display results for this level
+            display_level_results(ctx, &results);
+
+            // Count failures
+            let level_failures = results.iter().filter(|r| !r.success).count();
+            total_failures += level_failures;
+
+            // Check if we should continue
+            let decision = should_continue_after_failures(&parallel_config.on_failure, level_failures);
+
+            match decision {
+                ContinueDecision::Continue => {}
+                ContinueDecision::StopNow | ContinueDecision::StopAfterLevel => {
+                    ctx.output.blank();
+                    ctx.output.warning(&format!(
+                        "Stopping execution due to {} failure{} (on_failure: {:?})",
+                        level_failures,
+                        if level_failures == 1 { "" } else { "s" },
+                        parallel_config.on_failure
+                    ));
+                    break;
+                }
+            }
+        }
+
+        // Final summary
+        ctx.output.blank();
+
+        if total_failures > 0 {
+            ctx.output.error(&format!(
+                "{} completed with {} failure{}",
+                command_name,
+                total_failures,
+                if total_failures == 1 { "" } else { "s" }
+            ));
+        } else {
+            ctx.output.success(&format!(
+                "{} completed successfully on all {} projects",
+                command_name, total_projects
+            ));
+        }
+
+        Ok(())
+    }
+
+    /// Execute a command on a dependency graph sequentially
+    fn execute_on_graph_sequential(
+        ctx: &crate::context::Context,
+        graph: &DependencyGraph,
+        command_name: &str,
+        executor_fn: Arc<
+            dyn Fn(&crate::context::Context, &DependencyNode) -> Result<()> + Send + Sync,
+        >,
+    ) -> Result<()> {
+        let execution_order = graph.execution_order()?;
+
+        ctx.output.blank();
+        ctx.output.section(&format!(
+            "Executing {} on {} projects",
+            command_name,
+            execution_order.len()
+        ));
+
+        for (i, node) in execution_order.iter().enumerate() {
+            ctx.output.blank();
+            ctx.output.subsection(&format!(
+                "Step {}/{}: {} ({})",
+                i + 1,
+                execution_order.len(),
+                node.project_name,
+                node.environment_name
+            ));
+
+            executor_fn(ctx, node)?;
         }
 
         Ok(())
@@ -621,7 +779,7 @@ impl ExecutionHelper {
     }
 
     /// Get the appropriate executor based on name
-    fn get_executor(name: &str) -> Result<Box<dyn Executor>> {
+    pub fn get_executor(name: &str) -> Result<Box<dyn Executor>> {
         match name {
             "opentofu" => Ok(Box::new(OpenTofuExecutor::new())),
             "none" => Ok(Box::new(NoneExecutor::new())),

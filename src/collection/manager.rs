@@ -70,6 +70,9 @@ impl CollectionManager {
                 environments: std::collections::HashMap::new(),
                 hooks: None,
                 executor: None,
+                cost: None,
+                policy: None,
+                secrets: None,
             },
         };
 

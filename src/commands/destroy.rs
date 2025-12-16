@@ -1,10 +1,13 @@
-use crate::collection::{CollectionDiscovery, CollectionManager};
+use crate::collection::{CollectionDiscovery, CollectionManager, DependencyNode};
 use crate::commands::project_group::ProjectGroupHandler;
+use crate::commands::ExecutionHelper;
 use crate::executor::{Executor, ExecutorConfig, OpenTofuExecutor};
 use crate::hooks::{HookOutcome, HooksRunner};
+use crate::template::metadata::{FailureBehavior, ParallelConfig};
 use crate::template::{DynamicProjectEnvironmentResource, ProjectResource};
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 /// Handles the 'destroy' command - runs executor destroy with hooks
 pub struct DestroyCommand;
@@ -15,6 +18,7 @@ impl DestroyCommand {
         ctx: &crate::context::Context,
         project_path: Option<&str>,
         skip_confirmation: bool,
+        parallel: Option<usize>,
         extra_args: &[String],
     ) -> Result<()> {
         // Check for template packs before proceeding
@@ -183,57 +187,29 @@ impl DestroyCommand {
         }
 
         if let Some(graph) = maybe_graph {
-            // For destroy, we need to reverse the execution order
-            // (destroy dependents before dependencies)
-            let mut execution_order = graph.execution_order()?;
-            execution_order.reverse();
+            // Load collection to get parallel config
+            let (collection, _) = CollectionDiscovery::find_collection(&*ctx.fs)?
+                .context("Infrastructure is required to run commands")?;
 
-            ctx.output.blank();
-            ctx.output.section(&format!(
-                "Executing destroy on {} projects (in reverse dependency order)",
-                execution_order.len()
-            ));
+            // Build parallel config from CLI flag or infrastructure config
+            let parallel_config = Self::build_parallel_config(parallel, &collection);
 
-            // Execute destroy on each project in reverse order
-            for (i, node) in execution_order.iter().enumerate() {
-                ctx.output.blank();
-                ctx.output.subsection(&format!(
-                    "Step {}/{}: {} ({})",
-                    i + 1,
-                    execution_order.len(),
-                    node.project_name,
-                    node.environment_name
-                ));
+            // Execute destroy on entire dependency graph (in reverse order)
+            let ctx_clone = ctx.clone();
+            let executor_fn: Arc<
+                dyn Fn(&crate::context::Context, &DependencyNode) -> Result<()> + Send + Sync,
+            > = Arc::new(move |ctx, node| {
+                Self::execute_destroy_on_node_wrapper(ctx, node)
+            });
 
-                // Load environment resource
-                let env_file = node.environment_path.join(".pmp.environment.yaml");
-                let resource = DynamicProjectEnvironmentResource::from_file(&*ctx.fs, &env_file)
-                    .context("Failed to load environment resource")?;
-
-                // Get executor configuration
-                let executor_config = resource.get_executor_config();
-
-                // Get executor
-                let executor = Self::get_executor(&executor_config.name)?;
-
-                // Build executor config
-                let execution_config = crate::executor::ExecutorConfig {
-                    plan_command: None,
-                    apply_command: None,
-                    destroy_command: None,
-                    refresh_command: None,
-                    ..Default::default()
-                };
-
-                // Execute destroy on this node
-                crate::commands::ExecutionHelper::execute_destroy_on_node(
-                    ctx,
-                    node,
-                    executor.as_ref(),
-                    &execution_config,
-                    extra_args,
-                )?;
-            }
+            ExecutionHelper::execute_on_graph_parallel(
+                &ctx_clone,
+                &graph,
+                "destroy",
+                &parallel_config,
+                true, // reverse_order for destroy
+                executor_fn,
+            )?;
 
             ctx.output.blank();
             ctx.output
@@ -489,5 +465,76 @@ impl DestroyCommand {
             "opentofu" => Ok(Box::new(OpenTofuExecutor::new())),
             _ => anyhow::bail!("Unknown executor: {}", name),
         }
+    }
+
+    /// Build parallel config from CLI flag or infrastructure config
+    fn build_parallel_config(
+        cli_parallel: Option<usize>,
+        collection: &crate::template::metadata::InfrastructureResource,
+    ) -> ParallelConfig {
+        // CLI flag takes precedence
+        if let Some(max) = cli_parallel {
+            return ParallelConfig {
+                max,
+                on_failure: FailureBehavior::Continue,
+            };
+        }
+
+        // Fall back to infrastructure config
+        if let Some(executor_config) = &collection.spec.executor
+            && let Some(parallel) = &executor_config.parallel
+        {
+            return parallel.clone();
+        }
+
+        // Default: sequential execution
+        ParallelConfig {
+            max: 1,
+            on_failure: FailureBehavior::Continue,
+        }
+    }
+
+    /// Wrapper for execute_destroy_on_node that works with parallel execution
+    fn execute_destroy_on_node_wrapper(
+        ctx: &crate::context::Context,
+        node: &DependencyNode,
+    ) -> Result<()> {
+        // Load environment resource
+        let env_file = node.environment_path.join(".pmp.environment.yaml");
+        let resource = DynamicProjectEnvironmentResource::from_file(&*ctx.fs, &env_file)
+            .context("Failed to load environment resource")?;
+
+        // Get executor configuration
+        let executor_config = resource.get_executor_config();
+
+        // Get executor
+        let executor = ExecutionHelper::get_executor(&executor_config.name)?;
+
+        // Build executor config
+        let mut command_options = std::collections::HashMap::new();
+
+        if let Some(config) = &executor_config.config {
+            for (cmd_name, cmd_config) in &config.commands {
+                command_options.insert(cmd_name.clone(), cmd_config.options.clone());
+            }
+        }
+
+        let execution_config = ExecutorConfig {
+            plan_command: None,
+            apply_command: None,
+            destroy_command: None,
+            refresh_command: None,
+            test_command: None,
+            command_options,
+        };
+
+        // Execute destroy on this node
+        ExecutionHelper::execute_destroy_on_node(
+            ctx,
+            node,
+            executor.as_ref(),
+            &execution_config,
+            &[],
+        )
     }
 }

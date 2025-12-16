@@ -101,6 +101,15 @@ impl Executor for NoneExecutor {
     fn default_test_command(&self) -> &str {
         ""
     }
+
+    fn plan_with_output(&self, _working_dir: &str, _extra_args: &[String]) -> Result<Output> {
+        // Return a successful "no-op" output (no changes)
+        Ok(Output {
+            status: std::process::ExitStatus::default(),
+            stdout: b"No changes. Infrastructure is up to date.".to_vec(),
+            stderr: Vec::new(),
+        })
+    }
 }
 
 #[cfg(test)]
